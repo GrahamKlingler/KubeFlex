@@ -45,6 +45,7 @@ def fetch_cadvisor_metrics(session, api_url, endpoint, selector=None):
         response.raise_for_status()
         data = response.json()
         
+        # NEED TO ADD LATER SUPPORT FOR KUBERNETES POD/CONTAINER NAMES
         if selector:
             namespace = selector.split('=')[1]
             filtered_data = {}

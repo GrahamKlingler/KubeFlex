@@ -1,0 +1,8 @@
+metadata:
+  name: cadvisor-app
+  namespace: cadvisor
+
+resources:
+  - storage.yml
+  - service.yml
+  - cadvisor.yml

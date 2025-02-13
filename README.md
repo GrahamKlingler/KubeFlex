@@ -1,7 +1,7 @@
 # Flex-Nautilus
 ### Sallar Farokhi
 
-We're using cAdvisor to monitor specific Kubernetes namespaces and containers. This tool provides real-time insights into container CPU, memory, and network usage.
+We're using [cAdvisor](https://github.com/google/cadvisor) to monitor specific Kubernetes namespaces and containers. This tool provides real-time insights into container CPU, memory, and network usage.
 
 ## 📋 Prerequisites
 
@@ -10,33 +10,29 @@ We're using cAdvisor to monitor specific Kubernetes namespaces and containers. T
 
 ## 🛠️ Installation
 
-Go to `/src/manifests/` and create each of the objects, in THIS order:
+Go to `src/` and run:
 ```bash
-kubectl apply -f namespace.yml
-kubectl apply -f storage.yml
-kubectl apply -f service.yml
-kubectl apply -f cadvisor.yml
+./run.sh namespace=kube-system
+```
+This will boot up all of the necessary resources within /manifests
+After that, you can visit the cAdvisor UI [here](http://localhost:30081)
+
+In order to tear everything down, you simply run:
+```bash
+./delete.sh
 ```
 
-After that, visit the cAdvisor UI at `http://127.0.0.1:8080`
+## 🔍 Monitoring Specific Processes
+You can narrow down the processes you want to observe based on the namespace. You do this with the `SELECTOR` arguments.
 
-## ⚙️ Configuration
+**NOTE**: If `SELECTOR` is not given, value is defaulted to `namespace=default`
 
-The deployment can be configured using the following environment variables:
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `POLLING_INTERVAL` | Metrics collection interval (seconds) | `300` |
-| `POD_SELECTOR` | Kubernetes label selector for pods | `io.kubernetes.pod.namespace=foo` |
-
-## 🔍 Monitoring Specific Namespaces
-
-To monitor specific namespaces, modify the `POD_SELECTOR` environment variable in `cadvisor.yml`:
-
+The options are:
 ```yaml
-- name: POD_SELECTOR
-  value: "io.kubernetes.pod.namespace=your-namespace"
+namespace=<namespace>
 ```
+In the example above, we observe all the internal pod processes within `kube-system`.
+You can include multiple options with a comma-seperated list.
 
 ## 📊 Metrics Collected
 
