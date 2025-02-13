@@ -29,7 +29,10 @@ spec:
         - --storage_duration=1m0s
         - --allow_dynamic_housekeeping=true
         - --docker=unix:///var/run/docker.sock
+        - --docker_only=true
         - --port=8080
+        - --enable_metrics=app,cpu,cpuLoad,memory
+        # All metrics: advtcp,app,cpu,cpuLoad,cpu_topology,cpuset,disk,diskIO,hugetlb,memory,memory_numa,network,oom_event,percpu,perf_event,process,referenced_memory,resctrl,sched,tcp,udp
         securityContext:
           privileged: true
         resources:
@@ -100,35 +103,13 @@ spec:
           value: "http://127.0.0.1:8080"
         - name: POLLING_INTERVAL
           value: "10"
+        - name: POD_SELECTOR
+          value: "io.kubernetes.pod.namespace=kube-system"
+          # io.kubernetes.pod.namespace=<namespace>
+          # io.kubernetes.pod.name=<pod-name>
+          # io.kubernetes.container.name=<container-name>
         - name: STORAGE_PATH
           value: "/storage"
-      
-      # - name: python-controller
-      #   image: salamander1223/python-controller:latest
-      #   imagePullPolicy: Always
-      #   securityContext:
-      #     privileged: true
-      #   resources:
-      #     limits:
-      #       cpu: 100m
-      #       memory: 100Mi
-      #     requests:
-      #       cpu: 50m
-      #       memory: 50Mi
-      #   volumeMounts:
-      #   - name: cadvisor-storage
-      #     mountPath: /storage
-      #     readOnly: false
-      #   - name: var-run
-      #     mountPath: /var/run
-      #     readOnly: false
-      #   ports:
-      #   - name: http
-      #     containerPort: 8081
-      #     protocol: TCP
-      #   env:
-      #   - name: DOCKER_HOST
-      #     value: "unix:///var/run/docker.sock"
       
       volumes:
       - name: machine-id
