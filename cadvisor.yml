@@ -1,0 +1,160 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: cadvisor
+  namespace: cadvisor
+  annotations:
+    seccomp.security.alpha.kubernetes.io/pod: docker/default
+  labels:
+    app: cadvisor
+spec:
+  selector:
+    matchLabels:
+      name: cadvisor
+  template:
+    metadata:
+      labels:
+        name: cadvisor
+    spec:
+      serviceAccountName: cadvisor
+      terminationGracePeriodSeconds: 30
+      tolerations:
+      - key: node-role.kubernetes.io/master
+        effect: NoSchedule
+      automountServiceAccountToken: false
+      containers:
+      - name: cadvisor
+        image: gcr.io/cadvisor/cadvisor:v0.47.2
+        args:
+        - --storage_duration=1m0s
+        - --allow_dynamic_housekeeping=true
+        - --docker=unix:///var/run/docker.sock
+        - --port=8080
+        securityContext:
+          privileged: true
+        resources:
+          limits:
+            cpu: 300m
+            memory: 2000Mi
+          requests:
+            cpu: 150m
+            memory: 200Mi
+        volumeMounts:
+        - name: machine-id
+          mountPath: /etc/machine-id
+          readOnly: true
+        - name: rootfs
+          mountPath: /rootfs
+          readOnly: true 
+        - name: var-log
+          mountPath: /var/log
+          readOnly: true 
+        - name: var-run
+          mountPath: /var/run
+          readOnly: true 
+        - name: sys
+          mountPath: /sys
+          readOnly: true 
+        - name: containers
+          mountPath: /var/lib/containers
+          readOnly: true 
+        - name: docker
+          mountPath: /var/lib/docker
+          readOnly: true 
+        - name: disk
+          mountPath: /dev/disk
+          readOnly: true 
+        - name: cadvisor-storage
+          mountPath: /storage
+          readOnly: false
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+
+      - name: python-controller
+        image: salamander1223/python-controller:latest
+        imagePullPolicy: Always
+        securityContext:
+          privileged: true
+        resources:
+          limits:
+            cpu: 100m
+            memory: 100Mi
+          requests:
+            cpu: 50m
+            memory: 50Mi
+        volumeMounts:
+        - name: cadvisor-storage
+          mountPath: /storage
+          readOnly: false
+        - name: var-run
+          mountPath: /var/run
+          readOnly: false
+        ports:
+        - name: http
+          containerPort: 8081
+          protocol: TCP
+        env:
+        - name: CADVISOR_URL
+          value: "http://127.0.0.1:8080"
+        - name: POLLING_INTERVAL
+          value: "10"
+        - name: STORAGE_PATH
+          value: "/storage"
+      
+      # - name: python-controller
+      #   image: salamander1223/python-controller:latest
+      #   imagePullPolicy: Always
+      #   securityContext:
+      #     privileged: true
+      #   resources:
+      #     limits:
+      #       cpu: 100m
+      #       memory: 100Mi
+      #     requests:
+      #       cpu: 50m
+      #       memory: 50Mi
+      #   volumeMounts:
+      #   - name: cadvisor-storage
+      #     mountPath: /storage
+      #     readOnly: false
+      #   - name: var-run
+      #     mountPath: /var/run
+      #     readOnly: false
+      #   ports:
+      #   - name: http
+      #     containerPort: 8081
+      #     protocol: TCP
+      #   env:
+      #   - name: DOCKER_HOST
+      #     value: "unix:///var/run/docker.sock"
+      
+      volumes:
+      - name: machine-id
+        hostPath:
+          path: /etc/machine-id
+      - name: rootfs
+        hostPath:
+          path: /
+      - name: var-run
+        hostPath:
+          path: /var/run
+      - name: sys
+        hostPath:
+          path: /sys
+      - name: var-log
+        hostPath:
+          path: /var/log
+      - name: containers
+        hostPath:
+          path: /var/lib/containers
+      - name: docker
+        hostPath:
+          path: /var/lib/docker
+      - name: disk
+        hostPath:
+          path: /dev/disk
+      - name: cadvisor-storage
+        persistentVolumeClaim:
+          claimName: cadvisor-pvc
