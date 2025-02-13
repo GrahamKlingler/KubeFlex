@@ -37,9 +37,9 @@ def wait_for_cadvisor(session, url):
         time.sleep(10)
     return False
 
-def fetch_cadvisor_metrics(session, api_url):
+def fetch_cadvisor_metrics(session, api_url, endpoint):
     try:
-        response = session.get(f"{api_url}/api/v1.3/docker/", timeout=10)
+        response = session.get(f"{api_url}/api/v1.3/docker{endpoint}", timeout=10)
         response.raise_for_status()
         return response.json()
     except Exception as e:
@@ -57,17 +57,31 @@ def main():
         logger.error("cAdvisor not available after timeout")
         return
     
-    while True:
-        logger.info("Fetching container metrics...")
-        raw_data = fetch_cadvisor_metrics(session, cadvisor_url)
+    containers = fetch_cadvisor_metrics(session, cadvisor_url, "/")
+    print(containers)
+    
+    # while True:
+    #     logger.info("Fetching container metrics...")
+    #     raw_data = fetch_cadvisor_metrics(session, cadvisor_url)
         
-        if raw_data:
-            logger.info(f"Received {len(raw_data)} metrics")
-            # processed_data = process_metrics(raw_data)
-            # if processed_data:
-            #     save_to_storage(processed_data)
+    #     if raw_data:
+    #         logger.info(f"Received {len(raw_data)} metrics")
+
+    #         # Print the raw data for CPU,GPU and Memory within each container
+    #         for container in raw_data:
+    #             pass
+            
+    #             # container_name = container.get('name', 'Unknown')
+    #             # cpu_usage = container.get('cpu', {}).get('usage', {}).get('total', 0)
+    #             # memory_usage = container.get('memory', {}).get('usage', 0)
+    #             # gpu_usage = container.get('gpu', {}).get('usage', 0)
+
+    #             # logger.info(f"Container: {container_name}")
+    #             # logger.info(f"  CPU Usage: {cpu_usage}")
+    #             # logger.info(f"  Memory Usage: {memory_usage}")
+    #             # logger.info(f"  GPU Usage: {gpu_usage}")
         
-        time.sleep(interval)
+    #     time.sleep(interval)
 
 if __name__ == "__main__":
     main()
