@@ -28,10 +28,12 @@ python carbon_grapher.py --files data1.csv data2.csv
 python carbon_grapher.py --directory ./carbon_data/
 ```
 
+Corresponding dataset locations can be found at `https://portal.electricitymaps.com/datasets/US`
+
 ### Sample Usage
-Refers to the `/test` directory to display data from California's metrics, over the first day of the year.
+Refers to the `/data` directory to display data from a state's metrics over the first day of the year.
 ```bash
-python3 chart_data.py --directory ./test/ --start-time "2024-01-01" --end-time "2024-01-01 23:59:59"
+python3 chart_data.py --start-time "2024-01-01" --end-time "2024-01-01 23:59:59" --directory ./data/
 ```
 
 ### Command Line Options
@@ -60,13 +62,13 @@ python3 chart_data.py --directory ./test/ --start-time "2024-01-01" --end-time "
 #### Plot data from a specific time period
 
 ```bash
-python carbon_grapher.py --directory ./data/ --start-time "2024-01-01" --end-time "2024-01-31"
+python carbon_grapher.py --start-time "2024-01-01" --end-time "2024-01-31" --directory ./data/
 ```
 
 #### Plot multiple metrics on separate graphs
 
 ```bash
-python carbon_grapher.py --directory ./data/ --columns "Carbon intensity gCO₂eq/kWh (direct)" "Renewable energy percentage (RE%)"
+python carbon_grapher.py --columns "Carbon intensity gCO₂eq/kWh (direct)" "Renewable energy percentage (RE%)" --directory ./data/
 ```
 
 #### Combine multiple metrics on one graph
@@ -78,7 +80,7 @@ python carbon_grapher.py --files *.csv --columns "Carbon intensity gCO₂eq/kWh 
 #### Save plots to a directory without displaying them
 
 ```bash
-python carbon_grapher.py --directory ./data/ --output-dir ./plots/ --no-display
+python carbon_grapher.py --directory ./data/ --output-dir ./plots/ --no-display 
 ```
 
 #### Plot custom columns from your CSV
