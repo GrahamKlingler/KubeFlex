@@ -31,9 +31,14 @@ python carbon_grapher.py --directory ./carbon_data/
 Corresponding dataset locations can be found at `https://portal.electricitymaps.com/datasets/US`
 
 ### Sample Usage
-Refers to the `/data` directory to display data from a state's metrics over the first day of the year.
+Refers to the `/CAL` directory to display data from a state's metrics over the first day of the year.
 ```bash
-python3 chart_data.py --start-time "2024-01-01" --end-time "2024-01-01 23:59:59" --directory ./data/
+python3 chart_data.py --start-time "2024-01-01" --end-time "2024-01-01 23:59:59" --directory ./data/CAL/
+```
+Processes all data within `/data`.
+```bash
+python3 chart_data.py --process-subdirs --columns "Carbon intensity gCO₂eq/kWh (direct)" 
+--plot-averages --no-display --data-root data --start-time "2024-01-01" --end-time "2024-01-02"
 ```
 
 ### Command Line Options
