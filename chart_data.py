@@ -268,7 +268,7 @@ def plot_carbon_data(csv_files, columns_to_plot, output_dir=None, show_plot=True
                 # Create a safe filename from the column name
                 safe_name = column.replace(' ', '_').replace('/', '_').replace('%', 'pct')
                 # output_file = os.path.join(output_dir, f"{safe_name}.png")
-                output_file = os.path.join(output_dir, f"day_long.png")
+                output_file = os.path.join(output_dir, f"year_round_percentage.png")
                 plt.savefig(output_file, bbox_inches='tight')
                 print(f"Plot saved to {output_file}")
             
