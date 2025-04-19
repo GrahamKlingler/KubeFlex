@@ -3,7 +3,7 @@ import glob
 import pandas as pd
 from datetime import datetime
 
-def process_carbon_intensity_csvs(directory_path):
+def process_carbon_intensity_csvs(directory_path, file_name):
     """
     Process all CSV files in the specified directory that match the expected format,
     and create a new CSV with datetime and average direct carbon intensity.
@@ -78,7 +78,7 @@ def process_carbon_intensity_csvs(directory_path):
         result_df = result_df.sort_values('Datetime (UTC)')
     
     # Output file path
-    output_file = os.path.join(directory_path, "average_carbon_intensity.csv")
+    output_file = file_name if file_name else os.path.join(directory_path, "carbon_intensity_summary.csv")
     
     # Save to CSV
     result_df.to_csv(output_file, index=False)
@@ -88,9 +88,10 @@ def process_carbon_intensity_csvs(directory_path):
 if __name__ == "__main__":
     import sys
     
-    if len(sys.argv) > 1:
+    if len(sys.argv) > 2:
         directory_path = sys.argv[1]
+        file_name = sys.argv[2]
     else:
         directory_path = input("Enter the directory path containing the CSV files: ")
     
-    process_carbon_intensity_csvs(directory_path)
+    process_carbon_intensity_csvs(directory_path, file_name)
