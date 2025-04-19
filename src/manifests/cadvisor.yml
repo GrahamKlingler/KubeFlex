@@ -7,7 +7,7 @@ metadata:
   namespace: cadvisor
 ---
 apiVersion: apps/v1
-kind: DaemonSet
+kind: Deployment
 metadata:
   name: cadvisor
   namespace: cadvisor
@@ -25,11 +25,10 @@ spec:
         name: cadvisor
     spec:
       serviceAccountName: cadvisor
-      terminationGracePeriodSeconds: 30
+      terminationGracePeriodSeconds: 10
       tolerations:
       - key: node-role.kubernetes.io/master
         effect: NoSchedule
-      automountServiceAccountToken: false
       containers:
       - name: cadvisor
         image: gcr.io/cadvisor/cadvisor:v0.47.2
@@ -116,9 +115,6 @@ spec:
         # io.kubernetes.pod.namespace=<namespace>
         # io.kubernetes.pod.name=<pod-name>
         # io.kubernetes.container.name=<container-name>
-        envFrom:
-        - configMapRef:
-            name: pod-selector-config
       
       volumes:
       - name: machine-id
