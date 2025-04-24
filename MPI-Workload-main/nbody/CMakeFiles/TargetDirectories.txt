@@ -1,0 +1,3 @@
+/mnt/c/Users/salla/School/Flex-Nautilus/MPI-Workload-main/nbody/CMakeFiles/elastic_nbody.dir
+/mnt/c/Users/salla/School/Flex-Nautilus/MPI-Workload-main/nbody/CMakeFiles/edit_cache.dir
+/mnt/c/Users/salla/School/Flex-Nautilus/MPI-Workload-main/nbody/CMakeFiles/rebuild_cache.dir
