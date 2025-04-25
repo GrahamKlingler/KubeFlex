@@ -6,6 +6,72 @@ A versatile Python script for creating interactive visualizations from CSV data 
 
 This tool enables you to create interactive plots from CSV files, with complete flexibility over which columns to use for the x and y axes. It's particularly useful for analyzing time-series data with multiple metrics, such as carbon intensity measurements, power consumption data, or any other numerical data stored in CSV format.
 
+## Listed Values:
+1. datetime
+  2. timestamp
+  3. carbon_intensity_avg
+  4. carbon_intensity_direct_avg
+  5. carbon_intensity_production_avg
+  6. carbon_intensity_discharge_avg
+  7. carbon_intensity_import_avg
+  8. total_production_avg
+  9. total_storage_avg
+ 10. total_discharge_avg
+ 11. total_import_avg
+ 12. total_export_avg
+ 13. total_consumption_avg
+ 14. power_origin_percent_fossil_avg
+ 15. power_origin_percent_renewable_avg
+ 16. power_production_percent_fossil_avg
+ 17. power_production_percent_renewable_avg
+ 18. power_production_nuclear_avg
+ 19. power_production_geothermal_avg
+ 20. power_production_biomass_avg
+ 21. power_production_coal_avg
+ 22. power_production_wind_avg
+ 23. power_production_solar_avg
+ 24. power_production_hydro_avg
+ 25. power_production_gas_avg
+ 26. power_production_oil_avg
+ 27. power_production_unknown_avg
+ 28. power_consumption_nuclear_avg
+ 29. power_consumption_geothermal_avg
+ 30. power_consumption_biomass_avg
+ 31. power_consumption_coal_avg
+ 32. power_consumption_wind_avg
+ 33. power_consumption_solar_avg
+ 34. power_consumption_hydro_avg
+ 35. power_consumption_gas_avg
+ 36. power_consumption_oil_avg
+ 37. power_consumption_unknown_avg
+ 38. power_consumption_battery_discharge_avg
+ 39. power_consumption_hydro_discharge_avg
+ 40. power_net_discharge_battery_avg
+ 41. power_net_discharge_hydro_avg
+ 42. power_net_import_CA-ON_avg
+ 43. carbon_intensity_exchange_CA-ON_avg
+ 44. power_net_import_CA-QC_avg
+ 45. carbon_intensity_exchange_CA-QC_avg
+ 46. power_net_import_US-MIDA-PJM_avg
+ 47. carbon_intensity_exchange_US-MIDA-PJM_avg
+ 48. power_net_import_US-NE-ISNE_avg
+ 49. carbon_intensity_exchange_US-NE-ISNE_avg
+ 50. latest_forecasted_wind_x_avg
+ 51. latest_forecasted_wind_y_avg
+ 52. latest_forecasted_solar_avg
+ 53. latest_forecasted_temperature_avg
+ 54. latest_forecasted_dewpoint_avg
+ 55. latest_forecasted_precipitation_avg
+ 56. latest_forecasted_price_avg
+ 57. latest_forecasted_production_avg
+ 58. latest_forecasted_consumption_avg
+ 59. latest_forecasted_power_net_import_CA-ON_avg
+ 60. latest_forecasted_power_net_import_CA-QC_avg
+ 61. latest_forecasted_power_net_import_US-MIDA-PJM_avg
+ 62. latest_forecasted_power_net_import_US-NE-ISNE_avg
+ 63. latest_forecasted_production_solar_avg
+ 64. latest_forecasted_production_wind_avg
+
 ## Features
 
 - **Flexible axis selection**: Plot any column against any other column
