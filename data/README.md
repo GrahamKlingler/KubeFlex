@@ -43,34 +43,6 @@ This tool enables you to create interactive plots from CSV files, with complete 
  34. power_consumption_hydro_avg
  35. power_consumption_gas_avg
  36. power_consumption_oil_avg
- 37. power_consumption_unknown_avg
- 38. power_consumption_battery_discharge_avg
- 39. power_consumption_hydro_discharge_avg
- 40. power_net_discharge_battery_avg
- 41. power_net_discharge_hydro_avg
- 42. power_net_import_CA-ON_avg
- 43. carbon_intensity_exchange_CA-ON_avg
- 44. power_net_import_CA-QC_avg
- 45. carbon_intensity_exchange_CA-QC_avg
- 46. power_net_import_US-MIDA-PJM_avg
- 47. carbon_intensity_exchange_US-MIDA-PJM_avg
- 48. power_net_import_US-NE-ISNE_avg
- 49. carbon_intensity_exchange_US-NE-ISNE_avg
- 50. latest_forecasted_wind_x_avg
- 51. latest_forecasted_wind_y_avg
- 52. latest_forecasted_solar_avg
- 53. latest_forecasted_temperature_avg
- 54. latest_forecasted_dewpoint_avg
- 55. latest_forecasted_precipitation_avg
- 56. latest_forecasted_price_avg
- 57. latest_forecasted_production_avg
- 58. latest_forecasted_consumption_avg
- 59. latest_forecasted_power_net_import_CA-ON_avg
- 60. latest_forecasted_power_net_import_CA-QC_avg
- 61. latest_forecasted_power_net_import_US-MIDA-PJM_avg
- 62. latest_forecasted_power_net_import_US-NE-ISNE_avg
- 63. latest_forecasted_production_solar_avg
- 64. latest_forecasted_production_wind_avg
 
 ## Features
 
@@ -177,3 +149,21 @@ The script is designed to work with CSV files containing:
 - **Column not found**: Use the `-l` flag to list available columns
 - **Timezone errors**: The script automatically handles datetime columns with timezone information
 - **PNG export fails**: Install kaleido with `pip install kaleido`
+
+
+# Reading/Writing to db
+
+The following commands run with a clean installation of Postgresql:latest,12>
+
+## Run these commands:
+
+Once data is compiled in CSV format (seen in /avg), place your file in a directory and run:
+```
+python3 upload_data.py [--dbname] [--user] [--port] [--host] directory table_name
+```
+If `table_name` does not exist, one will be created.
+
+Accessing the database can be done with:
+```
+psql -h [host] -p [port] -U [user] 
+```
