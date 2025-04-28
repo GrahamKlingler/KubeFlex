@@ -52,7 +52,7 @@ def min_slope(start_date, end_date):
                 (start_date, end_date)
             )
             result = cur.fetchone()[0]  # [0] because fetchone() returns a tuple
-            print("Fetched results array:", result)
+            # print("Fetched results array:", result)
             return result
 
     except Exception as e:
@@ -82,8 +82,14 @@ if __name__ == "__main__":
     print(f"Start Date: {start_date.strftime(format_string)}")
     print(f"End Date: {end_date.strftime(format_string)}")
 
+    min_regions = min_slope(start_date, end_date)
+    print("Records from database:")
+    
+    min_region, min_ts, min_intensity = [], [], [] 
+    for record in sorted(min_regions):
 
-    # min_regions = min_slope('2020-01-01 00:00:00', '2020-01-02 00:00:00')
-    # print("Records from database:")
-    # for record in sorted(min_regions):
-    #     print(record)
+        min_region.append(record.split(" | ")[0])
+        min_ts.append(record.split(" | ")[1])
+        min_intensity.append(float(record.split(" | ")[2]))
+
+    print(f"Regions with minimum carbon intensity: {set(min_region)}")
