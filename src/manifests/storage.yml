@@ -1,24 +1,36 @@
-apiVersion: v1
-kind: PersistentVolume
+apiVersion: apps/v1
+kind: Deployment
 metadata:
-  name: cadvisor-pv
+  name: database
+  namespace: monitor
+  labels: 
+    app: postgres
 spec:
-  capacity:
-    storage: 1Gi
-  accessModes:
-    - ReadWriteMany
-  persistentVolumeReclaimPolicy: Retain
-  hostPath:
-    path: /data/cadvisor
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: cadvisor-pvc
-  namespace: cadvisor
-spec:
-  accessModes:
-    - ReadWriteMany
-  resources:
-    requests:
-      storage: 1Gi
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+      - name: postgres-container
+        image: bitnami/postgresql:latest
+        ports:
+        - containerPort: 5432
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1"
+        env:
+        - name: POSTGRES_USER
+          value: "sfarokhi"
+        - name: POSTGRES_PASSWORD
+          value: "wordpass"
+        - name: POSTGRES_DB
+          value: "postgres"

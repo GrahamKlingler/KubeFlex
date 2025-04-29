@@ -1,27 +1,14 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: cadvisor
-  namespace: cadvisor
-spec:
-  selector:
-    name: cadvisor
-  ports:
-  - name: metrics
-    port: 8080
-    targetPort: 8080
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: cadvisor-external
-  namespace: cadvisor
+  name: db-service
+  namespace: monitor
 spec:
   type: NodePort
   selector:
-    name: cadvisor
+    app: postgres
   ports:
-  - name: metrics
-    port: 8080
-    targetPort: 8080
-    nodePort: 30081
+  - protocol: TCP
+    port: 5432
+    targetPort: 5432
+    nodePort: 32345

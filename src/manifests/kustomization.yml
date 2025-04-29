@@ -1,6 +1,6 @@
 metadata:
   name: cadvisor-app
-  namespace: cadvisor
+  namespace: monitor
 
 resources:
   - storage.yml

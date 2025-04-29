@@ -1,0 +1,15 @@
+FROM python:3.9-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY controller/upload_data_req.txt upload_data_req.txt
+RUN pip install --no-cache-dir -r upload_data_req.txt
+
+# Copy script into the container
+COPY controller/upload_data.py /app/
+COPY test_data /app/data
+
+# Set the entrypoint to run the script
+ENTRYPOINT ["python3", "upload_data.py", "data", "table"]
+# python3 upload_data.py [--dbname] [--user] [--port] [--host] directory table_name

@@ -1,6 +1,7 @@
 import requests
 import json
 import time
+import psycopg2
 import os
 from datetime import datetime
 import logging
@@ -10,10 +11,52 @@ from urllib3.util.retry import Retry
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Database connection parameters
+db_config = {
+    'host': 'db-service',
+    'port': 5432,
+    'dbname': 'postgres',
+    'user': 'sfarokhi',
+    'password': 'wordpass'
+}
+
+def connect_to_db(db_params):
+    """Connect to PostgreSQL database."""
+    try:
+        connection = psycopg2.connect(**db_params)
+        logger.info("Successfully connected to PostgreSQL database")
+        return connection
+    except psycopg2.Error as e:
+        logger.error(f"Error connecting to PostgreSQL database: {e}")
+        raise
+
+def min_slope(conn, start_date, end_date):
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT get_min_intensity_records(%s, %s);",
+                (start_date, end_date)
+            )
+            result = cur.fetchone()[0]  # [0] because fetchone() returns a tuple
+            # print("Fetched results array:", result)
+
+            min_region, min_ts, min_intensity = [], [], [] 
+            for record in sorted(result):
+
+                min_region.append(record.split(" | ")[0])
+                min_ts.append(record.split(" | ")[1])
+                min_intensity.append(float(record.split(" | ")[2]))
+
+            return min_region, min_ts, min_intensity
+
+    except Exception as e:
+        print(f"Error fetching results: {e}")
+
 def get_cadvisor_url():
     return os.getenv('CADVISOR_URL', 'http://127.0.0.1:8080')
 
-def create_session():
+def create_cadvisor_session():
     session = requests.Session()
     retries = Retry(
         total=5,
@@ -123,9 +166,9 @@ def collect_container_metrics(containers):
 def main():
     cadvisor_url = get_cadvisor_url()
     # Ensure proper label format
-    pod_selector = os.getenv('POD_SELECTOR', 'io.kubernetes.pod.namespace=foo')
+    pod_selector = os.getenv('POD_SELECTOR', 'io.kubernetes.pod.namespace=monitor')
     interval = int(os.getenv('POLLING_INTERVAL', '300'))
-    session = create_session()
+    session = create_cadvisor_session()
     
     if not wait_for_cadvisor(session, cadvisor_url):
         logger.error("cAdvisor not available after timeout")
@@ -141,6 +184,7 @@ def main():
                 logger.info(f"Memory: {metrics['memory']}")
                 logger.info(f"Network: {metrics['network']}")
                 logger.info("\n")
+
         time.sleep(interval)
 
 if __name__ == "__main__":

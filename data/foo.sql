@@ -6,11 +6,11 @@ DECLARE
 BEGIN
     FOR r IN
         SELECT source, datetime, carbon_intensity_direct_avg
-        FROM test_db
+        FROM public.table
         WHERE CAST(datetime AS TIMESTAMP) BETWEEN start_date AND end_date
           AND (CAST(datetime AS TIMESTAMP), carbon_intensity_direct_avg) IN (
               SELECT CAST(datetime AS TIMESTAMP), MIN(carbon_intensity_direct_avg)
-              FROM test_db
+              FROM public.table
               WHERE CAST(datetime AS TIMESTAMP) BETWEEN start_date AND end_date
               GROUP BY CAST(datetime AS TIMESTAMP)
           )

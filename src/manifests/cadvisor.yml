@@ -4,13 +4,13 @@ metadata:
   labels:
     app: cadvisor
   name: cadvisor
-  namespace: cadvisor
+  namespace: monitor
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: cadvisor
-  namespace: cadvisor
+  namespace: monitor
   annotations:
     seccomp.security.alpha.kubernetes.io/pod: docker/default
   labels:
@@ -29,6 +29,24 @@ spec:
       tolerations:
       - key: node-role.kubernetes.io/master
         effect: NoSchedule
+
+      initContainers:
+      - name: db-upload-container
+        image: salamander1223/python-db-upload:latest
+        command: ["python", "upload_data.py", "data", "table"]
+        args:
+        - --host=db-service
+        - --port=5432
+        - --dbname=postgres
+        - --user=sfarokhi
+        - --password=wordpass
+        securityContext:
+          privileged: true
+        ports:
+        - name: http
+          containerPort: 5432
+          protocol: TCP
+
       containers:
       - name: cadvisor
         image: gcr.io/cadvisor/cadvisor:v0.47.2
@@ -74,9 +92,6 @@ spec:
         - name: disk
           mountPath: /dev/disk
           readOnly: true 
-        - name: cadvisor-storage
-          mountPath: /storage
-          readOnly: false
         ports:
         - name: http
           containerPort: 8080
@@ -95,9 +110,6 @@ spec:
             cpu: 50m
             memory: 50Mi
         volumeMounts:
-        - name: cadvisor-storage
-          mountPath: /storage
-          readOnly: false
         - name: var-run
           mountPath: /var/run
           readOnly: false
@@ -109,9 +121,14 @@ spec:
         - name: CADVISOR_URL
           value: "http://127.0.0.1:8080"
         - name: POLLING_INTERVAL
-          value: "10"
+          value: "60"
         - name: STORAGE_PATH
           value: "/storage"
+        - name: POD_SELECTOR
+          valueFrom:
+            configMapKeyRef:
+              key: POD_SELECTOR
+              name: pod-selector-config
         # io.kubernetes.pod.namespace=<namespace>
         # io.kubernetes.pod.name=<pod-name>
         # io.kubernetes.container.name=<container-name>
@@ -141,6 +158,3 @@ spec:
       - name: disk
         hostPath:
           path: /dev/disk
-      - name: cadvisor-storage
-        persistentVolumeClaim:
-          claimName: cadvisor-pvc

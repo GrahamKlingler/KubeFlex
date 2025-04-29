@@ -25,10 +25,11 @@ else
 fi
 
 # Create the namespace
-kubectl create namespace cadvisor
+kubectl create namespace monitor
 
 # Generate the ConfigMap based on the selector
-kubectl create configmap pod-selector-config -n cadvisor --from-literal=POD_SELECTOR="$SELECTOR" --dry-run=client -o yaml | kubectl apply -f -
+kubectl create configmap pod-selector-config -n monitor --from-literal=POD_SELECTOR="$SELECTOR" --dry-run=client -o yaml | kubectl apply -f -
 
 # Apply manifests
 kubectl apply -k manifests/ --validate=false
+
