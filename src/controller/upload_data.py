@@ -233,8 +233,12 @@ def process_directory(conn, directory_path, table_name, schema='public'):
 
 def setup_function(conn, schema='public'):
     
-    do_block = """ 
-    CREATE OR REPLACE FUNCTION get_min_intensity_records(start_date TIMESTAMP, end_date TIMESTAMP)
+    do_block = """
+
+    CREATE OR REPLACE FUNCTION get_min_intensity_records(
+        start_date TIMESTAMP,
+        end_date TIMESTAMP
+    )
     RETURNS TEXT[] AS $$
     DECLARE
         r RECORD;
@@ -243,14 +247,14 @@ def setup_function(conn, schema='public'):
         FOR r IN
             SELECT source, datetime, carbon_intensity_direct_avg
             FROM public.table
-            WHERE CAST(datetime AS TIMESTAMP) BETWEEN start_date AND end_date
-            AND (CAST(datetime AS TIMESTAMP), carbon_intensity_direct_avg) IN (
-                SELECT CAST(datetime AS TIMESTAMP), MIN(carbon_intensity_direct_avg)
+            WHERE datetime::TIMESTAMP BETWEEN start_date AND end_date
+            AND (datetime::TIMESTAMP, carbon_intensity_direct_avg) IN (
+                SELECT datetime::TIMESTAMP, MIN(carbon_intensity_direct_avg)
                 FROM public.table
-                WHERE CAST(datetime AS TIMESTAMP) BETWEEN start_date AND end_date
-                GROUP BY CAST(datetime AS TIMESTAMP)
+                WHERE datetime::TIMESTAMP BETWEEN start_date AND end_date
+                GROUP BY datetime::TIMESTAMP
             )
-            ORDER BY CAST(datetime AS TIMESTAMP) DESC
+            ORDER BY datetime::TIMESTAMP DESC
         LOOP
             results_array := array_append(results_array, 
                 r.source || ' | ' || r.datetime || ' | ' || r.carbon_intensity_direct_avg
@@ -260,6 +264,7 @@ def setup_function(conn, schema='public'):
         RETURN results_array;
     END;
     $$ LANGUAGE plpgsql;
+    
     """
     try:
         with conn.cursor() as cur:

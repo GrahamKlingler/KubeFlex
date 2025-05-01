@@ -1,30 +1,22 @@
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  labels:
-    app: cadvisor
-  name: cadvisor
-  namespace: monitor
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: cadvisor
+  name: controller
   namespace: monitor
   annotations:
     seccomp.security.alpha.kubernetes.io/pod: docker/default
   labels:
-    app: cadvisor
+    app: controller
 spec:
   selector:
     matchLabels:
-      name: cadvisor
+      name: controller
   template:
     metadata:
       labels:
-        name: cadvisor
+        name: controller
     spec:
-      serviceAccountName: cadvisor
+      serviceAccountName: controller-account
       terminationGracePeriodSeconds: 10
       tolerations:
       - key: node-role.kubernetes.io/master
@@ -48,7 +40,7 @@ spec:
           protocol: TCP
 
       containers:
-      - name: cadvisor
+      - name: cadvsior
         image: gcr.io/cadvisor/cadvisor:v0.47.2
         args:
         - --storage_duration=1m0s
@@ -121,7 +113,7 @@ spec:
         - name: CADVISOR_URL
           value: "http://127.0.0.1:8080"
         - name: POLLING_INTERVAL
-          value: "60"
+          value: "300"
         - name: STORAGE_PATH
           value: "/storage"
         - name: POD_SELECTOR

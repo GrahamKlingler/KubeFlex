@@ -1,8 +1,9 @@
 metadata:
-  name: cadvisor-app
+  name: controller-app
   namespace: monitor
 
 resources:
+  - roles.yml
   - storage.yml
   - service.yml
-  - cadvisor.yml
+  - controller.yml
