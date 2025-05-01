@@ -56,6 +56,34 @@ END;
 $$ LANGUAGE plpgsql; 
 """
 
+general_query = """
+CREATE OR REPLACE FUNCTION get_records_by_source(
+    start_date TIMESTAMP,
+    end_date TIMESTAMP,
+    source_list TEXT[]
+)
+RETURNS TEXT[] AS $$
+DECLARE
+    r RECORD;
+    results_array TEXT[] := ARRAY[]::TEXT[];
+BEGIN
+    FOR r IN
+        SELECT source, datetime, carbon_intensity_direct_avg
+        FROM public.table
+        WHERE datetime::TIMESTAMP BETWEEN start_date AND end_date
+        AND source = ANY(source_list)
+        ORDER BY datetime::TIMESTAMP DESC
+    LOOP
+        results_array := array_append(results_array, 
+            r.source || ' | ' || r.datetime || ' | ' || r.carbon_intensity_direct_avg
+        );
+    END LOOP;
+
+    RETURN results_array;
+END;
+$$ LANGUAGE plpgsql;
+"""
+
 # Connect to PostgreSQL database
 def connect_to_db(db_params):
     """Connect to PostgreSQL database."""
@@ -68,12 +96,32 @@ def connect_to_db(db_params):
         raise
 
 # Query the minimum carbon emissions from the db from the given start and end date
-def min_slope(conn, start_date, end_date):
-
+def fetch_min_slope(conn, start_date, end_date):
     try:
         with conn.cursor() as cur:
             cur.execute(min_query)  # Create or replace the function
             cur.execute("SELECT get_min_intensity_records(%s, %s);", (start_date, end_date))
+            result = cur.fetchone()[0]  # [0] because fetchone() returns a tuple
+            # logger.info("Fetched results array:", result)
+
+            min_region, min_ts, min_intensity = [], [], [] 
+            for record in sorted(result):
+
+                min_region.append(record.split(" | ")[0])
+                min_ts.append(record.split(" | ")[1])
+                min_intensity.append(float(record.split(" | ")[2]))
+
+            return min_region, min_ts, min_intensity
+
+    except Exception as e:
+        logger.info(f"Error fetching results: {e}")
+
+# Query the minimum carbon emissions from the db from the given start and end date
+def fetch_region_slopes(conn, start_date, end_date, regions):
+    try:
+        with conn.cursor() as cur:
+            cur.execute(general_query)  # Create or replace the function
+            cur.execute("SELECT get_records_by_source(%s, %s, %s);", (start_date, end_date, regions))
             result = cur.fetchone()[0]  # [0] because fetchone() returns a tuple
             # logger.info("Fetched results array:", result)
 
@@ -395,7 +443,7 @@ def main():
                 end_string = end_date.strftime("%Y-%m-%d")
 
                 logger.info(f"Start date: {start_string}, End date: {end_string}")
-                min_db = min_slope(db_conn, start_string, end_string)
+                min_db = fetch_min_slope(db_conn, start_string, end_string)
 
                 logger.info(f"Minimum carbon emissions for {resource['name']} in the given time range:")
                 if min_db:
@@ -406,6 +454,24 @@ def main():
 
                 # Add the minimum carbon emissions to the resource data 
                 logger.info(f"Mininum regions for {resource['name']}: {set(min_db[0])}")
+
+                min_regions = list(set(min_db[0]))
+
+                if min_regions:
+                    regions_db = fetch_region_slopes(db_conn, start_string, end_string, min_regions)
+                    regions_data = {region: [] for region in min_regions}
+
+                    logger.info(f"Minimum carbon emissions for {resource['name']} in the given time range:")
+                    if regions_db:
+                        for i in range(len(regions_db[0])):
+                            regions_data[regions_db[0][i]].append([regions_db[1][i], regions_db[2][i]])
+
+                        for region, values in regions_data.items():
+                            logger.info(f"Region: {region}")
+                            for value in values:
+                                logger.info(f"Timestamp: {value[0]}, Intensity: {value[1]}")
+                    else:
+                        logger.info("No records found in the database for the given time range")
 
         except Exception as e:
             logger.info("No records found in the database for the given time range")
