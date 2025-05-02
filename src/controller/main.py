@@ -408,6 +408,12 @@ def main():
     # Load the cluster config    
     load_kubernetes_config()
 
+    # Current date minus three years
+    current_date = datetime.now()- timedelta(days=365 * 3)
+    current_date = current_date.strftime("%Y-%m-%d")
+    
+    
+
     while True:
         
         logger.info("Collecting cadvisor metrics...")
