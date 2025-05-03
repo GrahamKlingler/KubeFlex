@@ -13,13 +13,13 @@ metadata:
 rules:
 - apiGroups: [""]  # Core API group
   resources: ["pods", "namespaces"]
-  verbs: ["get", "list", "describe"]
+  verbs: ["get", "list", "describe", "create", "delete"]
 - apiGroups: ["apps"]
   resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
-  verbs: ["get", "list", "describe"]
+  verbs: ["get", "list", "describe", "create", "delete"]
 - apiGroups: ["batch"]
   resources: ["jobs", "cronjobs"]
-  verbs: ["get", "list", "describe"]
+  verbs: ["get", "list", "describe", "create", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

@@ -9,9 +9,16 @@ metadata:
     REGION: "CAL"
     EXPECTED_DURATION: "48"
 spec:
+  # For the control-plane migration
+  tolerations:
+  - operator: Equal
+    effect: NoSchedule
+    key: node-role.kubernetes.io/control-plane
   containers:
   - name: test-container
     image: busybox:latest
+    command: ["sh", "-c", "echo Hello Kubernetes! && sleep 6000"]
+    imagePullPolicy: IfNotPresent
     resources:
       requests:
         memory: "128Mi"

@@ -40,6 +40,33 @@ spec:
           protocol: TCP
 
       containers:
+      - name: python-migrate
+        image: salamander1223/python-migrate:latest
+        command: ["python", "migrate.py"]
+        securityContext:
+          privileged: true
+        ports:
+        - name: migrate-http
+          containerPort: 5432
+          protocol: TCP
+        - name: kube
+          containerPort: 8081
+          protocol: TCP
+        - name: migrate
+          containerPort: 8000
+          protocol: TCP
+        - name: test
+          containerPort: 8080
+          protocol: TCP
+        
+        resources:
+          limits:
+            cpu: 100m
+            memory: 100Mi
+          requests:
+            cpu: 50m
+            memory: 50Mi
+
       - name: cadvsior
         image: gcr.io/cadvisor/cadvisor:v0.47.2
         args:

@@ -1,0 +1,13 @@
+FROM python:3.9-slim
+
+WORKDIR /app
+
+# Copy requirements and install
+COPY build/main_req.txt .
+RUN pip install --no-cache-dir -r main_req.txt
+
+# Copy the Python code from controller/
+COPY controller/main.py .
+
+# Run the script
+CMD ["python3", "main.py"]
