@@ -410,79 +410,93 @@ def main():
 
     # Current date minus three years
     current_date = datetime.now()- timedelta(days=365 * 3)
-    current_date = current_date.strftime("%Y-%m-%d")
+    current_date_str = current_date.strftime("%Y-%m-%d")
     
-    
+    epoch = current_date + timedelta(days=1)
+    epoch_str = epoch.strftime("%Y-%m-%d")
 
-    while True:
-        
-        logger.info("Collecting cadvisor metrics...")
-        cadvsisor_containers = fetch_cadvisor_metrics(session, cadvisor_url, "/", pod_selector)
-        if cadvsisor_containers:
-            cadvisor_data = collect_container_metrics(cadvsisor_containers)
-
-        logger.info("Collecting k8s resources...")
-        k8s_data = list_resources(pod_selector.split('=')[1], output_format="table", include_system=False)
-
-        # logger.info(cadvisor_data)
-        logger.info(k8s_data)
-
-        # -----------------------------------------------
-        # Necessary for test case: remove a delta of '3 years' from the timestamp, to match db records
-        for resource in k8s_data:
-            if 'age' in resource and isinstance(resource['age'], datetime):
-                logger.info(f"{type(resource['age'])}, {resource['age']}")
-                resource['age'] = resource['age'] - timedelta(days=365 * 3)
-        # -----------------------------------------------
-
-        # Get the minimum carbon emissions from the db
-        try:
-            for resource in k8s_data:
-                start_date = datetime.fromisoformat(str(resource['age']))
-
-                # Assumes `EXPECTED_DURATION` is inside each resource's 'annotations'
-                expected_duration = int(resource.get('annotations', {}).get('EXPECTED_DURATION', 0))
-
-                end_date = start_date + timedelta(hours=expected_duration)
-
-                start_string = start_date.strftime("%Y-%m-%d")
-                end_string = end_date.strftime("%Y-%m-%d")
-
-                logger.info(f"Start date: {start_string}, End date: {end_string}")
-                min_db = fetch_min_slope(db_conn, start_string, end_string)
-
-                logger.info(f"Minimum carbon emissions for {resource['name']} in the given time range:")
-                if min_db:
-                    for i in range(len(min_db[0])):
-                        logger.info(f"Region: {min_db[0][i]}, Timestamp: {min_db[1][i]}, Intensity: {min_db[2][i]}")
-                else:
-                    logger.info("No records found in the database for the given time range")
-
-                # Add the minimum carbon emissions to the resource data 
-                logger.info(f"Mininum regions for {resource['name']}: {set(min_db[0])}")
-
-                min_regions = list(set(min_db[0]))
-
-                if min_regions:
-                    regions_db = fetch_region_slopes(db_conn, start_string, end_string, min_regions)
-                    regions_data = {region: [] for region in min_regions}
-
-                    logger.info(f"Minimum carbon emissions for {resource['name']} in the given time range:")
-                    if regions_db:
-                        for i in range(len(regions_db[0])):
-                            regions_data[regions_db[0][i]].append([regions_db[1][i], regions_db[2][i]])
-
-                        for region, values in regions_data.items():
-                            logger.info(f"Region: {region}")
-                            for value in values:
-                                logger.info(f"Timestamp: {value[0]}, Intensity: {value[1]}")
-                    else:
-                        logger.info("No records found in the database for the given time range")
-
-        except Exception as e:
+    # Get the minimum carbon emissions from the db
+    try:
+        min_db = fetch_min_slope(db_conn, current_date_str, epoch_str)
+        logger.info(f"Minimum carbon emissions for {pod_selector} in the given time range:")
+        if min_db:
+            for i in range(len(min_db[0])):
+                logger.info(f"Region: {min_db[0][i]}, Timestamp: {min_db[1][i]}, Intensity: {min_db[2][i]}")
+        else:
             logger.info("No records found in the database for the given time range")
+    except Exception as e:
+        logger.info(f"Error fetching results: {e}")
+    
 
-        time.sleep(interval)
+    # while True:
+        
+    #     logger.info("Collecting cadvisor metrics...")
+    #     cadvsisor_containers = fetch_cadvisor_metrics(session, cadvisor_url, "/", pod_selector)
+    #     if cadvsisor_containers:
+    #         cadvisor_data = collect_container_metrics(cadvsisor_containers)
+
+    #     logger.info("Collecting k8s resources...")
+    #     k8s_data = list_resources(pod_selector.split('=')[1], output_format="table", include_system=False)
+
+    #     # logger.info(cadvisor_data)
+    #     logger.info(k8s_data)
+
+    #     # -----------------------------------------------
+    #     # Necessary for test case: remove a delta of '3 years' from the timestamp, to match db records
+    #     for resource in k8s_data:
+    #         if 'age' in resource and isinstance(resource['age'], datetime):
+    #             logger.info(f"{type(resource['age'])}, {resource['age']}")
+    #             resource['age'] = resource['age'] - timedelta(days=365 * 3)
+    #     # -----------------------------------------------
+
+    #     # Get the minimum carbon emissions from the db
+    #     try:
+    #         for resource in k8s_data:
+    #             start_date = datetime.fromisoformat(str(resource['age']))
+
+    #             # Assumes `EXPECTED_DURATION` is inside each resource's 'annotations'
+    #             expected_duration = int(resource.get('annotations', {}).get('EXPECTED_DURATION', 0))
+
+    #             end_date = start_date + timedelta(hours=expected_duration)
+
+    #             start_string = start_date.strftime("%Y-%m-%d")
+    #             end_string = end_date.strftime("%Y-%m-%d")
+
+    #             logger.info(f"Start date: {start_string}, End date: {end_string}")
+    #             min_db = fetch_min_slope(db_conn, start_string, end_string)
+
+    #             logger.info(f"Minimum carbon emissions for {resource['name']} in the given time range:")
+    #             if min_db:
+    #                 for i in range(len(min_db[0])):
+    #                     logger.info(f"Region: {min_db[0][i]}, Timestamp: {min_db[1][i]}, Intensity: {min_db[2][i]}")
+    #             else:
+    #                 logger.info("No records found in the database for the given time range")
+
+    #             # Add the minimum carbon emissions to the resource data 
+    #             logger.info(f"Mininum regions for {resource['name']}: {set(min_db[0])}")
+
+    #             min_regions = list(set(min_db[0]))
+
+    #             if min_regions:
+    #                 regions_db = fetch_region_slopes(db_conn, start_string, end_string, min_regions)
+    #                 regions_data = {region: [] for region in min_regions}
+
+    #                 logger.info(f"Minimum carbon emissions for {resource['name']} in the given time range:")
+    #                 if regions_db:
+    #                     for i in range(len(regions_db[0])):
+    #                         regions_data[regions_db[0][i]].append([regions_db[1][i], regions_db[2][i]])
+
+    #                     for region, values in regions_data.items():
+    #                         logger.info(f"Region: {region}")
+    #                         for value in values:
+    #                             logger.info(f"Timestamp: {value[0]}, Intensity: {value[1]}")
+    #                 else:
+    #                     logger.info("No records found in the database for the given time range")
+
+    #     except Exception as e:
+    #         logger.info("No records found in the database for the given time range")
+
+    time.sleep(interval)
 
 if __name__ == "__main__":
     main()

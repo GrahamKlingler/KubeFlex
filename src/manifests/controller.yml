@@ -25,7 +25,7 @@ spec:
       initContainers:
       - name: db-upload-container
         image: salamander1223/python-db-upload:latest
-        command: ["python", "upload_data.py", "data", "table"]
+        command: ["python", "upload_data.py", "test_data", "table"]
         args:
         - --host=db-service
         - --port=5432

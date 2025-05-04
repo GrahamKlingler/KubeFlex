@@ -197,13 +197,21 @@ def copy_csv_to_table(conn, csv_path, table_name, schema='public'):
 
 def process_directory(conn, directory_path, table_name, schema='public'):
     """Process all CSV files in the specified directory."""
-    # Check if directory exists
-    if not os.path.isdir(directory_path):
-        logger.error(f"Directory {directory_path} does not exist")
-        raise ValueError(f"Directory {directory_path} does not exist")
+    # Print all files and directories in the current path
+    # logger.info(f"Processing directory: {directory_path}")
+    # logger.info(f"Current directory contents: {os.listdir(directory_path)}")
+    # logger.info(f"Directory path: {directory_path}")
+    
+    # # Check if directory exists
+    # if not os.path.isdir(directory_path):
+    #     logger.error(f"Directory {directory_path} does not exist")
+    #     raise ValueError(f"Directory {directory_path} does not exist")
     
     # Find all CSV files
-    csv_files = glob.glob(os.path.join(directory_path, "*.csv"))
+    csv_files = glob.glob("*.csv")
+    # csv_files = [os.path.join(directory_path, f) for f in csv_files]
+    logger.info(f"CSV files found: {csv_files}")
+    # Check if any CSV files were found
     
     if not csv_files:
         logger.warning(f"No CSV files found in {directory_path}")
