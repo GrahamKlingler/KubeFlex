@@ -426,7 +426,36 @@ def main():
             logger.info("No records found in the database for the given time range")
     except Exception as e:
         logger.info(f"Error fetching results: {e}")
-    
+
+    url = "http://0.0.0.0:8000/migrate"
+    headers = {"Content-Type": "application/json"}
+    json_body = {
+        "namespace": "foo",
+        "pod": "test-pod",
+        "target_pod": "new-test-pod",
+        "target_node": "desktop-worker2",
+        "delete_original": True,
+    }
+
+    logger.info("Migrating test pod to the new node...")
+    response = requests.post(url, json=json_body, headers=headers)
+    logger.info(f"Status Code: {response.status_code}")
+    logger.info(f"Response: {response.text}")
+
+    json_body = {
+        "namespace": "foo",
+        "pod": "new-test-pod",
+        "target_pod": "test-pod",
+        "target_node": "desktop-worker",
+        "delete_original": True,
+    }
+
+    logger.info("Migrating test pod back to the original node...")
+    response = requests.post(url, json=json_body, headers=headers)
+    logger.info(f"Status Code: {response.status_code}")
+    logger.info(f"Response: {response.text}")
+
+    time.sleep(100000)
 
     # while True:
         

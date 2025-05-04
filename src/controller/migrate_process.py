@@ -86,7 +86,8 @@ def create_pod_clone_for_node(
     api: client.CoreV1Api,
     namespace: str, 
     original_pod_name: str,
-    target_node: str
+    target_node: str,
+    new_pod_name: str = None
 ) -> str:
     """Create a new pod on the target node based on an existing pod's configuration."""
     # Get the original pod definition
@@ -96,9 +97,11 @@ def create_pod_clone_for_node(
     node_info = get_node_info(api, target_node)
     logger.info(f"Target node: {node_info['name']}, is control plane: {node_info['is_control_plane']}")
     
-    # Create a new name for the pod
-    new_pod_name = f"{original_pod_name}-migrated-{int(time.time())}"
-    
+    # Generate a new pod name if not provided
+    if new_pod_name is None:
+        new_pod_name = f"{original_pod_name}-migrated-{int(time.time())}"
+        logger.info(f"Generated new pod name: {new_pod_name}")
+
     # Modify the pod definition for the new node
     pod_def["metadata"]["name"] = new_pod_name
     
@@ -233,6 +236,7 @@ def wait_for_pod_running(api: client.CoreV1Api, namespace: str, pod_name: str, t
 def migrate_pod(
     namespace: str,
     pod_name: str, 
+    target_pod: str,
     target_node: str,
     delete_original: bool = True,
     debug: bool = False
@@ -269,7 +273,7 @@ def migrate_pod(
         return None
     
     # Create clone on target node
-    new_pod_name = create_pod_clone_for_node(api, namespace, pod_name, target_node)
+    new_pod_name = create_pod_clone_for_node(api, namespace, pod_name, target_node, target_pod)
     
     # Wait for the new pod to be running
     if wait_for_pod_running(api, namespace, new_pod_name):
@@ -297,6 +301,7 @@ class MigrateRequest(BaseModel):
     namespace: str
     pod: str
     target_node: str
+    target_pod: str = None
     delete_original: bool = True
     debug: bool = False
 
@@ -309,6 +314,7 @@ async def migrate(req: MigrateRequest):
         result = migrate_pod(
             namespace=req.namespace,
             pod_name=req.pod,
+            target_pod=req.target_pod,
             target_node=req.target_node,
             delete_original=req.delete_original,
             debug=req.debug

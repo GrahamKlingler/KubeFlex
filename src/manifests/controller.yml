@@ -18,10 +18,27 @@ spec:
     spec:
       serviceAccountName: controller-account
       terminationGracePeriodSeconds: 10
+      # For the control-plane
       tolerations:
-      - key: node-role.kubernetes.io/master
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: Exists
         effect: NoSchedule
-
+      - key: "node.kubernetes.io/unreachable"
+        operator: Exists
+        effect: NoExecute
+      - key: "node-role.kubernetes.io/master"
+        operator: Exists
+        effect: NoSchedule  
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 1
+            preference:
+              matchExpressions:
+              - key: "kubernetes.io/hostname"
+                operator: In
+                values:
+                - desktop-control-plane
       initContainers:
       - name: db-upload-container
         image: salamander1223/python-db-upload:latest
@@ -42,7 +59,7 @@ spec:
       containers:
       - name: python-migrate
         image: salamander1223/python-migrate:latest
-        command: ["python", "migrate.py"]
+        command: ["python", "migrate_process.py"]
         securityContext:
           privileged: true
         ports:
@@ -123,7 +140,7 @@ spec:
           mountPath: /var/run
           readOnly: false
         ports:
-        - name: http
+        - name: main-http
           containerPort: 8081
           protocol: TCP
         env:

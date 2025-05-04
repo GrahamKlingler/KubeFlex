@@ -9,11 +9,27 @@ metadata:
     REGION: "CAL"
     EXPECTED_DURATION: "48"
 spec:
-  # For the control-plane migration
-  tolerations:
-  - operator: Equal
-    effect: NoSchedule
-    key: node-role.kubernetes.io/control-plane
+  # # For the control-plane
+  # tolerations:
+  # - key: "node-role.kubernetes.io/control-plane"
+  #   operator: Exists
+  #   effect: NoSchedule
+  # - key: "node.kubernetes.io/unreachable"
+  #   operator: Exists
+  #   effect: NoExecute
+  # - key: "node-role.kubernetes.io/master"
+  #   operator: Exists
+  #   effect: NoSchedule
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 1
+        preference:
+          matchExpressions:
+          - key: "kubernetes.io/hostname"
+            operator: In
+            values:
+            - desktop-worker
   containers:
   - name: test-container
     image: busybox:latest

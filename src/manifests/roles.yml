@@ -12,7 +12,7 @@ metadata:
   name: controller-account-role
 rules:
 - apiGroups: [""]  # Core API group
-  resources: ["pods", "namespaces"]
+  resources: ["pods", "nodes", "namespaces", "events"]
   verbs: ["get", "list", "describe", "create", "delete"]
 - apiGroups: ["apps"]
   resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
