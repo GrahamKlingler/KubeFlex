@@ -35,7 +35,7 @@ spec:
         securityContext:
           privileged: true
         ports:
-        - name: http
+        - name: postgres
           containerPort: 5432
           protocol: TCP
 
@@ -46,19 +46,9 @@ spec:
         securityContext:
           privileged: true
         ports:
-        - name: migrate-http
-          containerPort: 5432
-          protocol: TCP
-        - name: kube
-          containerPort: 8081
-          protocol: TCP
         - name: migrate
           containerPort: 8000
           protocol: TCP
-        - name: test
-          containerPort: 8080
-          protocol: TCP
-        
         resources:
           limits:
             cpu: 100m
