@@ -8,8 +8,8 @@ RUN pip install --no-cache-dir -r upload_data_req.txt
 
 # Copy script into the container
 COPY controller/upload_data.py .
-COPY test_data/*csv .
+COPY avg_data/*csv .
 
 # Set the entrypoint to run the script
-ENTRYPOINT ["python3", "upload_data.py", "test_data", "table"]
+ENTRYPOINT ["python3", "upload_data.py", "avg_data", "table"]
 # python3 upload_data.py [--dbname] [--user] [--port] [--host] directory table_name

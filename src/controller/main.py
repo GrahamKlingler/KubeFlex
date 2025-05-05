@@ -6,11 +6,16 @@ import psycopg2
 import os
 import sys
 import logging
+
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 from prettytable import PrettyTable
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.date import DateTrigger
+import asyncio
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -104,14 +109,15 @@ def fetch_min_slope(conn, start_date, end_date):
             result = cur.fetchone()[0]  # [0] because fetchone() returns a tuple
             # logger.info("Fetched results array:", result)
 
-            min_region, min_ts, min_intensity = [], [], [] 
-            for record in sorted(result):
+            final = []
+            for record in result:
 
-                min_region.append(record.split(" | ")[0])
-                min_ts.append(record.split(" | ")[1])
-                min_intensity.append(float(record.split(" | ")[2]))
+                min_region = record.split(" | ")[0]
+                min_ts = record.split(" | ")[1]
+                min_intensity = float(record.split(" | ")[2])
+                final.append([min_ts, min_region, min_intensity])
 
-            return min_region, min_ts, min_intensity
+            return sorted(final)
 
     except Exception as e:
         logger.info(f"Error fetching results: {e}")
@@ -386,7 +392,42 @@ def list_resources(namespace, output_format="table", include_system=False) -> li
     
     return all_resources
 
+global db_min
+global breakpoints
+
+def daily_job(db_conn):
+    # Current date minus three years
+    current_date = datetime.now()- timedelta(days=365 * 3)
+    current_date_str = current_date.strftime("%Y-%m-%d")
+    
+    epoch = current_date + timedelta(days=1)
+    epoch_str = epoch.strftime("%Y-%m-%d")
+
+    db_min = []
+
+    # Get the minimum carbon emissions from the db
+    try:
+        db_min = fetch_min_slope(db_conn, current_date_str, epoch_str)
+        logger.info(f"Minimum carbon emissions in the given time range {current_date_str}-{epoch_str}:")
+        
+        if db_min:
+            for i in range(len(db_min)):
+                logger.info(f"Timestamp: {db_min[i][0]}, Region: {db_min[i][1]}, Intensity: {db_min[i][2]}")
+        
+            # Go through the db_min and check if the region is different from the previous one
+            for i in range(1, len(db_min)):
+                if db_min[i][1] != db_min[i-1][1]:
+                    logger.info(f"New region detected: {db_min[i][1]} at {db_min[i][0]}")
+                    breakpoints.append(db_min[i])
+                    
+        else:
+            logger.info("No records found in the database for the given time range")
+    except Exception as e:
+        logger.info(f"Error fetching results: {e}")
+
+
 def main():
+    scheduler = BackgroundScheduler()
 
     # Load environment variables
     pod_selector = os.getenv('POD_SELECTOR', 'io.kubernetes.pod.namespace=monitor')
@@ -408,52 +449,37 @@ def main():
     # Load the cluster config    
     load_kubernetes_config()
 
-    # Current date minus three years
-    current_date = datetime.now()- timedelta(days=365 * 3)
-    current_date_str = current_date.strftime("%Y-%m-%d")
-    
-    epoch = current_date + timedelta(days=1)
-    epoch_str = epoch.strftime("%Y-%m-%d")
+    breakpoints = []
+    scheduler.add_job(daily_job, 'cron', hour=0, minute=0, args=[db_conn])
+    scheduler.start()
 
-    # Get the minimum carbon emissions from the db
-    try:
-        min_db = fetch_min_slope(db_conn, current_date_str, epoch_str)
-        logger.info(f"Minimum carbon emissions for {pod_selector} in the given time range:")
-        if min_db:
-            for i in range(len(min_db[0])):
-                logger.info(f"Region: {min_db[0][i]}, Timestamp: {min_db[1][i]}, Intensity: {min_db[2][i]}")
-        else:
-            logger.info("No records found in the database for the given time range")
-    except Exception as e:
-        logger.info(f"Error fetching results: {e}")
+    # url = "http://0.0.0.0:8000/migrate"
+    # headers = {"Content-Type": "application/json"}
+    # json_body = {
+    #     "namespace": "foo",
+    #     "pod": "test-pod",
+    #     "target_pod": "new-test-pod",
+    #     "target_node": "desktop-worker2",
+    #     "delete_original": True,
+    # }
 
-    url = "http://0.0.0.0:8000/migrate"
-    headers = {"Content-Type": "application/json"}
-    json_body = {
-        "namespace": "foo",
-        "pod": "test-pod",
-        "target_pod": "new-test-pod",
-        "target_node": "desktop-worker2",
-        "delete_original": True,
-    }
+    # logger.info("Migrating test pod to the new node...")
+    # response = requests.post(url, json=json_body, headers=headers)
+    # logger.info(f"Status Code: {response.status_code}")
+    # logger.info(f"Response: {response.text}")
 
-    logger.info("Migrating test pod to the new node...")
-    response = requests.post(url, json=json_body, headers=headers)
-    logger.info(f"Status Code: {response.status_code}")
-    logger.info(f"Response: {response.text}")
+    # json_body = {
+    #     "namespace": "foo",
+    #     "pod": "new-test-pod",
+    #     "target_pod": "test-pod",
+    #     "target_node": "desktop-worker",
+    #     "delete_original": True,
+    # }
 
-    json_body = {
-        "namespace": "foo",
-        "pod": "new-test-pod",
-        "target_pod": "test-pod",
-        "target_node": "desktop-worker",
-        "delete_original": True,
-    }
-
-    logger.info("Migrating test pod back to the original node...")
-    response = requests.post(url, json=json_body, headers=headers)
-    logger.info(f"Status Code: {response.status_code}")
-    logger.info(f"Response: {response.text}")
+    # logger.info("Migrating test pod back to the original node...")
+    # response = requests.post(url, json=json_body, headers=headers)
+    # logger.info(f"Status Code: {response.status_code}")
+    # logger.info(f"Response: {response.text}")
 
     time.sleep(100000)
 
