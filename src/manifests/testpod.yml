@@ -6,7 +6,7 @@ metadata:
   labels:
     name: test-pod
   annotations:
-    REGION: "CAL"
+    REGION: "TEN"
     EXPECTED_DURATION: "48"
 spec:
   # # For the control-plane

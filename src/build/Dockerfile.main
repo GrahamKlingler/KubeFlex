@@ -8,6 +8,7 @@ RUN pip install --no-cache-dir -r main_req.txt
 
 # Copy the Python code from controller/
 COPY controller/main.py .
+COPY controller/utils ./utils
 
 # Run the script
 CMD ["python3", "main.py"]

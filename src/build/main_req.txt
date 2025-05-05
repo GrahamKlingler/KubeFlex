@@ -3,3 +3,4 @@ psycopg2-binary
 kubernetes
 prettytable
 apscheduler
+pytz

@@ -147,7 +147,7 @@ spec:
         - name: CADVISOR_URL
           value: "http://127.0.0.1:8080"
         - name: POLLING_INTERVAL
-          value: "300"
+          value: "24"
         - name: STORAGE_PATH
           value: "/storage"
         - name: POD_SELECTOR

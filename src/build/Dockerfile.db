@@ -2,14 +2,16 @@ FROM python:3.9-slim
 
 WORKDIR /app
 
+ENV DATADIR="test_data"
+
 # Install dependencies
 COPY build/upload_data_req.txt .
 RUN pip install --no-cache-dir -r upload_data_req.txt
 
 # Copy script into the container
 COPY controller/upload_data.py .
-COPY avg_data/*csv .
+COPY ${DATADIR}/*csv .
 
 # Set the entrypoint to run the script
-ENTRYPOINT ["python3", "upload_data.py", "avg_data", "table"]
+ENTRYPOINT ["python3", "upload_data.py", "${DATADIR}", "table"]
 # python3 upload_data.py [--dbname] [--user] [--port] [--host] directory table_name
