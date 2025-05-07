@@ -32,18 +32,6 @@ def load_kubernetes_config():
             logger.error(f"Error loading Kubernetes configuration: {e}")
             sys.exit(1)
 
-# Format dictionary data for table display
-def format_dict_for_table(data_dict):
-    """Format dictionary data for table display"""
-    if not data_dict:
-        return ""
-    
-    result = []
-    for k, v in data_dict.items():
-        result.append(f"{k}={v}")
-    
-    return "\n".join(result)
-
 # Get the status of a pod
 def get_pod_status(pod):
     """Get the status of a pod"""
@@ -55,7 +43,7 @@ def get_pod_status(pod):
     return "Unknown"
 
 # List all resources in a namespace with k8s library
-def list_resources(namespace, output_format="table", include_system=False) -> list:
+def list_resources(namespace, include_system=False) -> list:
     """
     List all resources in the specified namespace
     """
@@ -115,35 +103,6 @@ def list_resources(namespace, output_format="table", include_system=False) -> li
             all_resources.append(resource_data)
     except ApiException as e:
         logger.info(f"Error listing jobs: {e}")
-
-    # # Format and return the results based on output format
-    # if output_format == "json":
-    #     logger.info(json.dumps(all_resources, default=str, indent=2))
-    # else:  # table format
-    #     if not all_resources:
-    #         logger.info(f"No resources found in namespace '{namespace}'")
-    #         return
-            
-    #     table = PrettyTable()
-    #     table.field_names = ["Kind", "Name", "Labels", "Annotations", "State", "Age"]
-    #     table.align = "l"
-    #     table.max_width = 40
-        
-    #     for resource in all_resources:
-    #         # Format labels and annotations for better readability
-    #         labels_str = format_dict_for_table(resource['labels'])
-    #         annotations_str = format_dict_for_table(resource['annotations'])
-            
-    #         table.add_row([
-    #             resource['kind'],
-    #             resource['name'],
-    #             labels_str,
-    #             annotations_str,
-    #             resource['state'],
-    #             resource['age']
-    #         ])
-        
-    #     logger.info(table)
     
     return all_resources
 

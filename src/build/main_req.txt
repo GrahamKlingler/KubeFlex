@@ -4,3 +4,5 @@ kubernetes
 prettytable
 apscheduler
 pytz
+numpy
+matplotlib

@@ -5,52 +5,13 @@ from utils.kubeapi import *
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.date import DateTrigger
 import pytz
+from datetime import datetime
+import time
 
-def collect_carbon_forecast(db_conn, interval=24):
-    # Current date (UTC) minus three years
-    current_date = datetime.now(pytz.timezone('UTC')) - timedelta(days=365 * 3)
-    current_date_str = current_date.strftime("%Y-%m-%d %H:%M:%S %Z")
+import numpy as np
+import matplotlib.pyplot as plt
 
-    epoch = current_date + timedelta(hours=interval)
-    epoch_str = epoch.strftime("%Y-%m-%d %H:%M:%S %Z")
 
-    db_min = []
-    breakpoints = []
-
-    # Get the minimum carbon emissions from the db
-    try:
-        db_min = fetch_min_slope(db_conn, current_date_str, epoch_str)
-        logger.info(f"Minimum carbon emissions in the given time range {current_date_str} to {epoch_str}:")
-        
-        if db_min:
-            # Iterate backwards to safely remove elements
-            for i in range(len(db_min) - 1, -1, -1):
-                # # Remove any inputs where the timezone is in the past
-                # if db_min[i][0] < current_date.strftime("%Y-%m-%d %H:%M:%S"):
-                #     db_min.pop(i)
-                #     continue
-
-                # Change it from a string to a datetime object first
-                # Strip timezone info before parsing
-                timestamp_str = db_min[i][0].split('+')[0]
-                db_min[i][0] = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S") + timedelta(days=365*3)
-                db_min[i][0] = db_min[i][0].strftime("%Y-%m-%d %H:%M:%S")
-                logger.info(f"Timestamp: {db_min[i][0]}, Region: {db_min[i][1]}, Intensity: {db_min[i][2]}")
-        
-            # Go through the db_min and check if the region is different from the previous one
-            for i in range(1, len(db_min)):
-                if db_min[i][1] != db_min[i-1][1]:
-                    logger.info(f"New region detected: {db_min[i][1]} at {db_min[i][0]}")
-                    breakpoints.append(db_min[i])
-        
-            logger.info(f"Breakpoints: {breakpoints}")
-
-        else:
-            logger.info("No records found in the database for the given time range")
-    except Exception as e:
-        logger.info(f"Error fetching results: {e}")
-    
-    return db_min, breakpoints
 
 def migrate_pod(namespace, pod, target_pod, target_node, delete_original):
     
@@ -125,8 +86,8 @@ def main():
 
     # Load environment variables
     pod_selector = os.getenv('POD_SELECTOR', 'io.kubernetes.pod.namespace=monitor')
-    cadvisor_interval = int(os.getenv('POLLING_INTERVAL', '300'))
-    forecast_interval = int(os.getenv('FORECAST_INTERVAL', '24'))
+    # cadvisor_interval = int(os.getenv('POLLING_INTERVAL', '300'))
+    forecast_interval = int(os.getenv('FORECAST_INTERVAL', '72'))
 
     # Connect to cadvisor API
     cadvisor_url = get_cadvisor_url()
@@ -144,7 +105,8 @@ def main():
     # Load the cluster config    
     load_kubernetes_config()
     nodes_info = list_nodes_with_labels_annotations()
-    logger.info(f"Nodes in the cluster: {nodes_info}")
+    for node in nodes_info:
+        logger.info(f"Node: {node['name']}, Labels: {node['labels']}, Annotations: {node['annotations']}")
 
     # Initialize scheduler
     scheduler = BackgroundScheduler()
@@ -170,7 +132,59 @@ def main():
 
     # Schedule the initial forecast update
     update_forecast_and_schedule()
-    
+
+    pods = list_resources("foo")
+    for pod in pods:
+        pod_region = pod["annotations"]["REGION"]
+        pod_start_time = pod["age"]
+        pod_name = pod["name"]
+        expected_duration = int(pod["annotations"]["EXPECTED_DURATION"])  # This is in hours
+        pod_end_time = pod_start_time + timedelta(hours=expected_duration)        
+
+        logger.info(f"{pod_region}, {pod_start_time}, {pod_end_time}, {expected_duration}")
+
+        if pod_end_time < datetime.now(pytz.timezone('UTC')):
+            logger.info(f"Error: Pod {pod_name} has extended past its duration")
+        else:
+            remaining_time = (pod_end_time - datetime.now(pytz.timezone('UTC'))).total_seconds() / 3600  # Convert seconds to hours
+
+            pod_carbon = collect_region_forecast(db_conn, pod_region, remaining_time)
+
+            # Filter db_min to only include timestamps within pod's lifetime
+            min_forecast = [
+                point for point in db_min 
+                if pod_start_time <= datetime.strptime(point[0], "%Y-%m-%d %H:%M:%S").replace(tzinfo=pytz.UTC) <= pod_end_time
+            ]
+            
+            logger.info(f"Found {len(min_forecast)} forecast points within pod {pod_name}'s lifetime")
+
+            # Calculate cumulative sums
+            pod_carbon_cumsum = np.cumsum([point[2] for point in pod_carbon])
+            min_forecast_cumsum = np.cumsum([point[2] for point in min_forecast])
+
+            # Create the plot
+            plt.figure(figsize=(12, 6))
+            plt.plot([point[0] for point in pod_carbon], pod_carbon_cumsum, label=f'Cumulative Carbon Intensity - {pod_region}')
+            plt.plot([point[0] for point in min_forecast], min_forecast_cumsum, label='Cumulative Minimum Carbon Intensity')
+            
+            plt.xlabel('Time')
+            plt.ylabel('Cumulative Carbon Intensity')
+            plt.title(f'Cumulative Carbon Intensity Over Time - Pod: {pod_name}')
+            plt.xticks(rotation=45)
+            plt.legend()
+            plt.grid(True)
+            
+            # Adjust layout to prevent label cutoff
+            plt.tight_layout()
+            
+            # Save the plot
+            plot_filename = f'plot_{pod_name}.png'
+            plt.savefig(plot_filename)
+            plt.close()
+            
+            logger.info(f"Generated carbon intensity plot: {plot_filename}")
+
+
     # Schedule periodic forecast updates
     scheduler.add_job(
         func=update_forecast_and_schedule,
@@ -184,7 +198,7 @@ def main():
     try:
         # Keep the main thread alive
         while True:
-            time.sleep(1)
+            time.sleep(60)
     except (KeyboardInterrupt, SystemExit):
         scheduler.shutdown()
         logger.info("Scheduler shutdown complete")
