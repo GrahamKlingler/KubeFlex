@@ -8,3 +8,4 @@ resources:
   - service.yml
   - controller.yml
   - testpod.yml
+  - metadata.yml

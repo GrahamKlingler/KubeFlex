@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: metadata
+  namespace: monitor
+  labels:
+    app: metadata
+spec:
+  selector:
+    matchLabels:
+      name: metadata
+  template:
+    metadata:
+      labels:
+        name: metadata
+    spec:
+      serviceAccountName: controller-account
+      containers:
+      - name: metadata
+        image: salamander1223/python-data-server:latest
+        imagePullPolicy: Always
+        command: ["python3", "metadata.py"]
+        securityContext:
+          privileged: true
+        resources:
+          limits:
+            cpu: 100m
+            memory: 100Mi
+          requests:
+            cpu: 50m
+            memory: 50Mi
+        ports:
+        - name: http
+          containerPort: 8008
+          protocol: TCP
+        env:
+        - name: SERVER_PORT
+          value: "8008"
+        - name: STORAGE_PATH
+          value: "/storage"
+        volumeMounts:
+        - name: storage
+          mountPath: /storage
+      volumes:
+      - name: storage
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: metadata
+  namespace: monitor
+spec:
+  selector:
+    name: metadata
+  ports:
+  - name: http
+    port: 8008
+    targetPort: 8008
+    protocol: TCP 

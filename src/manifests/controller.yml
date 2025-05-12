@@ -155,6 +155,8 @@ spec:
             configMapKeyRef:
               key: POD_SELECTOR
               name: pod-selector-config
+        - name: CARBON_SERVER_URL
+          value: "http://metadata:8008"
         # io.kubernetes.pod.namespace=<namespace>
         # io.kubernetes.pod.name=<pod-name>
         # io.kubernetes.container.name=<container-name>

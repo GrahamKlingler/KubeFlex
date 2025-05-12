@@ -10,3 +10,7 @@ docker push salamander1223/python-db-upload:latest
 docker build -t python-migrate:latest -f build/Dockerfile.migrate .
 docker tag python-migrate:latest salamander1223/python-migrate:latest
 docker push salamander1223/python-migrate:latest
+
+docker build -t python-data-server:latest -f build/Dockerfile.data-server .
+docker tag python-data-server:latest salamander1223/python-data-server:latest
+docker push salamander1223/python-data-server:latest

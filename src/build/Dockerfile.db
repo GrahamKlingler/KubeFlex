@@ -6,7 +6,7 @@ ENV DATADIR="test_data"
 
 # Install dependencies
 COPY build/upload_data_req.txt .
-RUN pip install --no-cache-dir -r upload_data_req.txt
+RUN pip install -r upload_data_req.txt
 
 # Copy script into the container
 COPY controller/upload_data.py .

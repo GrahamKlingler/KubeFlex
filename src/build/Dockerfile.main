@@ -4,7 +4,7 @@ WORKDIR /app
 
 # Copy requirements and install
 COPY build/main_req.txt .
-RUN pip install --no-cache-dir -r main_req.txt
+RUN pip install -r main_req.txt
 
 # Copy the Python code from controller/
 COPY controller/main.py .
