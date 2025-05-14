@@ -25,10 +25,10 @@ spec:
         resources:
           limits:
             cpu: 100m
-            memory: 100Mi
+            memory: 1000Mi
           requests:
             cpu: 50m
-            memory: 50Mi
+            memory: 500Mi
         ports:
         - name: http
           containerPort: 8008
@@ -48,7 +48,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: metadata
+  name: metadata-service
   namespace: monitor
 spec:
   selector:

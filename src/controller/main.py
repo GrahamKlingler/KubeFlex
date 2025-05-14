@@ -1,7 +1,6 @@
 from utils.cadvisor import *
 from utils.db import *
 from utils.kubeapi import *
-from utils.metadata import *
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.date import DateTrigger
@@ -298,7 +297,7 @@ def main():
     
     # Start the server in the main thread
     try:
-        run_server(server_port)
+        time.sleep(100)
     except KeyboardInterrupt:
         logger.info("Shutting down...")
         scheduler.shutdown()

@@ -5,7 +5,5 @@ metadata:
 resources:
   - roles.yml
   - storage.yml
-  - service.yml
   - controller.yml
-  - testpod.yml
   - metadata.yml

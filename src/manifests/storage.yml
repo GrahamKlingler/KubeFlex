@@ -34,3 +34,18 @@ spec:
           value: "wordpass"
         - name: POSTGRES_DB
           value: "postgres"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: db-service
+  namespace: monitor
+spec:
+  type: NodePort
+  selector:
+    app: postgres
+  ports:
+  - protocol: TCP
+    port: 5432
+    targetPort: 5432
+    nodePort: 32345

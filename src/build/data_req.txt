@@ -3,3 +3,6 @@ numpy
 matplotlib
 pytz
 psycopg2-binary
+kubernetes
+prettytable
+plotly
