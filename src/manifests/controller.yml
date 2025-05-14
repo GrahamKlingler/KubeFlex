@@ -186,3 +186,17 @@ spec:
       - name: disk
         hostPath:
           path: /dev/disk
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: python-migrate-service
+  namespace: monitor
+spec:
+  selector:
+    name: controller # Assuming the pods running python-migrate have this label
+  ports:
+  - name: migrate
+    port: 8000
+    targetPort: 8000
+    protocol: TCP
