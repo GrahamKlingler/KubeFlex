@@ -75,11 +75,26 @@ class CarbonDataHandler(BaseHTTPRequestHandler):
 
                 # Fetch data from database
                 pod_carbon = collect_region_forecast(db_conn, pod_region, interval)
-                min_forecast, _ = collect_carbon_forecast(db_conn, interval)
+                min_forecast, _ = collect_carbon_forecast(db_conn, interval)  # Commented out breakpoints since not used
+                # min_forecast, breakpoints = collect_carbon_forecast(db_conn, interval)
                 
                 # Format data for plotting
                 pod_carbon = [[point[0], 100, point[2]] for point in pod_carbon]
                 min_forecast = [[point[0], 100, point[2]] for point in min_forecast]
+
+                # Align by timestamp and compute difference and cumulative sum
+                # Assume both lists are sorted by timestamp and have the same timestamps
+                region_dict = {point[0]: point[2] for point in pod_carbon}
+                min_dict = {point[0]: point[2] for point in min_forecast}
+                common_times = sorted(set(region_dict.keys()) & set(min_dict.keys()))
+                diff_series = []
+                cum_diff_series = []
+                cum_sum = 0.0
+                for t in common_times:
+                    diff = region_dict[t] - min_dict[t]
+                    cum_sum += diff
+                    diff_series.append([t, diff])
+                    cum_diff_series.append([t, cum_sum])
 
                 if pod_end_time < datetime.now(pytz.timezone('UTC')):
                     logger.info(f"Error: Pod {pod_name} has extended past its duration")
@@ -91,7 +106,7 @@ class CarbonDataHandler(BaseHTTPRequestHandler):
                     fig.add_trace(go.Scatter(
                         x=[point[0] for point in pod_carbon],
                         y=[point[2] for point in pod_carbon],
-                        name=f'Carbon Intensity - {pod_region}',
+                        name=f'Carbon Intensity/{pod_region}',
                         mode='lines',
                         line=dict(width=2)
                     ))
@@ -102,6 +117,15 @@ class CarbonDataHandler(BaseHTTPRequestHandler):
                         name='Minimum Carbon Intensity',
                         mode='lines',
                         line=dict(width=2)
+                    ))
+                    
+                    # Add difference trace
+                    fig.add_trace(go.Scatter(
+                        x=[point[0] for point in diff_series],
+                        y=[point[1] for point in diff_series],
+                        name='Region/Minimum Difference',
+                        mode='lines',
+                        line=dict(width=2, dash='dash')
                     ))
                     
                     # Update layout
@@ -145,10 +169,12 @@ class CarbonDataHandler(BaseHTTPRequestHandler):
                         'end_time': pod_end_time.isoformat(),
                         'carbon_intensity_data': pod_carbon,
                         'min_forecast_data': min_forecast,
+                        'difference_series': diff_series,
+                        'cumulative_difference_series': cum_diff_series,
                         'plot_path': plot_filename
                     }
                     
-                    raw_data_filename = os.path.join(storage_path, f"raw_data_{pod_name}_{pod_region}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
+                    raw_data_filename = os.path.join(storage_path, f"raw_data_{pod_name}_{pod_region}.json")
                     with open(raw_data_filename, 'w') as f:
                         json.dump(raw_data, f, indent=2)
                     
