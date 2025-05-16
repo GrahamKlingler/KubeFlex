@@ -4,6 +4,6 @@ metadata:
 
 resources:
   - roles.yml
-  - storage.yml
+  # - storage.yml
   - controller.yml
   - metadata.yml

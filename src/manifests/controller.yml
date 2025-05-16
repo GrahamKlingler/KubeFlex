@@ -39,23 +39,6 @@ spec:
                 operator: In
                 values:
                 - desktop-control-plane
-      initContainers:
-      - name: db-upload-container
-        image: salamander1223/python-db-upload:latest
-        command: ["python", "upload_data.py", "test_data", "table"]
-        args:
-        - --host=db-service
-        - --port=5432
-        - --dbname=postgres
-        - --user=sfarokhi
-        - --password=wordpass
-        securityContext:
-          privileged: true
-        ports:
-        - name: postgres
-          containerPort: 5432
-          protocol: TCP
-
       containers:
       - name: python-migrate
         image: salamander1223/python-migrate:latest

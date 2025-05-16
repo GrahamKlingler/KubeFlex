@@ -1,6 +1,6 @@
-from utils.cadvisor import *
-from utils.db import *
-from utils.kubeapi import *
+from cadvisor import *
+from db import *
+from kubeapi import *
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.date import DateTrigger
@@ -15,6 +15,18 @@ import json
 import base64
 from io import BytesIO
 from threading import Thread
+
+"""
+curl -X POST http://0.0.0.0:8008/migrate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "namespace": "foo",
+    "pod": "test-pod",
+    "target_pod": "test-pod-migrated",
+    "target_node": "desktop-worker2",
+    "delete_original": true
+  }'
+"""
 
 def migrate_pod(namespace, pod, target_pod, target_node, delete_original):
     
@@ -170,12 +182,12 @@ def main():
     server_url = os.getenv('CARBON_SERVER_URL', 'http://metadata:8008')
     server_port = int(os.getenv('SERVER_PORT', 8008))
 
-    # Connect to cadvisor API
-    cadvisor_url = get_cadvisor_url()
-    session = create_cadvisor_session()
-    if not wait_for_cadvisor(session, cadvisor_url):
-        logger.error("cAdvisor not available after timeout")
-        return
+    # # Connect to cadvisor API
+    # cadvisor_url = get_cadvisor_url()
+    # session = create_cadvisor_session()
+    # if not wait_for_cadvisor(session, cadvisor_url):
+    #     logger.error("cAdvisor not available after timeout")
+    #     return
     
     # Connect to PostgreSQL database
     db_conn = connect_to_db(db_config)

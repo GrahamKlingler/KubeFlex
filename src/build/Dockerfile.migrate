@@ -8,6 +8,7 @@ RUN pip install -r migrate_req.txt
 
 # Copy script into the container
 COPY controller/migrate_process.py .
+COPY controller/utils/ .
 
 # Set the entrypoint to run the script
 CMD ["python3", "migrate_process.py"]

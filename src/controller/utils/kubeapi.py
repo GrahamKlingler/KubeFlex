@@ -3,13 +3,13 @@ import requests
 import json
 import time
 import psycopg2
-import os
 import sys
 import logging
 
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 from prettytable import PrettyTable
+from kubernetes.watch import Watch
 
 # logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -127,3 +127,66 @@ def list_nodes_with_labels_annotations() -> list:
     except ApiException as e:
         logger.error(f"Error listing nodes: {e}")
     return nodes_info
+
+def watch_pod_events(namespace: str, name: str = None, labels: dict = None, annotations: dict = None, timeout_seconds: int = None):
+    """
+    Watch for pod events in a specific namespace with optional filters for name, labels, and annotations.
+    
+    Args:
+        namespace (str): The namespace to watch
+        name (str, optional): Specific pod name to watch for
+        labels (dict, optional): Dictionary of labels to match
+        annotations (dict, optional): Dictionary of annotations to match
+        timeout_seconds (int, optional): How long to watch for events (None for indefinite)
+    
+    Returns:
+        None, but prints events as they occur
+    """
+    load_kubernetes_config()
+    core_v1 = client.CoreV1Api()
+    
+    # Create a watch object
+    w = Watch()
+    
+    # Start time for timeout calculation
+    start_time = datetime.now()
+    
+    try:
+        # Watch for pod events
+        for event in w.stream(core_v1.list_namespaced_pod,
+                            namespace=namespace,
+                            timeout_seconds=timeout_seconds):
+            pod = event['object']
+            event_type = event['type']
+            
+            # Skip if name doesn't match (if specified)
+            if name and pod.metadata.name != name:
+                continue
+                
+            # Skip if labels don't match (if specified)
+            if labels:
+                pod_labels = pod.metadata.labels or {}
+                if not all(pod_labels.get(k) == v for k, v in labels.items()):
+                    continue
+                    
+            # Skip if annotations don't match (if specified)
+            if annotations:
+                pod_annotations = pod.metadata.annotations or {}
+                if not all(pod_annotations.get(k) == v for k, v in annotations.items()):
+                    continue
+            
+            # Calculate time since start
+            elapsed = datetime.now() - start_time
+            
+            # Print event details
+            print(f"[{elapsed}] {event_type} Pod: {pod.metadata.name}")
+            print(f"  Status: {get_pod_status(pod)}")
+            if pod.metadata.labels:
+                print(f"  Labels: {pod.metadata.labels}")
+            if pod.metadata.annotations:
+                print(f"  Annotations: {pod.metadata.annotations}")
+            print("-" * 50)
+            
+    except Exception as e:
+        logger.error(f"Error watching pod events: {e}")
+        raise

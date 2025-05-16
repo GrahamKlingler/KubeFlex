@@ -2,3 +2,6 @@ kubernetes
 pydantic
 fastapi
 uvicorn
+requests
+psycopg2-binary
+prettytable

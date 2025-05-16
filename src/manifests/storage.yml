@@ -15,6 +15,18 @@ spec:
       labels:
         app: postgres
     spec:
+      initContainers:
+      - name: db-upload-container
+        image: salamander1223/python-db-upload:latest
+        command: ["python", "upload_data.py", "test_data", "table"]
+        args:
+        - --host=db-service
+        - --port=5432
+        - --dbname=postgres
+        - --user=sfarokhi
+        - --password=wordpass
+        securityContext:
+          privileged: true
       containers:
       - name: postgres-container
         image: bitnami/postgresql:latest
@@ -41,11 +53,10 @@ metadata:
   name: db-service
   namespace: monitor
 spec:
-  type: NodePort
+  type: LoadBalancer
   selector:
     app: postgres
   ports:
   - protocol: TCP
     port: 5432
     targetPort: 5432
-    nodePort: 32345

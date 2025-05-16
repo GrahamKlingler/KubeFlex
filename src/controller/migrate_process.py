@@ -19,6 +19,19 @@ import uvicorn
 import logging
 
 from kubernetes import client, config
+from kubeapi import *
+import threading
+import queue
+from datetime import datetime, timedelta
+import requests
+import json
+import psycopg2
+import sys
+import logging
+
+from kubernetes.client.rest import ApiException
+from prettytable import PrettyTable
+from kubernetes.watch import Watch
 
 # Set up logging
 logging.basicConfig(
@@ -233,6 +246,17 @@ def wait_for_pod_running(api: client.CoreV1Api, namespace: str, pod_name: str, t
     logger.error(f"Timeout waiting for pod {pod_name} to start")
     return False
 
+def watch_pod_events_thread(namespace: str, pod_name: str, event_queue: queue.Queue):
+    """Helper function to run watch_pod_events in a separate thread"""
+    try:
+        watch_pod_events(
+            namespace=namespace,
+            name=pod_name,
+            timeout_seconds=300  # 5 minutes timeout
+        )
+    except Exception as e:
+        event_queue.put(f"Error watching pod {pod_name}: {str(e)}")
+
 def migrate_pod(
     namespace: str,
     pod_name: str, 
@@ -275,8 +299,35 @@ def migrate_pod(
     # Create clone on target node
     new_pod_name = create_pod_clone_for_node(api, namespace, pod_name, target_node, target_pod)
     
+    # Set up event watching for both pods
+    event_queue = queue.Queue()
+    original_watch_thread = threading.Thread(
+        target=watch_pod_events_thread,
+        args=(namespace, pod_name, event_queue)
+    )
+    new_watch_thread = threading.Thread(
+        target=watch_pod_events_thread,
+        args=(namespace, new_pod_name, event_queue)
+    )
+    
+    # Start watching both pods
+    logger.info(f"Starting to watch events for pods {pod_name} and {new_pod_name}")
+    original_watch_thread.start()
+    new_watch_thread.start()
+    
     # Wait for the new pod to be running
-    if wait_for_pod_running(api, namespace, new_pod_name):
+    migration_success = wait_for_pod_running(api, namespace, new_pod_name)
+    
+    # Wait for watch threads to complete
+    original_watch_thread.join()
+    new_watch_thread.join()
+    
+    # Check for any errors in the event queue
+    while not event_queue.empty():
+        error_msg = event_queue.get()
+        logger.error(error_msg)
+    
+    if migration_success:
         logger.info(f"Successfully migrated pod to {new_pod_name} on node {target_node}")
         
         # Delete original pod if requested
