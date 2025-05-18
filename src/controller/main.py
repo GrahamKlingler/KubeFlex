@@ -17,21 +17,22 @@ from io import BytesIO
 from threading import Thread
 
 """
-curl -X POST http://0.0.0.0:8008/migrate \
+curl -X POST http://python-migrate-service:8000/migrate \
   -H "Content-Type: application/json" \
   -d '{
     "namespace": "foo",
     "pod": "test-pod",
     "target_pod": "test-pod-migrated",
     "target_node": "desktop-worker2",
-    "delete_original": true
+    "delete_original": true,
+    "debug": true
   }'
 """
 
-def migrate_pod(namespace, pod, target_pod, target_node, delete_original):
+def migrate_pod(namespace, pod, target_pod, target_node, delete_original, debug):
     
     # Migrate the pod to the new node with the api
-    url = "http://0.0.0.0:8008/migrate"
+    url = "http://python-migrate-service:8000/migrate"
     headers = {"Content-Type": "application/json"}
     json_body = {
         "namespace": namespace,
@@ -39,6 +40,7 @@ def migrate_pod(namespace, pod, target_pod, target_node, delete_original):
         "target_pod": target_pod,
         "target_node": target_node,
         "delete_original": delete_original,
+        "debug": debug
     }
 
     logger.info("Migrating test pod to the new node...")
@@ -75,7 +77,8 @@ def check_and_migrate_pods(namespace, region, db_data, nodes_info):
                 pod['name'],
                 target_pod,
                 target_node,
-                pod.get('delete_original', True)
+                pod.get('delete_original', True),
+                pod.get('debug', False)
             )
 
 def schedule_migration_jobs(scheduler, breakpoints, db_data, nodes_info, pod_selector):

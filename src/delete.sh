@@ -1,9 +1,25 @@
 #!/bin/bash
+# Parse command line arguments
+for arg in "$@"; do
+    case $arg in
+        --all)
+            APPLY_STORAGE=true
+            shift
+            ;;
+    esac
+done
+
 kubectl delete configmap pod-selector-config -n monitor
 kubectl delete -k manifests/
-kubectl delete -f testpod.yml
+# kubectl delete -f testpod.yml
+
+# Apply storage manifest if --all flag is set
+if [ "$APPLY_STORAGE" = true ]; then
+    echo "Deleting storage manifest..."
+    kubectl delete -f manifests/storage.yml
+fi
 
 kubectl label node desktop-worker2 REGION-
 kubectl label node desktop-worker REGION-
 
-kubectl delete namespace monitor
+# kubectl delete namespace monitor

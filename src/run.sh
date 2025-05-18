@@ -2,11 +2,22 @@
 
 IFS=',' read -ra PAIRS <<< "$1"
 SELECTOR=""
+APPLY_STORAGE=false
+
+# Parse command line arguments
+for arg in "$@"; do
+    case $arg in
+        --all)
+            APPLY_STORAGE=true
+            shift
+            ;;
+    esac
+done
 
 # If $SELECTOR is not set (empty or null), assign a default value
 if [ $# -eq 0 ]; then
-  SELECTOR="io.kubernetes.pod.namespace=default"
-  echo "SELECTOR not set. Assigning default value: namespace=default"
+  SELECTOR="io.kubernetes.pod.namespace=foo"
+  echo "SELECTOR not set. Assigning default value: namespace=foo"
 else
   for PAIR in "${PAIRS[@]}"; do
         if [ -n "$SELECTOR" ]; then
@@ -25,7 +36,7 @@ else
 fi
 
 # Create the namespace
-kubectl create namespace monitor
+# kubectl create namespace monitor
 
 kubectl label node desktop-worker REGION=TEN
 kubectl label node desktop-worker2 REGION=NE
@@ -35,4 +46,10 @@ kubectl create configmap pod-selector-config -n monitor --from-literal=POD_SELEC
 
 # Apply manifests
 kubectl apply -k manifests/ --validate=false
+
+# Apply storage manifest if --all flag is set
+if [ "$APPLY_STORAGE" = true ]; then
+    echo "Applying storage manifest..."
+    kubectl apply -f manifests/storage.yml --validate=false
+fi
 
