@@ -49,9 +49,11 @@ spec:
       privileged: true  # Required for CRIU operations
       capabilities:
         add:
-        - SYS_ADMIN  # Required for checkpoint/restore
-        - NET_ADMIN  # Required for network operations
-        - SYS_PTRACE # Required for process access
+        # - SYS_ADMIN  # Required for checkpoint/restore
+        # - NET_ADMIN  # Required for network operations
+        # - SYS_PTRACE # Required for process access
+        # - SYS_RESOURCE # Required for resource management
+        - ALL
     resources:
       requests:
         memory: "128Mi"

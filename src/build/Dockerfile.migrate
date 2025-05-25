@@ -8,6 +8,8 @@ RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
     criu \
+    procps \
+    htop \
     apt-transport-https \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*

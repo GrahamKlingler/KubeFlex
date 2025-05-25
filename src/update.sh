@@ -1,5 +1,18 @@
 #!/bin/bash
 
+# # Build and push CRIU container
+# docker build -t criu-container:latest -f build/Dockerfile.criu .
+# docker tag criu-container:latest salamander1223/criu-container:latest
+# docker push salamander1223/criu-container:latest
+
+# docker build -t criu-coordinator-server:latest -f build/Dockerfile.migrate-server .
+# docker tag criu-coordinator-server:latest salamander1223/criu-coordinator-server:latest
+# docker push salamander1223/criu-coordinator-server:latest
+
+# docker build -t criu-coordinator-client:latest -f build/Dockerfile.migrate-client .
+# docker tag criu-coordinator-client:latest salamander1223/criu-coordinator-client:latest
+# docker push salamander1223/criu-coordinator-client:latest
+
 # Build and push migration controller
 docker build -t python-migrate:latest -f build/Dockerfile.migrate .
 docker tag python-migrate:latest salamander1223/python-migrate:latest

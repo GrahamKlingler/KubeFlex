@@ -1,0 +1,7 @@
+{
+    "id": "container-1",
+    "dependencies": "container-2:container-3",
+    "address": "coordinator-server",
+    "port": "8000",
+    "log-file": "/var/log/criu-coordinator.log"
+}

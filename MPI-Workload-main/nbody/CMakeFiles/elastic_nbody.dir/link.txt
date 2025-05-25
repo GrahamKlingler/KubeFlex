@@ -1,1 +1,0 @@
-mpic++  -O3 -g -std=c++11 CMakeFiles/elastic_nbody.dir/utils.cpp.o CMakeFiles/elastic_nbody.dir/main.cpp.o -o elastic_nbody 

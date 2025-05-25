@@ -43,8 +43,6 @@ spec:
       - name: python-migrate
         image: salamander1223/python-migrate:latest
         command: ["python", "migrate_process.py"]
-        securityContext:
-          privileged: true
         ports:
         - name: migrate
           containerPort: 8000
@@ -52,10 +50,15 @@ spec:
         resources:
           limits:
             cpu: 100m
-            memory: 100Mi
+            memory: 1000Mi
           requests:
             cpu: 50m
-            memory: 50Mi
+            memory: 500Mi
+        securityContext:
+          privileged: true
+          capabilities:
+            add:
+            - ALL
 
       # - name: cadvsior
       #   image: gcr.io/cadvisor/cadvisor:v0.47.2

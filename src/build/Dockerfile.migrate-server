@@ -1,0 +1,42 @@
+FROM debian:12-slim
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    curl \
+    git \
+    pkg-config \
+    libssl-dev \
+    protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Install CRIU
+RUN echo "deb http://deb.debian.org/debian bullseye-backports main" > /etc/apt/sources.list.d/bullseye-backports.list && \
+    apt-get update && apt-get install -y -t bullseye-backports \
+    criu \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy the CRIU coordinator code and build files
+COPY criu-coordinator /app/criu-coordinator
+COPY build/criu-coordinator.json /etc/criu/
+
+WORKDIR /app/criu-coordinator
+
+# Build the coordinator
+RUN cargo build --release && \
+    cp target/release/criu-coordinator /usr/local/bin/
+
+# Create necessary directories
+RUN mkdir -p /tmp/server-images
+
+# Expose the coordinator port
+EXPOSE 8000
+
+# Run the coordinator server
+CMD ["criu-coordinator", "server", "--address", "0.0.0.0", "--port", "8000"]

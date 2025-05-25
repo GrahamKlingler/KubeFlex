@@ -6,6 +6,19 @@ This script migrates pods between nodes using CRIU to freeze and restore
 the exact state of containers, preserving all process states, memory, and CPU state.
 """
 
+"""
+curl -X POST http://python-migrate-service:8000/migrate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "namespace": "foo",
+    "pod": "test-pod",
+    "target_pod": "test-pod-migrated",
+    "target_node": "desktop-worker2",
+    "delete_original": true,
+    "debug": true
+  }'
+"""
+
 import argparse
 import sys
 import time
@@ -17,17 +30,15 @@ import tempfile
 import shutil
 import tarfile
 import base64
+import logging
 
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 import uvicorn
-import logging
 
 from kubernetes import client, config
 from kubeapi import *
 from datetime import datetime, timedelta
-import requests
-import json
 import psycopg2
 import sys
 import logging
@@ -148,6 +159,9 @@ def ensure_criu_installed(api: client.CoreV1Api, namespace: str, pod_name: str, 
 def get_main_process_id(api: client.CoreV1Api, namespace: str, pod_name: str, container_name: str) -> str:
     """Get the main process ID of the container."""
     try:
+        # Add a small delay to let transient processes settle
+        time.sleep(2)
+        
         # First try to get the main process directly using pgrep
         pgrep_cmd = [
             "kubectl", "exec", pod_name,
@@ -159,9 +173,33 @@ def get_main_process_id(api: client.CoreV1Api, namespace: str, pod_name: str, co
         try:
             pgrep_output = subprocess.run(pgrep_cmd, check=True, capture_output=True, text=True)
             if pgrep_output.stdout.strip():
-                pid = pgrep_output.stdout.strip()
-                logger.info(f"[PROCESS] Found main process with PID: {pid} using pgrep")
-                return pid
+                # Get all matching PIDs
+                pids = pgrep_output.stdout.strip().split("\n")
+                logger.info(f"[PROCESS] Found {len(pids)} matching PIDs")
+                
+                # Verify each PID is still running and is the main process
+                for pid in pids:
+                    try:
+                        # Check if process is still running and is the main process
+                        verify_cmd = [
+                            "kubectl", "exec", pod_name,
+                            "-n", namespace,
+                            "-c", container_name,
+                            "--", "bash", "-c",
+                            f"if [ -e /proc/{pid}/stat ] && [ $(cat /proc/{pid}/stat | cut -d' ' -f4) = 1 ]; then echo 'valid'; fi"
+                        ]
+                        verify_output = subprocess.run(verify_cmd, check=True, capture_output=True, text=True)
+                        
+                        if verify_output.stdout.strip() == "valid":
+                            logger.info(f"[PROCESS] Found stable main process with PID: {pid}")
+                            return pid
+                    except subprocess.CalledProcessError:
+                        continue
+                
+                # If no valid PID found, fall back to PID 1
+                logger.info("[PROCESS] No valid main process found, using PID 1")
+                return "1"
+                
         except subprocess.CalledProcessError:
             logger.info("[PROCESS] pgrep failed, falling back to /proc method")
         
@@ -186,27 +224,18 @@ def get_main_process_id(api: client.CoreV1Api, namespace: str, pod_name: str, co
                     # Process this batch
                     for pid in pids:
                         try:
-                            # Check if process is still running
-                            stat_cmd = [
+                            # Check if process is still running and is the main process
+                            verify_cmd = [
                                 "kubectl", "exec", pod_name,
                                 "-n", namespace,
                                 "-c", container_name,
-                                "--", "test", "-e", f"/proc/{pid}/stat"
+                                "--", "bash", "-c",
+                                f"if [ -e /proc/{pid}/stat ] && [ $(cat /proc/{pid}/stat | cut -d' ' -f4) = 1 ]; then echo 'valid'; fi"
                             ]
-                            subprocess.run(stat_cmd, check=True, capture_output=True)
+                            verify_output = subprocess.run(verify_cmd, check=True, capture_output=True, text=True)
                             
-                            # Read cmdline
-                            cmdline_cmd = [
-                                "kubectl", "exec", pod_name,
-                                "-n", namespace,
-                                "-c", container_name,
-                                "--", "cat", f"/proc/{pid}/cmdline"
-                            ]
-                            cmdline_output = subprocess.run(cmdline_cmd, check=True, capture_output=True, text=True)
-                            cmdline = cmdline_output.stdout
-                            
-                            if "counter=" in cmdline or "bash" in cmdline:
-                                logger.info(f"[PROCESS] Found main process with PID: {pid}")
+                            if verify_output.stdout.strip() == "valid":
+                                logger.info(f"[PROCESS] Found stable main process with PID: {pid}")
                                 return pid
                         except subprocess.CalledProcessError:
                             continue
@@ -216,25 +245,17 @@ def get_main_process_id(api: client.CoreV1Api, namespace: str, pod_name: str, co
         # Process any remaining PIDs
         for pid in pids:
             try:
-                stat_cmd = [
+                verify_cmd = [
                     "kubectl", "exec", pod_name,
                     "-n", namespace,
                     "-c", container_name,
-                    "--", "test", "-e", f"/proc/{pid}/stat"
+                    "--", "bash", "-c",
+                    f"if [ -e /proc/{pid}/stat ] && [ $(cat /proc/{pid}/stat | cut -d' ' -f4) = 1 ]; then echo 'valid'; fi"
                 ]
-                subprocess.run(stat_cmd, check=True, capture_output=True)
+                verify_output = subprocess.run(verify_cmd, check=True, capture_output=True, text=True)
                 
-                cmdline_cmd = [
-                    "kubectl", "exec", pod_name,
-                    "-n", namespace,
-                    "-c", container_name,
-                    "--", "cat", f"/proc/{pid}/cmdline"
-                ]
-                cmdline_output = subprocess.run(cmdline_cmd, check=True, capture_output=True, text=True)
-                cmdline = cmdline_output.stdout
-                
-                if "counter=" in cmdline or "bash" in cmdline:
-                    logger.info(f"[PROCESS] Found main process with PID: {pid}")
+                if verify_output.stdout.strip() == "valid":
+                    logger.info(f"[PROCESS] Found stable main process with PID: {pid}")
                     return pid
             except subprocess.CalledProcessError:
                 continue
@@ -253,45 +274,19 @@ def get_main_process_id(api: client.CoreV1Api, namespace: str, pod_name: str, co
         return "1"
 
 def create_checkpoint(api: client.CoreV1Api, namespace: str, pod_name: str) -> str:
-    """Create a CRIU checkpoint of the pod and return the checkpoint path."""
-    checkpoint_dir = "/tmp/checkpoint"
-    checkpoint_archive = f"{checkpoint_dir}.tar.gz"
+    """Create a CRIU checkpoint of the pod."""
+    checkpoint_archive = f"/tmp/checkpoint-{pod_name}.tar.gz"
     
     try:
         logger.info(f"[CHECKPOINT] Creating checkpoint for pod {pod_name}")
         
-        # Clean up any existing checkpoint files
+        # Clean up any existing checkpoint archive
         try:
             if os.path.exists(checkpoint_archive):
                 os.remove(checkpoint_archive)
                 logger.info(f"[CHECKPOINT] Removed existing checkpoint archive: {checkpoint_archive}")
         except Exception as e:
             logger.warning(f"[CHECKPOINT] Could not remove existing checkpoint archive: {e}")
-        
-        # Create fresh checkpoint directory
-        try:
-            if os.path.exists(checkpoint_dir):
-                # Try to unmount if it's a mount point
-                try:
-                    subprocess.run(["umount", checkpoint_dir], check=False)
-                except Exception:
-                    pass
-                # Remove directory contents but not the directory itself
-                for item in os.listdir(checkpoint_dir):
-                    item_path = os.path.join(checkpoint_dir, item)
-                    try:
-                        if os.path.isfile(item_path):
-                            os.unlink(item_path)
-                        elif os.path.isdir(item_path):
-                            shutil.rmtree(item_path)
-                    except Exception as e:
-                        logger.warning(f"[CHECKPOINT] Could not remove {item_path}: {e}")
-            else:
-                os.makedirs(checkpoint_dir)
-            logger.info(f"[CHECKPOINT] Prepared checkpoint directory: {checkpoint_dir}")
-        except Exception as e:
-            logger.error(f"[CHECKPOINT] Failed to prepare checkpoint directory: {e}")
-            raise
         
         # Get pod information
         pod = api.read_namespaced_pod(name=pod_name, namespace=namespace)
@@ -305,41 +300,71 @@ def create_checkpoint(api: client.CoreV1Api, namespace: str, pod_name: str) -> s
             if not ensure_criu_installed(api, namespace, pod_name, container_name):
                 raise Exception(f"Failed to ensure CRIU installation in container {container_name}")
             
-            logger.info(f"[CHECKPOINT] Using checkpoint directory: {checkpoint_dir}")
-            
             # Get the main process ID
             main_pid = get_main_process_id(api, namespace, pod_name, container_name)
             logger.info(f"[CHECKPOINT] Using process ID: {main_pid}")
             
-            # Execute CRIU dump command with additional options
+            # Create checkpoint directory in container
+            mkdir_cmd = [
+                "kubectl", "exec", pod_name,
+                "-n", namespace,
+                "-c", container_name,
+                "--", "mkdir", "-p", "/tmp/checkpoint"
+            ]
+            subprocess.run(mkdir_cmd, check=True)
+            
+            # Execute CRIU dump command with modified flags
             criu_cmd = [
                 "kubectl", "exec", pod_name,
                 "-n", namespace,
                 "-c", container_name,
                 "--", "criu", "dump",
-                "-D", checkpoint_dir,
+                "-D", "/tmp/checkpoint",
                 "-t", main_pid,
-                "--leave-running",  # Keep the process running after checkpoint
-                "--shell-job",  # Required for shell-based processes
-                "--tcp-established",  # Handle established TCP connections
-                "--ext-mount-map", "/proc",  # Map /proc
-                "--ext-mount-map", "/sys",  # Map /sys
-                "--ext-mount-map", "/dev",  # Map /dev
-                "--ext-mount-map", "/var/run",  # Map /var/run
-                "--ext-mount-map", "/sys/fs/cgroup",  # Map cgroup
-                "--log-file", "/tmp/criu.log",  # Log file for debugging
-                "--log-level", "4"  # Verbose logging
+                "--leave-running",
+                "--shell-job",
+                "--tcp-established",
+                "--manage-cgroups",
+                "--weak-sysctls",
+                "--force-irmap",
+                "--link-remap",
+                "--ext-unix-sk",
+                "--file-locks",
+                "--ghost-limit", "1M"
             ]
             
             try:
                 subprocess.run(criu_cmd, check=True)
                 logger.info(f"[CHECKPOINT] Successfully created checkpoint for container {container_name}")
                 
-                # Create a tar archive of the checkpoint
-                with tarfile.open(checkpoint_archive, "w:gz") as tar:
-                    tar.add(checkpoint_dir, arcname=os.path.basename(checkpoint_dir))
+                # Create a tar archive of the checkpoint from within the container
+                tar_cmd = [
+                    "kubectl", "exec", pod_name,
+                    "-n", namespace,
+                    "-c", container_name,
+                    "--", "tar", "czf", "/tmp/checkpoint.tar.gz", "-C", "/tmp", "checkpoint"
+                ]
+                subprocess.run(tar_cmd, check=True)
+                logger.info(f"[CHECKPOINT] Created checkpoint archive in container")
                 
-                logger.info(f"[CHECKPOINT] Created checkpoint archive: {checkpoint_archive}")
+                # Copy the archive from the container to the host
+                copy_cmd = [
+                    "kubectl", "cp",
+                    f"{namespace}/{pod_name}:/tmp/checkpoint.tar.gz",
+                    checkpoint_archive
+                ]
+                subprocess.run(copy_cmd, check=True)
+                logger.info(f"[CHECKPOINT] Copied checkpoint archive to host")
+                
+                # Clean up the archive in the container
+                cleanup_cmd = [
+                    "kubectl", "exec", pod_name,
+                    "-n", namespace,
+                    "-c", container_name,
+                    "--", "rm", "-f", "/tmp/checkpoint.tar.gz"
+                ]
+                subprocess.run(cleanup_cmd, check=True)
+                
                 return checkpoint_archive
                 
             except subprocess.CalledProcessError as e:
@@ -367,37 +392,11 @@ def create_checkpoint(api: client.CoreV1Api, namespace: str, pod_name: str) -> s
         except Exception as cleanup_error:
             logger.warning(f"[CHECKPOINT] Could not remove checkpoint archive during cleanup: {cleanup_error}")
         raise
-    finally:
-        # Always try to clean up the checkpoint directory
-        try:
-            if os.path.exists(checkpoint_dir):
-                # Try to unmount if it's a mount point
-                try:
-                    subprocess.run(["umount", checkpoint_dir], check=False)
-                except Exception:
-                    pass
-                # Remove directory contents but not the directory itself
-                for item in os.listdir(checkpoint_dir):
-                    item_path = os.path.join(checkpoint_dir, item)
-                    try:
-                        if os.path.isfile(item_path):
-                            os.unlink(item_path)
-                        elif os.path.isdir(item_path):
-                            shutil.rmtree(item_path)
-                    except Exception as e:
-                        logger.warning(f"[CHECKPOINT] Could not remove {item_path} during cleanup: {e}")
-        except Exception as e:
-            logger.warning(f"[CHECKPOINT] Error during final cleanup: {e}")
 
 def restore_checkpoint(api: client.CoreV1Api, namespace: str, pod_name: str, checkpoint_path: str):
     """Restore a pod from a CRIU checkpoint."""
     try:
         logger.info(f"[RESTORE] Restoring pod {pod_name} from checkpoint")
-        
-        # Extract checkpoint archive
-        checkpoint_dir = tempfile.mkdtemp(prefix=f"restore-{pod_name}-")
-        with tarfile.open(checkpoint_path, "r:gz") as tar:
-            tar.extractall(path=checkpoint_dir)
         
         # Get pod information
         pod = api.read_namespaced_pod(name=pod_name, namespace=namespace)
@@ -407,35 +406,54 @@ def restore_checkpoint(api: client.CoreV1Api, namespace: str, pod_name: str, che
             container_name = container.name
             logger.info(f"[RESTORE] Restoring container {container_name}")
             
-            container_checkpoint_dir = os.path.join(checkpoint_dir, container_name)
-            
-            # Copy checkpoint files to container
+            # Copy checkpoint archive to container
             copy_cmd = [
                 "kubectl", "cp",
-                container_checkpoint_dir,
-                f"{namespace}/{pod_name}:/tmp/checkpoint"
+                checkpoint_path,
+                f"{namespace}/{pod_name}:/tmp/checkpoint.tar.gz"
             ]
             subprocess.run(copy_cmd, check=True)
             
-            # Execute CRIU restore command
+            # Extract checkpoint in container
+            extract_cmd = [
+                "kubectl", "exec", pod_name,
+                "-n", namespace,
+                "-c", container_name,
+                "--", "bash", "-c",
+                "rm -rf /tmp/checkpoint && mkdir -p /tmp/checkpoint && tar xzf /tmp/checkpoint.tar.gz -C /tmp && rm -f /tmp/checkpoint.tar.gz"
+            ]
+            subprocess.run(extract_cmd, check=True)
+            
+            # Execute CRIU restore command with modified flags
             criu_cmd = [
                 "kubectl", "exec", pod_name,
                 "-n", namespace,
                 "-c", container_name,
                 "--", "criu", "restore",
                 "-D", "/tmp/checkpoint",
-                "--restore-detached"  # Restore in detached mode
+                "--restore-detached",
+                "--no-pid",
+                "--no-ipc",
+                "--no-uts",
+                "--no-net",
+                "--no-time",
+                "--no-user",
+                "--no-mnt",
+                "--no-cgroup",
+                "--no-kerndat",
+                "--no-fd",
+                "--no-file-locks",
+                "--no-mem-tracking"
             ]
             
             try:
                 subprocess.run(criu_cmd, check=True)
                 logger.info(f"[RESTORE] Successfully restored container {container_name}")
+                
             except subprocess.CalledProcessError as e:
                 logger.error(f"[RESTORE] Failed to restore container {container_name}: {e}")
                 raise
         
-        # Cleanup
-        shutil.rmtree(checkpoint_dir)
         logger.info(f"[RESTORE] Successfully restored pod {pod_name}")
         
     except Exception as e:
@@ -633,13 +651,6 @@ def migrate_pod(
 ):
     """
     Migrate a pod to another node by creating a clone with the same configuration.
-    
-    Args:
-        namespace: Kubernetes namespace
-        pod_name: Name of the pod to migrate
-        target_node: Target node for the new pod
-        delete_original: Whether to delete the original pod if migration succeeds
-        debug: Enable debug logging
     """
     if debug:
         logger.setLevel(logging.DEBUG)
@@ -665,34 +676,39 @@ def migrate_pod(
         logger.error(f"[MIGRATION] Pod {pod_name} not found: {e}")
         return None
     
-    # Create clone on target node
-    logger.info("[MIGRATION] Creating pod clone on target node")
-    new_pod_name = create_pod_clone_for_node(api, namespace, pod_name, target_node, target_pod)
-    
-    # Wait for the new pod to be running
-    logger.info("[MIGRATION] Waiting for new pod to reach Running state")
-    migration_success = wait_for_pod_running(api, namespace, new_pod_name)
-    
-    if migration_success:
-        logger.info(f"[MIGRATION] Successfully migrated pod to {new_pod_name} on node {target_node}")
+    try:
+        # Create clone on target node
+        logger.info("[MIGRATION] Creating pod clone on target node")
+        new_pod_name = create_pod_clone_for_node(api, namespace, pod_name, target_node, target_pod)
         
-        # Delete original pod if requested
-        if delete_original:
-            try:
-                logger.info(f"[MIGRATION] Deleting original pod {pod_name}")
-                api.delete_namespaced_pod(
-                    name=pod_name,
-                    namespace=namespace
-                )
-                logger.info(f"[MIGRATION] Original pod {pod_name} deleted")
-            except client.rest.ApiException as e:
-                logger.error(f"[MIGRATION] Error deleting original pod: {e}")
+        # Wait for the new pod to be running
+        logger.info("[MIGRATION] Waiting for new pod to reach Running state")
+        migration_success = wait_for_pod_running(api, namespace, new_pod_name)
         
-        return new_pod_name
-    else:
-        logger.error("[MIGRATION] Migration failed - new pod did not reach Running state")
+        if migration_success:
+            logger.info(f"[MIGRATION] Successfully migrated pod to {new_pod_name} on node {target_node}")
+            
+            # Delete original pod if requested
+            if delete_original:
+                try:
+                    logger.info(f"[MIGRATION] Deleting original pod {pod_name}")
+                    api.delete_namespaced_pod(
+                        name=pod_name,
+                        namespace=namespace
+                    )
+                    logger.info(f"[MIGRATION] Original pod {pod_name} deleted")
+                except client.rest.ApiException as e:
+                    logger.error(f"[MIGRATION] Error deleting original pod: {e}")
+            
+            return new_pod_name
+        else:
+            logger.error("[MIGRATION] Migration failed - new pod did not reach Running state")
+            return None
+            
+    except Exception as e:
+        logger.error(f"[MIGRATION] Error during migration: {e}")
         return None
-    
+
 # Define input model
 class MigrateRequest(BaseModel):
     namespace: str

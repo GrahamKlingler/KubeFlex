@@ -6,5 +6,6 @@ resources:
   - roles.yml
   # - storage.yml
   - controller.yml
-  - metadata.yml
+  # - metadata.yml
   - testpod.yml
+  # - criu-coordinator-server.yml
