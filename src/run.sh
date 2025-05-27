@@ -55,8 +55,8 @@ fi
 # Create the namespace
 # kubectl create namespace monitor
 
-kubectl label node desktop-worker REGION=TEN
-kubectl label node desktop-worker2 REGION=NE
+kubectl label node kind-worker REGION=TEN
+kubectl label node kind-worker2 REGION=NE
 
 # Generate the ConfigMap based on the selector
 kubectl create configmap pod-selector-config -n monitor --from-literal=POD_SELECTOR="$SELECTOR" --dry-run=client -o yaml | kubectl apply -f -

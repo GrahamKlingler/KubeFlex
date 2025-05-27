@@ -35,3 +35,7 @@ chmod +x kubectl
 sudo mv kubectl /usr/local/bin/kubectl
 
 kubectl version --client
+
+# Also install kubectl k alias and auto complete
+echo 'source <(kubectl completion bash)' >> ~/.bashrc
+alias k=kubectl

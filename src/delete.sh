@@ -23,8 +23,8 @@ if [ "$APPLY_STORAGE" = true ]; then
     kubectl delete -f manifests/storage.yml
 fi
 
-kubectl label node desktop-worker2 REGION-
-kubectl label node desktop-worker REGION-
+kubectl label node kind-worker2 REGION-
+kubectl label node kind-worker REGION-
 
 # Delete kind cluster if --cluster flag is set
 if [ "$APPLY_CLUSTER" = true ]; then

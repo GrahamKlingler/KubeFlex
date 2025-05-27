@@ -23,7 +23,7 @@ curl -X POST http://python-migrate-service:8000/migrate \
     "namespace": "foo",
     "pod": "test-pod",
     "target_pod": "test-pod-migrated",
-    "target_node": "desktop-worker2",
+    "target_node": "kind-worker2",
     "delete_original": true,
     "debug": true
   }'
@@ -230,7 +230,7 @@ def main():
     update_forecast_and_schedule()
 
     # check_and_migrate_pods("foo", "NE", db_conn, nodes_info)
-    # migrate_pod("foo", "test-pod", "test-pod-migrated", "desktop-worker2", False)
+    # migrate_pod("foo", "test-pod", "test-pod-migrated", "kind-worker2", False)
 
     # pods = list_resources("foo")
     # for pod in pods:

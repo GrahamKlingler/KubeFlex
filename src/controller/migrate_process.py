@@ -13,7 +13,7 @@ curl -X POST http://python-migrate-service:8000/migrate \
     "namespace": "foo",
     "pod": "test-pod",
     "target_pod": "test-pod-migrated",
-    "target_node": "desktop-worker2",
+    "target_node": "kind-worker2",
     "delete_original": true,
     "debug": true
   }'
