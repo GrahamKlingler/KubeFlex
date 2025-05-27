@@ -1,3 +1,7 @@
+#!/bin/bash
+
+# ssh debian@192.168.64.4
+
 sudo apt update
 sudo apt install -y ca-certificates curl gnupg lsb-release
 
@@ -25,3 +29,9 @@ chmod +x ./kind
 sudo mv ./kind /usr/local/bin/kind
 
 kind version
+
+curl -LO "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/arm64/kubectl"
+chmod +x kubectl
+sudo mv kubectl /usr/local/bin/kubectl
+
+kubectl version --client

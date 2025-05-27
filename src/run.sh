@@ -3,12 +3,23 @@
 IFS=',' read -ra PAIRS <<< "$1"
 SELECTOR=""
 APPLY_STORAGE=false
+APPLY_CLUSTER=false
+
+# Check if kind is installed
+if ! command -v kind &> /dev/null; then
+    echo "kind could not be found. Please install kind first."
+    exit 1
+fi
 
 # Parse command line arguments
 for arg in "$@"; do
     case $arg in
         --all)
             APPLY_STORAGE=true
+            shift
+            ;;
+        --cluster)
+            APPLY_CLUSTER=true
             shift
             ;;
     esac
@@ -33,6 +44,12 @@ else
             *) echo "Invalid key: $KEY. Must be namespace, name, or container"; exit 1 ;;
         esac
     done
+fi
+
+# Apply kind manifest if --cluster flag is set
+if [ "$APPLY_CLUSTER" = true ]; then
+    echo "Applying cluster manifest..."
+    kubectl apply -f manifests/cluster.yml --validate=false
 fi
 
 # Create the namespace
