@@ -49,7 +49,7 @@ fi
 # Apply kind manifest if --cluster flag is set
 if [ "$APPLY_CLUSTER" = true ]; then
     echo "Applying cluster manifest..."
-    kubectl apply -f manifests/cluster.yml --validate=false
+    kind create cluster --config manifests/cluster.yml
 fi
 
 # Create the namespace

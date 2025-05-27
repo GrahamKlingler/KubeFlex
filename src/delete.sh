@@ -6,6 +6,10 @@ for arg in "$@"; do
             APPLY_STORAGE=true
             shift
             ;;
+        --cluster)
+            APPLY_CLUSTER=true
+            shift
+            ;;
     esac
 done
 
@@ -21,5 +25,11 @@ fi
 
 kubectl label node desktop-worker2 REGION-
 kubectl label node desktop-worker REGION-
+
+# Delete kind cluster if --cluster flag is set
+if [ "$APPLY_CLUSTER" = true ]; then
+    echo "Deleting kind cluster..."
+    kind delete cluster
+fi
 
 # kubectl delete namespace monitor
