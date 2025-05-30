@@ -53,7 +53,8 @@ if [ "$APPLY_CLUSTER" = true ]; then
 fi
 
 # Create the namespace
-# kubectl create namespace monitor
+kubectl create namespace monitor
+kubectl create namespace foo
 
 kubectl label node kind-worker REGION=TEN
 kubectl label node kind-worker2 REGION=NE
@@ -61,12 +62,14 @@ kubectl label node kind-worker2 REGION=NE
 # Generate the ConfigMap based on the selector
 kubectl create configmap pod-selector-config -n monitor --from-literal=POD_SELECTOR="$SELECTOR" --dry-run=client -o yaml | kubectl apply -f -
 
-# Apply manifests
-kubectl apply -k manifests/ --validate=false
-
 # Apply storage manifest if --all flag is set
 if [ "$APPLY_STORAGE" = true ]; then
     echo "Applying storage manifest..."
     kubectl apply -f manifests/storage.yml --validate=false
 fi
 
+# Apply manifests
+kubectl apply -k manifests/ --validate=false
+
+# Set the default namespace
+kubectl config set-context --current --namespace=monitor

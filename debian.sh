@@ -39,3 +39,7 @@ kubectl version --client
 # Also install kubectl k alias and auto complete
 echo 'source <(kubectl completion bash)' >> ~/.bashrc
 alias k=kubectl
+
+echo 'export KUBECONFIG=~/.kube/config' >> ~/.bashrc
+chmod 666 ~/.kube/config
+source ~/.bashrc

@@ -310,13 +310,18 @@ def main():
     scheduler_thread.daemon = True
     scheduler_thread.start()
     
-    # Start the server in the main thread
+    # Keep the main thread alive and handle signals
     try:
-        time.sleep(100)
+        while True:
+            time.sleep(1)
     except KeyboardInterrupt:
         logger.info("Shutting down...")
         scheduler.shutdown()
         logger.info("Shutdown complete")
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+        scheduler.shutdown()
+        raise
 
 if __name__ == "__main__":
     main()

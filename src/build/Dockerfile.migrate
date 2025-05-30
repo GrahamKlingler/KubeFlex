@@ -10,14 +10,18 @@ RUN apt-get update && apt-get install -y \
     criu \
     procps \
     htop \
+    openssh-server \
+    sshpass \
     apt-transport-https \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Install kubectl
-RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
-    && chmod +x kubectl \
-    && mv kubectl /usr/local/bin/
+# Install kubectl for correct architecture
+RUN ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "arm64" ]; then ARCH="aarch64"; fi && \
+    curl -LO "https://dl.k8s.io/release/$(curl -s https://dl.k8s.io/release/stable.txt)/bin/linux/${ARCH}/kubectl" && \
+    chmod +x kubectl && \
+    mv kubectl /usr/local/bin/
 
 # Create necessary directories for Kubernetes, CRIU, and Docker
 RUN mkdir -p /root/.kube \

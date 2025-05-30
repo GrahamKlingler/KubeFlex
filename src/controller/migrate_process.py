@@ -4,19 +4,9 @@ Kubernetes Pod Migration Script with CRIU Checkpoint/Restore
 
 This script migrates pods between nodes using CRIU to freeze and restore
 the exact state of containers, preserving all process states, memory, and CPU state.
-"""
 
-"""
-curl -X POST http://python-migrate-service:8000/migrate \
-  -H "Content-Type: application/json" \
-  -d '{
-    "namespace": "foo",
-    "pod": "test-pod",
-    "target_pod": "test-pod-migrated",
-    "target_node": "kind-worker2",
-    "delete_original": true,
-    "debug": true
-  }'
+curl -X POST http://python-migrate-service.monitor.svc.cluster.local:8000/migrate -H "Content-Type: application/json" -d '{"namespace": "foo","pod": "test-pod","target_node": "kind-worker2","target_pod": "test-pod-migrated","delete_original": true,"debug": false}'
+
 """
 
 import argparse
@@ -125,10 +115,19 @@ def ensure_criu_installed(api: client.CoreV1Api, namespace: str, pod_name: str, 
             "kubectl", "exec", pod_name,
             "-n", namespace,
             "-c", container_name,
-            "--", "which", "criu"
+            "--", "bash", "-c", "which criu"
         ]
         
+        logger.info(f"CRIU CHECK CMD: {check_cmd}")
+
         try:
+            # Change to use a single string command after --
+            check_cmd = [
+                "kubectl", "exec", pod_name,
+                "-n", namespace,
+                "-c", container_name,
+                "--", "which criu"
+            ]
             subprocess.run(check_cmd, check=True, capture_output=True)
             logger.info(f"[CRIU] CRIU is already installed in container {container_name}")
             return True
