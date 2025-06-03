@@ -50,6 +50,11 @@ fi
 if [ "$APPLY_CLUSTER" = true ]; then
     echo "Applying cluster manifest..."
     kind create cluster --config manifests/cluster.yml
+    # Copy the kubeconfig to the current directory
+    cp ~/.kube/config kubeconfig
+    # Give it the right permissions so that the terminal can read it
+    chmod 644 kubeconfig
+    sudo chown $USER:$USER kubeconfig
 fi
 
 # Create the namespace

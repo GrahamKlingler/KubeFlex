@@ -19,21 +19,34 @@ RUN apt-get update && apt-get install -y \
 # Install kubectl for correct architecture
 RUN ARCH=$(dpkg --print-architecture) && \
     if [ "$ARCH" = "arm64" ]; then ARCH="aarch64"; fi && \
-    curl -LO "https://dl.k8s.io/release/$(curl -s https://dl.k8s.io/release/stable.txt)/bin/linux/${ARCH}/kubectl" && \
+    curl -LO "https://dl.k8s.io/release/stable.txt" && \
+    KUBE_VERSION=$(cat stable.txt) && \
+    curl -LO "https://dl.k8s.io/release/${KUBE_VERSION}/bin/linux/${ARCH}/kubectl" && \
     chmod +x kubectl && \
-    mv kubectl /usr/local/bin/
+    # Verify the binary is valid before moving it
+    if ! ./kubectl version --client > /dev/null 2>&1; then \
+        echo "Failed to verify kubectl binary" && exit 1; \
+    fi && \
+    mv kubectl /usr/local/bin/ && \
+    rm stable.txt && \
+    # Final verification
+    kubectl version --client
 
 # Create necessary directories for Kubernetes, CRIU, and Docker
 RUN mkdir -p /root/.kube \
     && mkdir -p /var/run/secrets/kubernetes.io/serviceaccount \
     && mkdir -p /tmp/checkpoint \
-    && mkdir -p /var/run
+    && mkdir -p /var/run \
+    && chmod 700 /root/.kube
 
 # Set environment variables
 ENV PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 ENV CRIU_PATH="/usr/sbin/criu"
 ENV KUBECONFIG="/root/.kube/config"
 ENV DOCKER_HOST="unix:///var/run/docker.sock"
+
+# Add a health check for kubectl
+RUN kubectl version --client
 
 # Install dependencies
 COPY build/migrate_req.txt .

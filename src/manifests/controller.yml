@@ -38,7 +38,7 @@ spec:
               - key: "kubernetes.io/hostname"
                 operator: In
                 values:
-                - desktop-control-plane
+                - kind-worker
       containers:
       - name: python-migrate
         image: salamander1223/python-migrate:latest
