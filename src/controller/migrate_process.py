@@ -27,6 +27,7 @@ from pydantic import BaseModel
 import uvicorn
 
 from kubernetes import client, config
+from kubernetes.stream import stream
 from kubeapi import *
 from datetime import datetime, timedelta
 import psycopg2
@@ -108,51 +109,65 @@ def get_pod_definition(api: client.CoreV1Api, namespace: str, pod_name: str) -> 
 def ensure_criu_installed(api: client.CoreV1Api, namespace: str, pod_name: str, container_name: str):
     """Ensure CRIU is installed in the target container."""
     try:
-        logger.info(f"[CRIU] Checking CRIU installation in container {container_name}")
+        logger.info(f"[CRIU] Starting CRIU installation check for container {container_name} in pod {pod_name}")
         
-        # Check if CRIU is installed
-        check_cmd = [
-            "kubectl", "exec", pod_name,
-            "-n", namespace,
-            "-c", container_name,
-            "--", "bash", "-c", "which criu"
-        ]
+        # Check architecture first
+        exec_command = ['uname', '-m']
+        resp = stream(api.connect_get_namespaced_pod_exec,
+                     pod_name,
+                     namespace,
+                     container=container_name,
+                     command=exec_command,
+                     stderr=True, stdin=False, stdout=True, tty=False)
+        architecture = resp.strip()
+        logger.info(f"[CRIU] Container architecture: {architecture}")
         
-        logger.info(f"CRIU CHECK CMD: {check_cmd}")
-
+        if architecture != "x86_64" and architecture != "aarch64":
+            logger.warning(f"[CRIU] Unsupported architecture: {architecture}")
+            return False
+            
+        # Check CRIU installation
+        exec_command = ['which', 'criu']
         try:
-            # Change to use a single string command after --
-            check_cmd = [
-                "kubectl", "exec", pod_name,
-                "-n", namespace,
-                "-c", container_name,
-                "--", "which criu"
-            ]
-            subprocess.run(check_cmd, check=True, capture_output=True)
+            resp = stream(api.connect_get_namespaced_pod_exec,
+                         pod_name,
+                         namespace,
+                         container=container_name,
+                         command=exec_command,
+                         stderr=True, stdin=False, stdout=True, tty=False)
             logger.info(f"[CRIU] CRIU is already installed in container {container_name}")
+            
+            # Run CRIU check to verify functionality
+            exec_command = ['criu', 'check', '--all']
+            resp = stream(api.connect_get_namespaced_pod_exec,
+                         pod_name,
+                         namespace,
+                         container=container_name,
+                         command=exec_command,
+                         stderr=True, stdin=False, stdout=True, tty=False)
+            logger.info(f"[CRIU] CRIU check output:\n{resp}")
+            
             return True
-        except subprocess.CalledProcessError:
-            logger.info(f"[CRIU] CRIU not found in container {container_name}")
+        except client.rest.ApiException as e:
+            logger.info(f"[CRIU] CRIU not found in container {container_name}, proceeding with installation")
             
             # Install CRIU in Debian container
-            install_cmd = [
-                "kubectl", "exec", pod_name,
-                "-n", namespace,
-                "-c", container_name,
-                "--", "bash", "-c",
-                "apt-get update && apt-get install -y criu && rm -rf /var/lib/apt/lists/*"
-            ]
-            
+            exec_command = ['bash', '-c', 'apt-get update && apt-get install -y criu && rm -rf /var/lib/apt/lists/*']
             try:
-                subprocess.run(install_cmd, check=True)
+                resp = stream(api.connect_get_namespaced_pod_exec,
+                            pod_name,
+                            namespace,
+                            container=container_name,
+                            command=exec_command,
+                            stderr=True, stdin=False, stdout=True, tty=False)
                 logger.info(f"[CRIU] Successfully installed CRIU in container {container_name}")
                 return True
-            except subprocess.CalledProcessError as e:
+            except client.rest.ApiException as e:
                 logger.error(f"[CRIU] Failed to install CRIU: {e}")
                 return False
                 
     except Exception as e:
-        logger.error(f"[CRIU] Error ensuring CRIU installation: {e}")
+        logger.error(f"[CRIU] Unexpected error during CRIU installation check: {e}")
         return False
 
 def get_main_process_id(api: client.CoreV1Api, namespace: str, pod_name: str, container_name: str) -> str:
@@ -277,109 +292,123 @@ def create_checkpoint(api: client.CoreV1Api, namespace: str, pod_name: str) -> s
     checkpoint_archive = f"/tmp/checkpoint-{pod_name}.tar.gz"
     
     try:
-        logger.info(f"[CHECKPOINT] Creating checkpoint for pod {pod_name}")
+        logger.info(f"[CHECKPOINT] Starting checkpoint creation process for pod {pod_name}")
+        logger.info(f"[CHECKPOINT] Checkpoint archive will be saved to: {checkpoint_archive}")
         
         # Clean up any existing checkpoint archive
         try:
             if os.path.exists(checkpoint_archive):
+                logger.info(f"[CHECKPOINT] Found existing checkpoint archive, removing: {checkpoint_archive}")
                 os.remove(checkpoint_archive)
-                logger.info(f"[CHECKPOINT] Removed existing checkpoint archive: {checkpoint_archive}")
+                logger.info(f"[CHECKPOINT] Successfully removed existing checkpoint archive")
         except Exception as e:
             logger.warning(f"[CHECKPOINT] Could not remove existing checkpoint archive: {e}")
         
         # Get pod information
+        logger.info(f"[CHECKPOINT] Fetching pod information for {pod_name}")
         pod = api.read_namespaced_pod(name=pod_name, namespace=namespace)
+        logger.info(f"[CHECKPOINT] Found {len(pod.spec.containers)} containers in pod")
         
         # Create checkpoint for each container
         for container in pod.spec.containers:
             container_name = container.name
-            logger.info(f"[CHECKPOINT] Creating checkpoint for container {container_name}")
+            logger.info(f"[CHECKPOINT] Starting checkpoint process for container {container_name}")
             
             # Ensure CRIU is installed
+            logger.info(f"[CHECKPOINT] Verifying CRIU installation for container {container_name}")
             if not ensure_criu_installed(api, namespace, pod_name, container_name):
                 raise Exception(f"Failed to ensure CRIU installation in container {container_name}")
             
             # Get the main process ID
+            logger.info(f"[CHECKPOINT] Determining main process ID for container {container_name}")
             main_pid = get_main_process_id(api, namespace, pod_name, container_name)
-            logger.info(f"[CHECKPOINT] Using process ID: {main_pid}")
+            logger.info(f"[CHECKPOINT] Using process ID {main_pid} for checkpoint")
             
             # Create checkpoint directory in container
-            mkdir_cmd = [
-                "kubectl", "exec", pod_name,
-                "-n", namespace,
-                "-c", container_name,
-                "--", "mkdir", "-p", "/tmp/checkpoint"
-            ]
-            subprocess.run(mkdir_cmd, check=True)
+            exec_command = ['mkdir', '-p', '/tmp/checkpoint']
+            resp = stream(api.connect_get_namespaced_pod_exec,
+                         pod_name,
+                         namespace,
+                         container=container_name,
+                         command=exec_command,
+                         stderr=True, stdin=False, stdout=True, tty=False)
+            logger.info(f"[CHECKPOINT] Successfully created checkpoint directory")
             
-            # Execute CRIU dump command with modified flags
+            # Execute CRIU dump command
             criu_cmd = [
-                "kubectl", "exec", pod_name,
-                "-n", namespace,
-                "-c", container_name,
-                "--", "criu", "dump",
-                "-D", "/tmp/checkpoint",
-                "-t", main_pid,
-                "--leave-running",
-                "--shell-job",
-                "--tcp-established",
-                "--manage-cgroups",
-                "--weak-sysctls",
-                "--force-irmap",
-                "--link-remap",
-                "--ext-unix-sk",
-                "--file-locks",
-                "--ghost-limit", "1M"
+                'criu', 'dump',
+                '-D', '/tmp/checkpoint',
+                '-t', main_pid,
+                '--leave-running',
+                '--tcp-established',
+                '--file-locks',
+                '--link-remap',
+                '--manage-cgroups',
+                '--ext-unix-sk',
+                '--shell-job',
+                '--ghost-limit', '1073741824',
+                '--weak-sysctls',
+                '--force-irmap',
+                '-o', '/tmp/dump.log'
             ]
             
+            logger.info(f"[CHECKPOINT] Executing CRIU dump command: {' '.join(criu_cmd)}")
             try:
-                subprocess.run(criu_cmd, check=True)
+                resp = stream(api.connect_get_namespaced_pod_exec,
+                            pod_name,
+                            namespace,
+                            container=container_name,
+                            command=criu_cmd,
+                            stderr=True, stdin=False, stdout=True, tty=False)
                 logger.info(f"[CHECKPOINT] Successfully created checkpoint for container {container_name}")
                 
-                # Create a tar archive of the checkpoint from within the container
-                tar_cmd = [
-                    "kubectl", "exec", pod_name,
-                    "-n", namespace,
-                    "-c", container_name,
-                    "--", "tar", "czf", "/tmp/checkpoint.tar.gz", "-C", "/tmp", "checkpoint"
-                ]
-                subprocess.run(tar_cmd, check=True)
+                # Check dump log
+                exec_command = ['cat', '/tmp/dump.log']
+                resp = stream(api.connect_get_namespaced_pod_exec,
+                            pod_name,
+                            namespace,
+                            container=container_name,
+                            command=exec_command,
+                            stderr=True, stdin=False, stdout=True, tty=False)
+                logger.info(f"[CHECKPOINT] Dump log contents:\n{resp}")
+                
+                # Create tar archive
+                exec_command = ['tar', 'czf', '/tmp/checkpoint.tar.gz', '-C', '/tmp', 'checkpoint']
+                resp = stream(api.connect_get_namespaced_pod_exec,
+                            pod_name,
+                            namespace,
+                            container=container_name,
+                            command=exec_command,
+                            stderr=True, stdin=False, stdout=True, tty=False)
                 logger.info(f"[CHECKPOINT] Created checkpoint archive in container")
                 
-                # Copy the archive from the container to the host
-                copy_cmd = [
-                    "kubectl", "cp",
-                    f"{namespace}/{pod_name}:/tmp/checkpoint.tar.gz",
-                    checkpoint_archive
-                ]
-                subprocess.run(copy_cmd, check=True)
-                logger.info(f"[CHECKPOINT] Copied checkpoint archive to host")
+                # Copy the archive from the container
+                with open(checkpoint_archive, 'wb') as f:
+                    resp = stream(api.connect_get_namespaced_pod_exec,
+                                pod_name,
+                                namespace,
+                                container=container_name,
+                                command=['cat', '/tmp/checkpoint.tar.gz'],
+                                stderr=True, stdin=False, stdout=True, tty=False,
+                                _preload_content=False)
+                    for chunk in resp.read_chunked():
+                        f.write(chunk)
+                logger.info(f"[CHECKPOINT] Successfully copied checkpoint archive to host")
                 
                 # Clean up the archive in the container
-                cleanup_cmd = [
-                    "kubectl", "exec", pod_name,
-                    "-n", namespace,
-                    "-c", container_name,
-                    "--", "rm", "-f", "/tmp/checkpoint.tar.gz"
-                ]
-                subprocess.run(cleanup_cmd, check=True)
+                exec_command = ['rm', '-f', '/tmp/checkpoint.tar.gz']
+                resp = stream(api.connect_get_namespaced_pod_exec,
+                            pod_name,
+                            namespace,
+                            container=container_name,
+                            command=exec_command,
+                            stderr=True, stdin=False, stdout=True, tty=False)
+                logger.info(f"[CHECKPOINT] Successfully cleaned up container checkpoint archive")
                 
                 return checkpoint_archive
                 
-            except subprocess.CalledProcessError as e:
+            except client.rest.ApiException as e:
                 logger.error(f"[CHECKPOINT] Failed to create checkpoint for container {container_name}: {e}")
-                # Try to get CRIU log for debugging
-                try:
-                    log_cmd = [
-                        "kubectl", "exec", pod_name,
-                        "-n", namespace,
-                        "-c", container_name,
-                        "--", "cat", "/tmp/criu.log"
-                    ]
-                    log_output = subprocess.run(log_cmd, check=True, capture_output=True, text=True)
-                    logger.error(f"[CHECKPOINT] CRIU log:\n{log_output.stdout}")
-                except Exception as log_error:
-                    logger.error(f"[CHECKPOINT] Could not get CRIU log: {log_error}")
                 raise
         
     except Exception as e:
@@ -387,7 +416,9 @@ def create_checkpoint(api: client.CoreV1Api, namespace: str, pod_name: str) -> s
         # Cleanup on failure
         try:
             if os.path.exists(checkpoint_archive):
+                logger.info(f"[CHECKPOINT] Cleaning up checkpoint archive after failure: {checkpoint_archive}")
                 os.remove(checkpoint_archive)
+                logger.info(f"[CHECKPOINT] Successfully cleaned up checkpoint archive")
         except Exception as cleanup_error:
             logger.warning(f"[CHECKPOINT] Could not remove checkpoint archive during cleanup: {cleanup_error}")
         raise
@@ -395,15 +426,18 @@ def create_checkpoint(api: client.CoreV1Api, namespace: str, pod_name: str) -> s
 def restore_checkpoint(api: client.CoreV1Api, namespace: str, pod_name: str, checkpoint_path: str):
     """Restore a pod from a CRIU checkpoint."""
     try:
-        logger.info(f"[RESTORE] Restoring pod {pod_name} from checkpoint")
+        logger.info(f"[RESTORE] Starting checkpoint restoration process for pod {pod_name}")
+        logger.info(f"[RESTORE] Using checkpoint path: {checkpoint_path}")
         
         # Get pod information
+        logger.info(f"[RESTORE] Fetching pod information for {pod_name}")
         pod = api.read_namespaced_pod(name=pod_name, namespace=namespace)
+        logger.info(f"[RESTORE] Found {len(pod.spec.containers)} containers to restore")
         
         # Restore each container
         for container in pod.spec.containers:
             container_name = container.name
-            logger.info(f"[RESTORE] Restoring container {container_name}")
+            logger.info(f"[RESTORE] Starting restoration process for container {container_name}")
             
             # Copy checkpoint archive to container
             copy_cmd = [
@@ -411,7 +445,9 @@ def restore_checkpoint(api: client.CoreV1Api, namespace: str, pod_name: str, che
                 checkpoint_path,
                 f"{namespace}/{pod_name}:/tmp/checkpoint.tar.gz"
             ]
+            logger.info(f"[RESTORE] Copying checkpoint archive to container: {' '.join(copy_cmd)}")
             subprocess.run(copy_cmd, check=True)
+            logger.info(f"[RESTORE] Successfully copied checkpoint archive to container")
             
             # Extract checkpoint in container
             extract_cmd = [
@@ -421,7 +457,9 @@ def restore_checkpoint(api: client.CoreV1Api, namespace: str, pod_name: str, che
                 "--", "bash", "-c",
                 "rm -rf /tmp/checkpoint && mkdir -p /tmp/checkpoint && tar xzf /tmp/checkpoint.tar.gz -C /tmp && rm -f /tmp/checkpoint.tar.gz"
             ]
+            logger.info(f"[RESTORE] Extracting checkpoint archive in container: {' '.join(extract_cmd)}")
             subprocess.run(extract_cmd, check=True)
+            logger.info(f"[RESTORE] Successfully extracted checkpoint archive")
             
             # Execute CRIU restore command with modified flags
             criu_cmd = [
@@ -430,33 +468,84 @@ def restore_checkpoint(api: client.CoreV1Api, namespace: str, pod_name: str, che
                 "-c", container_name,
                 "--", "criu", "restore",
                 "-D", "/tmp/checkpoint",
+                "-v4",
                 "--restore-detached",
-                "--no-pid",
-                "--no-ipc",
-                "--no-uts",
-                "--no-net",
-                "--no-time",
-                "--no-user",
-                "--no-mnt",
-                "--no-cgroup",
-                "--no-kerndat",
-                "--no-fd",
-                "--no-file-locks",
-                "--no-mem-tracking"
+                "--pidfile", "/tmp/restored.pid",
+                "--tcp-established",
+                "--file-locks",
+                "--shell-job",
+                "--link-remap",
+                "--manage-cgroups",
+                "--ext-unix-sk",
+                "--ghost-limit", "1073741824",
+                "-o", "/tmp/restore.log"
             ]
             
+            logger.info(f"[RESTORE] Executing CRIU restore command: {' '.join(criu_cmd)}")
             try:
                 subprocess.run(criu_cmd, check=True)
                 logger.info(f"[RESTORE] Successfully restored container {container_name}")
                 
+                # Check restore log for any warnings or errors
+                try:
+                    log_cmd = [
+                        "kubectl", "exec", pod_name,
+                        "-n", namespace,
+                        "-c", container_name,
+                        "--", "cat", "/tmp/restore.log"
+                    ]
+                    log_output = subprocess.run(log_cmd, check=True, capture_output=True, text=True)
+                    logger.info(f"[RESTORE] Restore log contents:\n{log_output.stdout}")
+                except Exception as log_error:
+                    logger.warning(f"[RESTORE] Could not get restore log: {log_error}")
+                
             except subprocess.CalledProcessError as e:
                 logger.error(f"[RESTORE] Failed to restore container {container_name}: {e}")
-                raise
+                logger.error(f"[RESTORE] Command output: {e.output if hasattr(e, 'output') else 'No output available'}")
+                
+                # Try alternative restore method with --restore-sibling
+                logger.info(f"[RESTORE] Attempting alternative restore method with --restore-sibling")
+                alt_criu_cmd = [
+                    "kubectl", "exec", pod_name,
+                    "-n", namespace,
+                    "-c", container_name,
+                    "--", "criu", "restore",
+                    "-D", "/tmp/checkpoint",
+                    "-v4",
+                    "--restore-sibling",
+                    "--tcp-established",
+                    "--file-locks",
+                    "--ext-unix-sk",
+                    "-o", "/tmp/restore2.log"
+                ]
+                
+                try:
+                    logger.info(f"[RESTORE] Executing alternative CRIU restore command: {' '.join(alt_criu_cmd)}")
+                    subprocess.run(alt_criu_cmd, check=True)
+                    logger.info(f"[RESTORE] Successfully restored container {container_name} using alternative method")
+                    
+                    # Check alternative restore log
+                    try:
+                        log_cmd = [
+                            "kubectl", "exec", pod_name,
+                            "-n", namespace,
+                            "-c", container_name,
+                            "--", "cat", "/tmp/restore2.log"
+                        ]
+                        log_output = subprocess.run(log_cmd, check=True, capture_output=True, text=True)
+                        logger.info(f"[RESTORE] Alternative restore log contents:\n{log_output.stdout}")
+                    except Exception as log_error:
+                        logger.warning(f"[RESTORE] Could not get alternative restore log: {log_error}")
+                        
+                except subprocess.CalledProcessError as alt_e:
+                    logger.error(f"[RESTORE] Alternative restore also failed: {alt_e}")
+                    logger.error(f"[RESTORE] Alternative command output: {alt_e.output if hasattr(alt_e, 'output') else 'No output available'}")
+                    raise
         
-        logger.info(f"[RESTORE] Successfully restored pod {pod_name}")
+        logger.info(f"[RESTORE] Successfully completed restoration process for pod {pod_name}")
         
     except Exception as e:
-        logger.error(f"[RESTORE] Error restoring checkpoint: {e}")
+        logger.error(f"[RESTORE] Error during checkpoint restoration: {e}")
         raise
 
 def create_pod_clone_for_node(

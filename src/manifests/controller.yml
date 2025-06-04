@@ -18,17 +18,17 @@ spec:
     spec:
       serviceAccountName: controller-account
       terminationGracePeriodSeconds: 10
-      # For the control-plane
-      tolerations:
-      - key: "node-role.kubernetes.io/control-plane"
-        operator: Exists
-        effect: NoSchedule
-      - key: "node.kubernetes.io/unreachable"
-        operator: Exists
-        effect: NoExecute
-      - key: "node-role.kubernetes.io/master"
-        operator: Exists
-        effect: NoSchedule  
+      # # For the control-plane
+      # tolerations:
+      # - key: "node-role.kubernetes.io/control-plane"
+      #   operator: Exists
+      #   effect: NoSchedule
+      # - key: "node.kubernetes.io/unreachable"
+      #   operator: Exists
+      #   effect: NoExecute
+      # - key: "node-role.kubernetes.io/master"
+      #   operator: Exists
+      #   effect: NoSchedule  
       affinity:
         nodeAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -54,11 +54,135 @@ spec:
           requests:
             cpu: 50m
             memory: 500Mi
+        env:
+        - name: KUBECONFIG
+          value: /root/.kube/config
+        - name: DOCKER_HOST
+          value: unix:///var/run/docker.sock
+        - name: CRIU_PATH
+          value: /usr/sbin/criu
+        volumeMounts:
+        - name: kube-config
+          mountPath: /root/.kube
+        - name: docker-sock
+          mountPath: /var/run/docker.sock
+        - name: checkpoint-dir
+          mountPath: /tmp/checkpoint
+        - name: proc
+          mountPath: /proc
+        - name: sys
+          mountPath: /sys
+        - name: dev
+          mountPath: /dev
+        - name: run
+          mountPath: /var/run
+        - name: cgroup
+          mountPath: /sys/fs/cgroup
         securityContext:
           privileged: true
+          runAsUser: 0
+          runAsGroup: 0
+          allowPrivilegeEscalation: true
+          fsGroup: 999
           capabilities:
             add:
             - ALL
+
+      - name: python-controller
+        image: salamander1223/python-controller:latest
+        imagePullPolicy: Always
+        securityContext:
+          privileged: true
+        resources:
+          limits:
+            cpu: 100m
+            memory: 100Mi
+          requests:
+            cpu: 50m
+            memory: 50Mi
+        volumeMounts:
+        - name: run
+          mountPath: /var/run
+          readOnly: false
+        ports:
+        - name: main-http
+          containerPort: 8081
+          protocol: TCP
+        env:
+        - name: CADVISOR_URL
+          value: "http://127.0.0.1:8080"
+        - name: POLLING_INTERVAL
+          value: "24"
+        - name: STORAGE_PATH
+          value: "/storage"
+        - name: POD_SELECTOR
+          valueFrom:
+            configMapKeyRef:
+              key: POD_SELECTOR
+              name: pod-selector-config
+        - name: CARBON_SERVER_URL
+          value: "http://metadata:8008"
+        # io.kubernetes.pod.namespace=<namespace>
+        # io.kubernetes.pod.name=<pod-name>
+        # io.kubernetes.container.name=<container-name>
+      
+      volumes:
+      - name: kube-config
+        hostPath:
+          path: /root/.kube
+          type: DirectoryOrCreate
+      - name: docker-sock
+        hostPath:
+          path: /var/run/docker.sock
+          type: ""
+      - name: checkpoint-dir
+        hostPath:
+          path: /tmp/checkpoint
+          type: DirectoryOrCreate
+      - name: proc
+        hostPath:
+          path: /proc
+          type: Directory
+      - name: sys
+        hostPath:
+          path: /sys
+          type: Directory
+      - name: dev
+        hostPath:
+          path: /dev
+          type: Directory
+      - name: run
+        hostPath:
+          path: /var/run
+          type: Directory
+      - name: cgroup
+        hostPath:
+          path: /sys/fs/cgroup
+          type: Directory
+      - name: machine-id
+        hostPath:
+          path: /etc/machine-id
+          type: File
+      - name: rootfs
+        hostPath:
+          path: /
+          type: Directory
+      - name: var-log
+        hostPath:
+          path: /var/log
+          type: Directory
+      - name: containers
+        hostPath:
+          path: /var/lib/containers
+          type: Directory
+      - name: docker
+        hostPath:
+          path: /var/lib/docker
+          type: Directory
+      - name: disk
+        hostPath:
+          path: /dev/disk
+          type: Directory
 
       # - name: cadvsior
       #   image: gcr.io/cadvisor/cadvisor:v0.47.2
@@ -109,69 +233,6 @@ spec:
       #     containerPort: 8080
       #     protocol: TCP
 
-      - name: python-controller
-        image: salamander1223/python-controller:latest
-        imagePullPolicy: Always
-        securityContext:
-          privileged: true
-        resources:
-          limits:
-            cpu: 100m
-            memory: 100Mi
-          requests:
-            cpu: 50m
-            memory: 50Mi
-        volumeMounts:
-        - name: var-run
-          mountPath: /var/run
-          readOnly: false
-        ports:
-        - name: main-http
-          containerPort: 8081
-          protocol: TCP
-        env:
-        - name: CADVISOR_URL
-          value: "http://127.0.0.1:8080"
-        - name: POLLING_INTERVAL
-          value: "24"
-        - name: STORAGE_PATH
-          value: "/storage"
-        - name: POD_SELECTOR
-          valueFrom:
-            configMapKeyRef:
-              key: POD_SELECTOR
-              name: pod-selector-config
-        - name: CARBON_SERVER_URL
-          value: "http://metadata:8008"
-        # io.kubernetes.pod.namespace=<namespace>
-        # io.kubernetes.pod.name=<pod-name>
-        # io.kubernetes.container.name=<container-name>
-      
-      volumes:
-      - name: machine-id
-        hostPath:
-          path: /etc/machine-id
-      - name: rootfs
-        hostPath:
-          path: /
-      - name: var-run
-        hostPath:
-          path: /var/run
-      - name: sys
-        hostPath:
-          path: /sys
-      - name: var-log
-        hostPath:
-          path: /var/log
-      - name: containers
-        hostPath:
-          path: /var/lib/containers
-      - name: docker
-        hostPath:
-          path: /var/lib/docker
-      - name: disk
-        hostPath:
-          path: /dev/disk
 ---
 apiVersion: v1
 kind: Service

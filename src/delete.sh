@@ -30,6 +30,7 @@ kubectl label node kind-worker REGION-
 if [ "$APPLY_CLUSTER" = true ]; then
     echo "Deleting kind cluster..."
     kind delete cluster
+    rm -f kubeconfig
 fi
 
 # kubectl delete namespace monitor

@@ -1,0 +1,94 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: python-migrate-service
+  namespace: monitor
+  labels:
+    name: python-migrate-service
+spec:
+  containers:
+  - name: python-migrate
+    image: python:3.9-slim
+    command: ["/bin/bash", "-c"]
+    args:
+    - |
+      apt-get update && \
+      apt-get install -y kubectl curl && \
+      pip install kubernetes fastapi uvicorn psycopg2-binary && \
+      python /app/migrate_process.py
+    imagePullPolicy: IfNotPresent
+    securityContext:
+      privileged: true  # Required for CRIU operations
+      capabilities:
+        add:
+        - ALL
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "500m"
+      limits:
+        memory: "512Mi"
+        cpu: "1000m"
+    ports:
+    - name: http
+      containerPort: 8000
+      protocol: TCP
+    volumeMounts:
+    - name: app-code
+      mountPath: /app
+    - name: proc
+      mountPath: /proc
+    - name: sys
+      mountPath: /sys
+    - name: dev
+      mountPath: /dev
+    - name: var-run
+      mountPath: /var/run
+    - name: cgroup
+      mountPath: /sys/fs/cgroup
+    - name: checkpoint-dir
+      mountPath: /tmp/checkpoint
+  volumes:
+  - name: app-code
+    configMap:
+      name: python-migrate-code
+  - name: proc
+    hostPath:
+      path: /proc
+  - name: sys
+    hostPath:
+      path: /sys
+  - name: dev
+    hostPath:
+      path: /dev
+  - name: var-run
+    hostPath:
+      path: /var/run
+  - name: cgroup
+    hostPath:
+      path: /sys/fs/cgroup
+  - name: checkpoint-dir
+    emptyDir: {}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: python-migrate-code
+  namespace: monitor
+data:
+  migrate_process.py: |
+    # Content of migrate_process.py will be added here
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: python-migrate-service
+  namespace: monitor
+spec:
+  selector:
+    name: python-migrate-service
+  ports:
+  - port: 8000
+    targetPort: 8000
+    protocol: TCP
+  type: ClusterIP 

@@ -16,27 +16,16 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Install kubectl for correct architecture
-RUN ARCH=$(dpkg --print-architecture) && \
-    if [ "$ARCH" = "arm64" ]; then ARCH="aarch64"; fi && \
-    curl -LO "https://dl.k8s.io/release/stable.txt" && \
-    KUBE_VERSION=$(cat stable.txt) && \
-    curl -LO "https://dl.k8s.io/release/${KUBE_VERSION}/bin/linux/${ARCH}/kubectl" && \
+RUN curl -LO "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/arm64/kubectl" && \
     chmod +x kubectl && \
-    # Verify the binary is valid before moving it
-    if ! ./kubectl version --client > /dev/null 2>&1; then \
-        echo "Failed to verify kubectl binary" && exit 1; \
-    fi && \
-    mv kubectl /usr/local/bin/ && \
-    rm stable.txt && \
-    # Final verification
-    kubectl version --client
+    mv kubectl /usr/local/bin/
 
 # Create necessary directories for Kubernetes, CRIU, and Docker
 RUN mkdir -p /root/.kube \
     && mkdir -p /var/run/secrets/kubernetes.io/serviceaccount \
     && mkdir -p /tmp/checkpoint \
     && mkdir -p /var/run \
+    && mkdir -p /sys/fs/cgroup \
     && chmod 700 /root/.kube
 
 # Set environment variables
@@ -57,7 +46,7 @@ COPY controller/migrate_process.py .
 COPY controller/utils/ .
 
 # Create volume mount points
-VOLUME ["/root/.kube", "/var/run/docker.sock", "/tmp/checkpoint"]
+VOLUME ["/root/.kube", "/var/run/docker.sock", "/tmp/checkpoint", "/proc", "/sys", "/dev", "/var/run", "/sys/fs/cgroup"]
 
 # Expose the port specified in the manifest
 EXPOSE 8000
