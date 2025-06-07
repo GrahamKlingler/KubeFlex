@@ -5,6 +5,11 @@ docker build -t python-migrate:latest -f build/Dockerfile.migrate .
 docker tag python-migrate:latest salamander1223/python-migrate:latest
 docker push salamander1223/python-migrate:latest
 
+# Build and push stress test
+docker build -t benchmark:latest -f build/Dockerfile.benchmark .
+docker tag benchmark:latest salamander1223/benchmark:latest
+docker push salamander1223/benchmark:latest
+
 # # # Build and push main controller
 # docker build -t python-controller:latest -f build/Dockerfile.main .
 # docker tag python-controller:latest salamander1223/python-controller:latest

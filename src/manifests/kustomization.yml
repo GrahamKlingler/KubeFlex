@@ -7,4 +7,5 @@ resources:
   # - storage.yml
   - controller.yml
   # - metadata.yml
-  - testpod.yml
+  # - testpod.yml
+  - benchmark-pod.yml
