@@ -137,16 +137,6 @@ def ensure_criu_installed(api: client.CoreV1Api, namespace: str, pod_name: str, 
                          stderr=True, stdin=False, stdout=True, tty=False)
             logger.info(f"[CRIU] CRIU is already installed in container {container_name}")
             
-            # Run CRIU check to verify functionality
-            exec_command = ['criu', 'check', '--all']
-            resp = stream(api.connect_get_namespaced_pod_exec,
-                         pod_name,
-                         namespace,
-                         container=container_name,
-                         command=exec_command,
-                         stderr=True, stdin=False, stdout=True, tty=False)
-            logger.info(f"[CRIU] CRIU check output:\n{resp}")
-            
             return True
         except client.rest.ApiException as e:
             logger.info(f"[CRIU] CRIU not found in container {container_name}, proceeding with installation")
@@ -182,33 +172,30 @@ def get_main_process_id(api: client.CoreV1Api, namespace: str, pod_name: str, co
             "-n", namespace,
             "-c", container_name,
             "--", "bash", "-c", """
-                pgrep -f 'counter=' | while read pid; do
-                    echo "=== Process $pid ==="
-                    if [ -r "/proc/$pid/cmdline" ]; then
-                        echo "Command: $(cat /proc/$pid/cmdline | tr '\\0' ' ')"
-                        echo "Status: $(grep -E 'State|Threads|Pid|PPid' /proc/$pid/status 2>/dev/null)"
-                        echo "Thread IDs:"
-                        ls /proc/$pid/task/ 2>/dev/null | while read tid; do
-                            echo "  TID: $tid"
-                            if [ -r "/proc/$pid/task/$tid/comm" ]; then
-                                echo "    Name: $(cat /proc/$pid/task/$tid/comm 2>/dev/null)"
-                            fi
-                        done
+                # Get the PID of the bash process running the script
+                pgrep -f 'simple_test.sh' > /tmp/test.pid && \
+                # Verify the process exists and is accessible
+                if [ -f /tmp/test.pid ]; then
+                    pid=$(cat /tmp/test.pid)
+                    if [ -d "/proc/$pid" ]; then
+                        echo $pid
                     else
-                        echo "Process $pid no longer exists"
+                        echo "1"
                     fi
-                    echo ""
-                done
+                else
+                    echo "1"
+                fi
             """
         ]
         
         try:
             pgrep_output = subprocess.run(pgrep_cmd, check=True, capture_output=True, text=True)
             logger.info(f"[PROCESS] pgrep output:\n{pgrep_output.stdout}")
-
-
-
-
+            
+            # Return the first PID
+            pid = pgrep_output.stdout.strip().split("\n")[0]
+            logger.info(f"[PROCESS] Selected PID: {pid}")
+            return pid
 
         except subprocess.CalledProcessError as e:
             logger.error(f"[PROCESS] Failed to get main process ID: {e}")
@@ -217,158 +204,6 @@ def get_main_process_id(api: client.CoreV1Api, namespace: str, pod_name: str, co
     except Exception as e:
         logger.error(f"[PROCESS] Unexpected error: {e}")
         return "1"
-
-    #         if pgrep_output.stdout.strip():
-    #             # Get all matching PIDs
-    #             pids = pgrep_output.stdout.strip().split("\n")
-    #             logger.info(f"[PROCESS] Found {len(pids)} matching PIDs")
-    #             logger.info(f"[PROCESS] PIDs: {pids}")
-                
-    #             # Verify each PID is still running and is the main process
-    #             for pid in pids:
-    #                 try:
-    #                     # Get the full command line for the process
-    #                     cmdline_cmd = [
-    #                         "kubectl", "exec", pod_name,
-    #                         "-n", namespace,
-    #                         "-c", container_name,
-    #                         "--", "bash", "-c",
-    #                         f"if [ -e /proc/{pid}/cmdline ]; then cat /proc/{pid}/cmdline | tr '\\0' ' '; else echo ''; fi"
-    #                     ]
-    #                     cmdline_output = subprocess.run(cmdline_cmd, check=True, capture_output=True, text=True)
-    #                     process_cmdline = cmdline_output.stdout.strip()
-    #                     logger.info(f"[PROCESS] Process {pid} command line: {process_cmdline}")
-                        
-    #                     # Check if process is still running and is the main process
-    #                     verify_cmd = [
-    #                         "kubectl", "exec", pod_name,
-    #                         "-n", namespace,
-    #                         "-c", container_name,
-    #                         "--", "bash", "-c",
-    #                         f"if [ -e /proc/{pid}/stat ]; then PPID=$(cat /proc/{pid}/stat | cut -d' ' -f4); if [ $PPID = 1 ]; then echo 'valid'; else echo 'invalid_ppid:'$PPID; fi; else echo 'invalid_no_stat'; fi"
-    #                     ]
-    #                     verify_output = subprocess.run(verify_cmd, check=True, capture_output=True, text=True)
-    #                     logger.info(f"[PROCESS] Command: {' '.join(verify_cmd)}")
-    #                     logger.info(f"[PROCESS] Output: {verify_output.stdout}")
-                        
-    #                     # Check if process is valid and contains counter=
-    #                     if verify_output.stdout.strip() == "valid" and "counter=" in process_cmdline:
-    #                         logger.info(f"[PROCESS] Found stable main process with PID: {pid}")
-    #                         return pid
-    #                 except subprocess.CalledProcessError:
-    #                     continue
-    #                 except Exception as e:
-    #                     logger.error(f"[PROCESS] Error verifying process: {e}")
-    #                     continue
-                
-    #             # If no valid PID found, fall back to PID 1
-    #             logger.info("[PROCESS] No valid main process found, using PID 1")
-    #             return "1"
-                
-    #     except subprocess.CalledProcessError:
-    #         logger.info("[PROCESS] pgrep failed, falling back to /proc method")
-    #         return "1"
-    #     except Exception as e:
-    #         logger.error(f"[PROCESS] Unexpected error: {e}")
-    #         return "1"
-        
-    #     # Fallback to /proc method with memory-efficient approach
-    #     ls_cmd = [
-    #         "kubectl", "exec", pod_name,
-    #         "-n", namespace,
-    #         "-c", container_name,
-    #         "--", "ls", "-1", "/proc"
-    #     ]
-        
-    #     ls_output = subprocess.run(ls_cmd, check=True, capture_output=True, text=True)
-    #     logger.info("[PROCESS] Successfully listed /proc directory")
-        
-    #     # Process PIDs in smaller batches to avoid memory issues
-    #     batch_size = 10
-    #     pids = []
-    #     for line in ls_output.stdout.splitlines():
-    #         if line.isdigit():
-    #             pids.append(line)
-    #             if len(pids) >= batch_size:
-    #                 # Process this batch
-    #                 for pid in pids:
-    #                     try:
-    #                         # Get the full command line for the process
-    #                         cmdline_cmd = [
-    #                             "kubectl", "exec", pod_name,
-    #                             "-n", namespace,
-    #                             "-c", container_name,
-    #                             "--", "bash", "-c",
-    #                             f"if [ -e /proc/{pid}/cmdline ]; then cat /proc/{pid}/cmdline | tr '\\0' ' '; else echo ''; fi"
-    #                         ]
-    #                         cmdline_output = subprocess.run(cmdline_cmd, check=True, capture_output=True, text=True)
-    #                         process_cmdline = cmdline_output.stdout.strip()
-                            
-    #                         # Check if process is still running and is the main process
-    #                         verify_cmd = [
-    #                             "kubectl", "exec", pod_name,
-    #                             "-n", namespace,
-    #                             "-c", container_name,
-    #                             "--", "bash", "-c",
-    #                             f"if [ -e /proc/{pid}/stat ]; then PPID=$(cat /proc/{pid}/stat | cut -d' ' -f4); if [ $PPID = 1 ]; then echo 'valid'; else echo 'invalid_ppid:'$PPID; fi; else echo 'invalid_no_stat'; fi"
-    #                         ]
-    #                         verify_output = subprocess.run(verify_cmd, check=True, capture_output=True, text=True)
-                            
-    #                         if verify_output.stdout.strip() == "valid" and "counter=" in process_cmdline:
-    #                             logger.info(f"[PROCESS] Found stable main process with PID: {pid}")
-    #                             return pid
-    #                     except subprocess.CalledProcessError:
-    #                         continue
-    #                     except Exception as e:
-    #                         logger.error(f"[PROCESS] Error verifying process: {e}")
-    #                         continue
-    #                 # Clear the batch
-    #                 pids = []
-        
-    #     # Process any remaining PIDs
-    #     for pid in pids:
-    #         try:
-    #             # Get the full command line for the process
-    #             cmdline_cmd = [
-    #                 "kubectl", "exec", pod_name,
-    #                 "-n", namespace,
-    #                 "-c", container_name,
-    #                 "--", "bash", "-c",
-    #                 f"if [ -e /proc/{pid}/cmdline ]; then cat /proc/{pid}/cmdline | tr '\\0' ' '; else echo ''; fi"
-    #             ]
-    #             cmdline_output = subprocess.run(cmdline_cmd, check=True, capture_output=True, text=True)
-    #             process_cmdline = cmdline_output.stdout.strip()
-                
-    #             verify_cmd = [
-    #                 "kubectl", "exec", pod_name,
-    #                 "-n", namespace,
-    #                 "-c", container_name,
-    #                 "--", "bash", "-c",
-    #                 f"if [ -e /proc/{pid}/stat ]; then PPID=$(cat /proc/{pid}/stat | cut -d' ' -f4); if [ $PPID = 1 ]; then echo 'valid'; else echo 'invalid_ppid:'$PPID; fi; else echo 'invalid_no_stat'; fi"
-    #             ]
-    #             verify_output = subprocess.run(verify_cmd, check=True, capture_output=True, text=True)
-                
-    #             if verify_output.stdout.strip() == "valid" and "counter=" in process_cmdline:
-    #                 logger.info(f"[PROCESS] Found stable main process with PID: {pid}")
-    #                 return pid
-    #         except subprocess.CalledProcessError:
-    #             continue
-    #         except Exception as e:
-    #             logger.error(f"[PROCESS] Error verifying process: {e}")
-    #             continue
-        
-    #     # If we still haven't found the process, try PID 1
-    #     logger.info("[PROCESS] No specific process found, using PID 1")
-    #     return "1"
-        
-    # except subprocess.CalledProcessError as e:
-    #     logger.error(f"[PROCESS] Failed to get process list: {e}")
-    #     # Fallback to PID 1
-    #     logger.info("[PROCESS] Falling back to PID 1")
-    #     return "1"
-    # except Exception as e:
-    #     logger.error(f"[PROCESS] Unexpected error: {e}")
-    #     return "1"
 
 def create_checkpoint(api: client.CoreV1Api, namespace: str, pod_name: str) -> str:
     """Create a CRIU checkpoint of the pod."""
@@ -422,7 +257,7 @@ def create_checkpoint(api: client.CoreV1Api, namespace: str, pod_name: str) -> s
                 'criu', 'dump',
                 '-D', '/tmp/checkpoint',
                 '-t', main_pid,
-                '--leave-running',
+                '--leave-stopped',
                 '--tcp-established',
                 '--file-locks',
                 '--link-remap',
@@ -430,9 +265,13 @@ def create_checkpoint(api: client.CoreV1Api, namespace: str, pod_name: str) -> s
                 '--ext-unix-sk',
                 '--shell-job',
                 '--ghost-limit', '1073741824',
-                '--weak-sysctls',
-                '--force-irmap',
-                '-o', '/tmp/checkpoint/dump.log'
+                '-v4',  # Increase verbosity for debugging
+                '-o', '/tmp/checkpoint/dump.log',
+                '--pidfile', '/tmp/checkpoint/dump.pid',
+                '--track-mem',  # Enable memory tracking
+                '--force-irmap',  # Force resolving names for inotify watches
+                '--evasive-devices',  # Use any path to a device file if original is inaccessible
+                '--skip-in-flight'  # Skip in-flight TCP connections
             ]
             
             logger.info(f"[CHECKPOINT] Executing CRIU dump command: {' '.join(criu_cmd)}")

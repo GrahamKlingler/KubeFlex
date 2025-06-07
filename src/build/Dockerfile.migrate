@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y \
     gnupg \
     criu \
     procps \
+    psmisc \
     htop \
     openssh-server \
     sshpass \

@@ -36,81 +36,51 @@ spec:
     command: ["/bin/bash", "-c"]
     args:
     - |
-      # Create the test program
-      cat > /tmp/simple_test.c << 'EOF'
-      #include <stdio.h>
-      #include <unistd.h>
-      #include <time.h>
-      #include <signal.h>
-      #include <sys/types.h>
-      #include <fcntl.h>
-
-      volatile int running = 1;
-
-      void handle_signal(int sig) {
-          running = 0;
+      # MAIN THREAD
+      # Create the test script
+      cat > /tmp/simple_test.sh << 'EOF'
+      #!/bin/bash
+      
+      # Function to handle signals
+      cleanup() {
+          echo "Process shutting down" >> /tmp/container.log
+          exit 0
       }
-
-      int main() {
-          // Redirect stdout/stderr to avoid TTY issues but don't fully daemonize
-          freopen("/dev/null", "w", stdout);
-          freopen("/dev/null", "w", stderr);
-          
-          signal(SIGTERM, handle_signal);
-          signal(SIGINT, handle_signal);
-          
-          FILE *f = fopen("/tmp/container.log", "a");
-          if (!f) return 1;
-          
-          int counter = 0;
-          while (running) {
-              time_t now = time(NULL);
-              fprintf(f, "Counter: %d, Time: %s", counter++, ctime(&now));
-              fflush(f);
-              sleep(60);
-          }
-          
-          fprintf(f, "Process shutting down\n");
-          fclose(f);
-          return 0;
-      }
+      
+      # Set up signal handlers
+      trap cleanup SIGTERM SIGINT
+      
+      # Initialize counter
+      counter=0
+      
+      # Main loop
+      while true; do
+          echo "Counter: $counter, Time: $(date)" >> /tmp/container.log
+          counter=$((counter + 1))
+          sleep 60
+      done
       EOF
-
-      # Install gcc and compile
+      
+      # Make script executable
+      chmod +x /tmp/simple_test.sh && \
+      
+      # Install monitoring tools
       apt-get update && \
-      apt-get install -y gcc && \
-      gcc -o /tmp/simple_test /tmp/simple_test.c && \
-      rm /tmp/simple_test.c && \
-      apt-get remove -y gcc && \
-      apt-get autoremove -y && \
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends criu htop procps psmisc && \
       apt-get clean && \
       rm -rf /var/lib/apt/lists/* && \
       
-      # Start the program in background and save PID
-      nohup /tmp/simple_test </dev/null >/dev/null 2>&1 & \
-      echo $! > /tmp/test.pid && \
-      
-      # Monitor the process
-      while true; do \
-        if [ -f /tmp/test.pid ]; then \
-          pid=$(cat /tmp/test.pid); \
-          if ps -p $pid > /dev/null 2>&1; then \
-            echo "Process running with PID: $pid" > /tmp/status.log; \
-          else \
-            echo "Process not running" > /tmp/status.log; \
-          fi; \
-        fi; \
-        sleep 60; \
-      done
+      # Start the script in background with proper process hierarchy
+      exec /tmp/simple_test.sh
     imagePullPolicy: IfNotPresent
     securityContext:
       privileged: true  # Required for CRIU operations
       capabilities:
         add:
-        # - SYS_ADMIN  # Required for checkpoint/restore
-        # - NET_ADMIN  # Required for network operations
-        # - SYS_PTRACE # Required for process access
-        # - SYS_RESOURCE # Required for resource management
+        - SYS_ADMIN  # Required for checkpoint/restore
+        - NET_ADMIN  # Required for network operations
+        - SYS_PTRACE # Required for process access
+        - SYS_RESOURCE # Required for resource management
         - ALL
     resources:
       requests:
