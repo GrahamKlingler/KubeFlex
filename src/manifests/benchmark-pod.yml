@@ -33,7 +33,7 @@ spec:
       tail -f /dev/null
     env:
     - name: STRESS_THREAD_COUNT
-      value: "4"
+      value: "${STRESS_THREAD_COUNT:-1}"  # Default to 1 if not specified
     securityContext:
       privileged: true  # Required for CRIU operations
       capabilities:

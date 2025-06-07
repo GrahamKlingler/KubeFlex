@@ -45,6 +45,8 @@ RUN pip install -r migrate_req.txt
 # Copy script into the container
 COPY controller/migrate_process.py .
 COPY controller/utils/ .
+COPY controller/migrate_pod.sh .
+RUN chmod +x migrate_pod.sh
 
 # Create volume mount points
 VOLUME ["/root/.kube", "/var/run/docker.sock", "/tmp/checkpoint", "/proc", "/sys", "/dev", "/var/run", "/sys/fs/cgroup"]

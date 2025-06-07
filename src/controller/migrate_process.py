@@ -7,6 +7,10 @@ the exact state of containers, preserving all process states, memory, and CPU st
 
 curl -X POST http://python-migrate-service.monitor.svc.cluster.local:8000/migrate -H "Content-Type: application/json" -d '{"namespace": "foo","pod": "test-pod","target_node": "kind-worker2","target_pod": "test-pod-migrated","delete_original": true,"debug": false}'
 
+curl -X POST http://python-migrate-service.monitor.svc.cluster.local:8000/migrate -H "Content-Type: application/json" -d '{"namespace": "foo","pod": "benchmark-pod","target_node": "kind-worker2","target_pod": "benchmark-pod-migrated","delete_original": true,"debug": false}'
+
+curl -X POST http://python-migrate-service.monitor.svc.cluster.local:8000/migrate -H "Content-Type: application/json" -d '{"namespace": "foo","pod": "benchmark-pod-migrated","target_node": "kind-worker","target_pod": "benchmark-pod","delete_original": true,"debug": false}'
+
 """
 
 import argparse
@@ -21,6 +25,8 @@ import shutil
 import tarfile
 import base64
 import logging
+import csv
+from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
@@ -44,6 +50,45 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# CSV logging setup
+CSV_LOG_FILE = "migration_timings.csv"
+CSV_HEADERS = [
+    "timestamp",
+    "pod_name",
+    "total_migration_time",
+    "pod_clone_creation_time",
+    "pod_ready_time",
+    "original_pod_deletion_time",
+    "migration_success"
+]
+
+def ensure_csv_file_exists():
+    """Ensure the CSV log file exists with headers."""
+    if not os.path.exists(CSV_LOG_FILE):
+        with open(CSV_LOG_FILE, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(CSV_HEADERS)
+
+def log_migration_timing(timing_data: Dict[str, Any]):
+    """Log migration timing data to CSV file."""
+    ensure_csv_file_exists()
+    
+    # Prepare row data
+    row_data = [
+        datetime.now().isoformat(),
+        timing_data.get('pod_name', ''),
+        timing_data.get('total_migration_time', 0),
+        timing_data.get('pod_clone_creation_time', 0),
+        timing_data.get('pod_ready_time', 0),
+        timing_data.get('original_pod_deletion_time', 0),
+        timing_data.get('migration_success', False)
+    ]
+    
+    # Append to CSV file
+    with open(CSV_LOG_FILE, 'a', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(row_data)
 
 def load_k8s_config():
     """Load Kubernetes configuration from default location or service account."""
@@ -449,8 +494,8 @@ def create_pod_clone_for_node(
     logger.info(f"[MIGRATION] Original pod: {original_pod_name}, Target node: {target_node}")
     
     # Create checkpoint of original pod
-    checkpoint_path = create_checkpoint(api, namespace, original_pod_name)
-    logger.info(f"[MIGRATION] Created checkpoint at {checkpoint_path}")
+    # checkpoint_path = create_checkpoint(api, namespace, original_pod_name)
+    # logger.info(f"[MIGRATION] Created checkpoint at {checkpoint_path}")
     
     # Get the original pod definition
     pod_def = get_pod_definition(api, namespace, original_pod_name)
@@ -496,47 +541,7 @@ def create_pod_clone_for_node(
             if field in pod_def["spec"]:
                 del pod_def["spec"][field]
         logger.info("[MIGRATION] Removed scheduling interference fields")
-    
-    # Add tolerations for control plane if needed
-    if node_info["is_control_plane"]:
-        logger.info("[MIGRATION] Adding control plane tolerations")
         
-        # Create tolerations for control plane taints
-        control_plane_tolerations = []
-        
-        # Add specific tolerations for any taints found on the node
-        for taint in node_info["taints"]:
-            control_plane_tolerations.append({
-                "key": taint["key"],
-                "operator": "Exists",
-                "effect": taint["effect"]
-            })
-        
-        # If no taints found, add common control plane taints
-        if not control_plane_tolerations:
-            control_plane_tolerations = [
-                {
-                    "key": "node-role.kubernetes.io/control-plane",
-                    "operator": "Exists",
-                    "effect": "NoSchedule"
-                },
-                {
-                    "key": "node-role.kubernetes.io/master",
-                    "operator": "Exists",
-                    "effect": "NoSchedule"
-                }
-            ]
-        
-        # Add tolerations to pod spec
-        if "tolerations" not in pod_def["spec"]:
-            pod_def["spec"]["tolerations"] = []
-        
-        # Add our control plane tolerations
-        for toleration in control_plane_tolerations:
-            if toleration not in pod_def["spec"]["tolerations"]:
-                pod_def["spec"]["tolerations"].append(toleration)
-        logger.info("[MIGRATION] Added control plane tolerations")
-    
     # Create the new pod
     try:
         logger.info(f"[MIGRATION] Creating new pod {new_pod_name} on node {target_node}")
@@ -552,12 +557,12 @@ def create_pod_clone_for_node(
             time.sleep(5)
         
         # Restore checkpoint to new pod
-        restore_checkpoint(api, namespace, new_pod_name, checkpoint_path)
-        logger.info(f"[MIGRATION] Successfully restored checkpoint to new pod")
+        # restore_checkpoint(api, namespace, new_pod_name, checkpoint_path)
+        # logger.info(f"[MIGRATION] Successfully restored checkpoint to new pod")
         
         # Cleanup checkpoint file
-        os.remove(checkpoint_path)
-        logger.info(f"[MIGRATION] Cleaned up checkpoint file")
+        # os.remove(checkpoint_path)
+        # logger.info(f"[MIGRATION] Cleaned up checkpoint file")
         
         return new_pod_name
         
@@ -633,6 +638,18 @@ def migrate_pod(
         logger.setLevel(logging.DEBUG)
         logger.info("[MIGRATION] Debug logging enabled")
     
+    # Initialize timing data
+    timing_data = {
+        'pod_name': pod_name,
+        'total_migration_time': 0,
+        'pod_clone_creation_time': 0,
+        'pod_ready_time': 0,
+        'original_pod_deletion_time': 0,
+        'migration_success': False
+    }
+    
+    start_time = time.time()
+    
     # Load Kubernetes configuration
     logger.info("[MIGRATION] Starting pod migration process")
     api = load_k8s_config()
@@ -647,20 +664,29 @@ def migrate_pod(
         # Check if already on target node
         if original_node == target_node:
             logger.info(f"[MIGRATION] Pod is already on target node {target_node}. No migration needed.")
+            timing_data['migration_success'] = True
+            timing_data['total_migration_time'] = time.time() - start_time
+            log_migration_timing(timing_data)
             return pod_name
             
     except client.rest.ApiException as e:
         logger.error(f"[MIGRATION] Pod {pod_name} not found: {e}")
+        timing_data['total_migration_time'] = time.time() - start_time
+        log_migration_timing(timing_data)
         return None
     
     try:
         # Create clone on target node
         logger.info("[MIGRATION] Creating pod clone on target node")
+        clone_start_time = time.time()
         new_pod_name = create_pod_clone_for_node(api, namespace, pod_name, target_node, target_pod)
+        timing_data['pod_clone_creation_time'] = time.time() - clone_start_time
         
         # Wait for the new pod to be running
         logger.info("[MIGRATION] Waiting for new pod to reach Running state")
+        ready_start_time = time.time()
         migration_success = wait_for_pod_running(api, namespace, new_pod_name)
+        timing_data['pod_ready_time'] = time.time() - ready_start_time
         
         if migration_success:
             logger.info(f"[MIGRATION] Successfully migrated pod to {new_pod_name} on node {target_node}")
@@ -669,21 +695,30 @@ def migrate_pod(
             if delete_original:
                 try:
                     logger.info(f"[MIGRATION] Deleting original pod {pod_name}")
+                    deletion_start_time = time.time()
                     api.delete_namespaced_pod(
                         name=pod_name,
                         namespace=namespace
                     )
+                    timing_data['original_pod_deletion_time'] = time.time() - deletion_start_time
                     logger.info(f"[MIGRATION] Original pod {pod_name} deleted")
                 except client.rest.ApiException as e:
                     logger.error(f"[MIGRATION] Error deleting original pod: {e}")
             
+            timing_data['migration_success'] = True
+            timing_data['total_migration_time'] = time.time() - start_time
+            log_migration_timing(timing_data)
             return new_pod_name
         else:
             logger.error("[MIGRATION] Migration failed - new pod did not reach Running state")
+            timing_data['total_migration_time'] = time.time() - start_time
+            log_migration_timing(timing_data)
             return None
             
     except Exception as e:
         logger.error(f"[MIGRATION] Error during migration: {e}")
+        timing_data['total_migration_time'] = time.time() - start_time
+        log_migration_timing(timing_data)
         return None
 
 # Define input model
