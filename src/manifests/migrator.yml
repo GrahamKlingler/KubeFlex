@@ -1,0 +1,82 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: migrator-{NODE_NAME}
+  namespace: monitor
+  labels:
+    name: migrator-{NODE_NAME}
+    purpose: containerd-access
+spec:
+  serviceAccountName: controller-account
+  hostNetwork: true
+  hostPID: true
+  containers:
+  - name: migrator
+    image: salamander1223/migrator:latest
+    imagePullPolicy: Always
+    securityContext:
+      privileged: true
+      capabilities:
+        add:
+        - ALL
+      runAsUser: 0
+      runAsGroup: 0
+    volumeMounts:
+    - name: containerd-sock
+      mountPath: /run/containerd
+    - name: var-run
+      mountPath: /var/run
+    - name: var-lib
+      mountPath: /var/lib
+    - name: proc
+      mountPath: /proc
+    - name: sys
+      mountPath: /sys
+    - name: dev
+      mountPath: /dev
+    - name: cgroup
+      mountPath: /sys/fs/cgroup
+    - name: checkpoints
+      mountPath: /tmp/checkpoints
+    resources:
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
+      limits:
+        memory: "256Mi"
+        cpu: "500m"
+  volumes:
+  - name: containerd-sock
+    hostPath:
+      path: /run/containerd
+      type: Directory
+  - name: var-run
+    hostPath:
+      path: /var/run
+      type: Directory
+  - name: var-lib
+    hostPath:
+      path: /var/lib
+      type: Directory
+  - name: proc
+    hostPath:
+      path: /proc
+      type: Directory
+  - name: sys
+    hostPath:
+      path: /sys
+      type: Directory
+  - name: dev
+    hostPath:
+      path: /dev
+      type: Directory
+  - name: cgroup
+    hostPath:
+      path: /sys/fs/cgroup
+      type: Directory
+  - name: checkpoints
+    hostPath:
+      path: /tmp/checkpoints
+      type: DirectoryOrCreate
+  nodeSelector:
+    kubernetes.io/hostname: {NODE_NAME}

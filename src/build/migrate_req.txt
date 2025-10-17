@@ -5,4 +5,8 @@ uvicorn
 requests
 psycopg2-binary
 prettytable
+paramiko
+psutil
+grpcio
+grpcio-tools
 

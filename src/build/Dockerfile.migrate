@@ -2,57 +2,98 @@ FROM python:3.9-slim
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies for containerd operations and SSH
 RUN apt-get update && apt-get install -y \
     curl \
     wget \
     gnupg \
-    criu \
+    docker.io \
+    containerd \
+    jq \
     procps \
     psmisc \
     htop \
-    openssh-server \
-    sshpass \
     apt-transport-https \
     ca-certificates \
+    criu \
+    tar \
+    gzip \
+    openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
-RUN curl -LO "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/arm64/kubectl" && \
+# Install crictl for containerd operations
+RUN VERSION="v1.28.0" && \
+    ARCH=$(dpkg --print-architecture) && \
+    curl -L "https://github.com/kubernetes-sigs/cri-tools/releases/download/${VERSION}/crictl-${VERSION}-linux-${ARCH}.tar.gz" | tar -xz -C /usr/local/bin && \
+    chmod +x /usr/local/bin/crictl
+
+# Install kubectl
+RUN ARCH=$(dpkg --print-architecture) && \
+    curl -LO "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/${ARCH}/kubectl" && \
     chmod +x kubectl && \
     mv kubectl /usr/local/bin/
 
-# Create necessary directories for Kubernetes, CRIU, and Docker
+# Create necessary directories for Kubernetes, CRIU, containerd, and Docker
 RUN mkdir -p /root/.kube \
     && mkdir -p /var/run/secrets/kubernetes.io/serviceaccount \
-    && mkdir -p /tmp/checkpoint \
     && mkdir -p /var/run \
     && mkdir -p /sys/fs/cgroup \
+    && mkdir -p /etc/containerd \
+    && mkdir -p /etc/crictl \
+    && mkdir -p /run/containerd \
     && chmod 700 /root/.kube
 
-# Set environment variables
+# Configure containerd with experimental features enabled
+RUN containerd config default > /etc/containerd/config.toml && \
+    sed -i 's/#disabled_plugins = \["cri"\]/disabled_plugins = []/' /etc/containerd/config.toml && \
+    echo '[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]' >> /etc/containerd/config.toml && \
+    echo '  SystemdCgroup = false' >> /etc/containerd/config.toml
+
+# Configure crictl for containerd
+RUN echo 'runtime-endpoint: unix:///run/containerd/containerd.sock' > /etc/crictl/crictl.yaml && \
+    echo 'image-endpoint: unix:///run/containerd/containerd.sock' >> /etc/crictl/crictl.yaml && \
+    echo 'timeout: 10' >> /etc/crictl/crictl.yaml && \
+    echo 'debug: false' >> /etc/crictl/crictl.yaml
+
+# Set environment variables for containerd
 ENV PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-ENV CRIU_PATH="/usr/sbin/criu"
 ENV KUBECONFIG="/root/.kube/config"
 ENV DOCKER_HOST="unix:///var/run/docker.sock"
+ENV CONTAINERD_SOCKET="/run/containerd/containerd.sock"
+ENV CONTAINERD_NAMESPACE="k8s.io"
+ENV CRIU_PATH="/usr/sbin/criu"
 
-# Add a health check for kubectl
-RUN kubectl version --client
+# Verify installations
+RUN kubectl version --client && \
+    crictl --version
 
-# Install dependencies
+# Install Python dependencies
 COPY build/migrate_req.txt .
-RUN pip install -r migrate_req.txt
+RUN pip install --upgrade pip && \
+    pip install -r migrate_req.txt
 
-# Copy script into the container
-COPY controller/migrate_process.py .
-COPY controller/utils/ .
-COPY controller/migrate_pod.sh .
-RUN chmod +x migrate_pod.sh
+# Copy scripts and utilities into the container
+COPY controller/migrate_service.py .
+COPY controller/utils/ ./utils/
 
-# Create volume mount points
-VOLUME ["/root/.kube", "/var/run/docker.sock", "/tmp/checkpoint", "/proc", "/sys", "/dev", "/var/run", "/sys/fs/cgroup"]
+# Add build timestamp to force cache invalidation when files change
+ARG BUILD_TIMESTAMP
+RUN echo "Build timestamp: ${BUILD_TIMESTAMP}" > /build_info.txt
+
+# Copy startup script for migrator pod-based migration
+COPY build/start.sh /start.sh
+RUN chmod +x /start.sh
+
+# Migrator pods are now created as part of deployment process
+
+# Make the migration service executable
+RUN chmod +x migrate_service.py
+
+# Create volume mount points for containerd operations
+VOLUME ["/root/.kube", "/sys", "/dev", "/var/run", "/sys/fs/cgroup", "/run/containerd"]
 
 # Expose the port specified in the manifest
 EXPOSE 8000
 
-# Set the entrypoint to match the manifest command
-ENTRYPOINT ["python", "migrate_process.py"]
+# Set the entrypoint to use the startup script
+ENTRYPOINT ["/start.sh"]

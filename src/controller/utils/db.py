@@ -13,11 +13,11 @@ logger = logging.getLogger(__name__)
 
 # Database connection parameters
 db_config = {
-    'host': 'db-service',
-    'port': 5432,
-    'dbname': 'postgres',
-    'user': 'sfarokhi',
-    'password': 'wordpass'
+    'host': os.getenv('DB_HOST', 'db-service'),
+    'port': int(os.getenv('DB_PORT', '5432')),
+    'dbname': os.getenv('DB_NAME', 'sfarokhi'),
+    'user': os.getenv('DB_USER', 'sfarokhi'),
+    'password': os.getenv('DB_PASSWORD', 'wordpass')
 }
 
 min_query = """

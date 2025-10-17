@@ -5,37 +5,33 @@ metadata:
   namespace: monitor
   labels:
     name: python-migrate-service
+    version: "3.0"
+    runtime: "containerd"
 spec:
+  serviceAccountName: controller-account
   containers:
   - name: python-migrate
-    image: python:3.9-slim
-    command: ["/bin/bash", "-c"]
-    args:
-    - |
-      apt-get update && \
-      apt-get install -y kubectl curl && \
-      pip install kubernetes fastapi uvicorn psycopg2-binary && \
-      python /app/migrate_process.py
-    imagePullPolicy: IfNotPresent
-    securityContext:
-      privileged: true  # Required for CRIU operations
-      capabilities:
-        add:
-        - ALL
-    resources:
-      requests:
-        memory: "256Mi"
-        cpu: "500m"
-      limits:
-        memory: "512Mi"
-        cpu: "1000m"
+    image: salamander1223/python-migrate:latest
+    imagePullPolicy: Always
+    command: ["/start.sh"]
     ports:
     - name: http
       containerPort: 8000
       protocol: TCP
+    env:
+    - name: KUBECONFIG
+      value: /root/.kube/config
+    - name: CONTAINERD_SOCKET
+      value: /run/containerd/containerd.sock
+    - name: CONTAINERD_NAMESPACE
+      value: "foo"
+    - name: CRIU_PATH
+      value: /usr/sbin/criu
     volumeMounts:
-    - name: app-code
-      mountPath: /app
+    - name: kube-config
+      mountPath: /root/.kube
+    - name: containerd-sock
+      mountPath: /run/containerd
     - name: proc
       mountPath: /proc
     - name: sys
@@ -45,45 +41,64 @@ spec:
     - name: var-run
       mountPath: /var/run
     - name: cgroup
-      mountPath: /sys/fs/cgroup
-    - name: checkpoint-dir
-      mountPath: /tmp/checkpoint
+      mountPath: /sys/fs/cgroup 
+    - name: checkpoints
+      mountPath: /tmp/checkpoints
+    securityContext:
+      privileged: true  # Required for containerd checkpoint operations
+      capabilities:
+        add:
+        - ALL
+      runAsUser: 0  # Run as root to access Docker socket
+      runAsGroup: 0
+    resources:
+      requests:
+        memory: "512Mi"
+        cpu: "1000m"
+      limits:
+        memory: "1Gi"
+        cpu: "2000m"
   volumes:
-  - name: app-code
-    configMap:
-      name: python-migrate-code
+  - name: kube-config
+    hostPath:
+      path: /root/.kube
+      type: DirectoryOrCreate
+  - name: containerd-sock
+    hostPath:
+      path: /run/containerd
+      type: DirectoryOrCreate
   - name: proc
     hostPath:
       path: /proc
+      type: Directory
   - name: sys
     hostPath:
       path: /sys
+      type: Directory
   - name: dev
     hostPath:
       path: /dev
+      type: Directory
   - name: var-run
     hostPath:
       path: /var/run
+      type: Directory
   - name: cgroup
     hostPath:
       path: /sys/fs/cgroup
-  - name: checkpoint-dir
-    emptyDir: {}
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: python-migrate-code
-  namespace: monitor
-data:
-  migrate_process.py: |
-    # Content of migrate_process.py will be added here
+      type: Directory
+  - name: checkpoints
+    hostPath:
+      path: /tmp/checkpoints
+      type: DirectoryOrCreate
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: python-migrate-service
   namespace: monitor
+  labels:
+    version: "3.0"
 spec:
   selector:
     name: python-migrate-service
@@ -91,4 +106,4 @@ spec:
   - port: 8000
     targetPort: 8000
     protocol: TCP
-  type: ClusterIP 
+  type: ClusterIP

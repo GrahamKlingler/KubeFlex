@@ -1,3 +1,2 @@
 #!/bin/bash
-
-./delete.sh && ./update.sh && ./run.sh namespace=foo
+./delete.sh --migrate && ./update.sh && ./run.sh --migrate

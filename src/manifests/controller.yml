@@ -40,54 +40,6 @@ spec:
                 values:
                 - kind-worker
       containers:
-      - name: python-migrate
-        image: salamander1223/python-migrate:latest
-        command: ["python", "migrate_process.py"]
-        ports:
-        - name: migrate
-          containerPort: 8000
-          protocol: TCP
-        resources:
-          limits:
-            cpu: 100m
-            memory: 1000Mi
-          requests:
-            cpu: 50m
-            memory: 500Mi
-        env:
-        - name: KUBECONFIG
-          value: /root/.kube/config
-        - name: DOCKER_HOST
-          value: unix:///var/run/docker.sock
-        - name: CRIU_PATH
-          value: /usr/sbin/criu
-        volumeMounts:
-        - name: kube-config
-          mountPath: /root/.kube
-        - name: docker-sock
-          mountPath: /var/run/docker.sock
-        - name: checkpoint-dir
-          mountPath: /tmp/checkpoint
-        - name: proc
-          mountPath: /proc
-        - name: sys
-          mountPath: /sys
-        - name: dev
-          mountPath: /dev
-        - name: run
-          mountPath: /var/run
-        - name: cgroup
-          mountPath: /sys/fs/cgroup
-        securityContext:
-          privileged: true
-          runAsUser: 0
-          runAsGroup: 0
-          allowPrivilegeEscalation: true
-          fsGroup: 999
-          capabilities:
-            add:
-            - ALL
-
       - name: python-controller
         image: salamander1223/python-controller:latest
         imagePullPolicy: Always
@@ -95,15 +47,17 @@ spec:
           privileged: true
         resources:
           limits:
+            cpu: 200m
+            memory: 200Mi
+          requests:
             cpu: 100m
             memory: 100Mi
-          requests:
-            cpu: 50m
-            memory: 50Mi
         volumeMounts:
         - name: run
           mountPath: /var/run
           readOnly: false
+        - name: kube-config
+          mountPath: /root/.kube
         ports:
         - name: main-http
           containerPort: 8081
@@ -116,72 +70,18 @@ spec:
         - name: STORAGE_PATH
           value: "/storage"
         - name: POD_SELECTOR
-          valueFrom:
-            configMapKeyRef:
-              key: POD_SELECTOR
-              name: pod-selector-config
+          value: "io.kubernetes.pod.namespace=foo"
         - name: CARBON_SERVER_URL
           value: "http://metadata:8008"
-        # io.kubernetes.pod.namespace=<namespace>
-        # io.kubernetes.pod.name=<pod-name>
-        # io.kubernetes.container.name=<container-name>
       
       volumes:
       - name: kube-config
         hostPath:
           path: /root/.kube
           type: DirectoryOrCreate
-      - name: docker-sock
-        hostPath:
-          path: /var/run/docker.sock
-          type: ""
-      - name: checkpoint-dir
-        hostPath:
-          path: /tmp/checkpoint
-          type: DirectoryOrCreate
-      - name: proc
-        hostPath:
-          path: /proc
-          type: Directory
-      - name: sys
-        hostPath:
-          path: /sys
-          type: Directory
-      - name: dev
-        hostPath:
-          path: /dev
-          type: Directory
       - name: run
         hostPath:
           path: /var/run
-          type: Directory
-      - name: cgroup
-        hostPath:
-          path: /sys/fs/cgroup
-          type: Directory
-      - name: machine-id
-        hostPath:
-          path: /etc/machine-id
-          type: File
-      - name: rootfs
-        hostPath:
-          path: /
-          type: Directory
-      - name: var-log
-        hostPath:
-          path: /var/log
-          type: Directory
-      - name: containers
-        hostPath:
-          path: /var/lib/containers
-          type: Directory
-      - name: docker
-        hostPath:
-          path: /var/lib/docker
-          type: Directory
-      - name: disk
-        hostPath:
-          path: /dev/disk
           type: Directory
 
       # - name: cadvsior
@@ -232,21 +132,3 @@ spec:
       #   - name: http
       #     containerPort: 8080
       #     protocol: TCP
-
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: python-migrate-service
-  namespace: monitor
-  labels:
-    app: controller
-spec:
-  selector:
-    name: controller
-  ports:
-  - name: migrate
-    port: 8000
-    targetPort: migrate
-    protocol: TCP
-  type: ClusterIP

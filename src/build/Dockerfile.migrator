@@ -1,0 +1,76 @@
+FROM python:3.9-slim
+
+WORKDIR /app
+
+# Install system dependencies for containerd operations
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    gnupg \
+    docker.io \
+    containerd \
+    jq \
+    procps \
+    psmisc \
+    htop \
+    apt-transport-https \
+    ca-certificates \
+    criu \
+    tar \
+    gzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install crictl for containerd operations
+RUN VERSION="v1.28.0" && \
+    ARCH=$(dpkg --print-architecture) && \
+    curl -L "https://github.com/kubernetes-sigs/cri-tools/releases/download/${VERSION}/crictl-${VERSION}-linux-${ARCH}.tar.gz" | tar -xz -C /usr/local/bin && \
+    chmod +x /usr/local/bin/crictl
+
+# Install kubectl
+RUN ARCH=$(dpkg --print-architecture) && \
+    curl -LO "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/${ARCH}/kubectl" && \
+    chmod +x kubectl && \
+    mv kubectl /usr/local/bin/
+
+# Create necessary directories for Kubernetes, CRIU, containerd, and Docker
+RUN mkdir -p /root/.kube \
+    && mkdir -p /var/run/secrets/kubernetes.io/serviceaccount \
+    && mkdir -p /var/run \
+    && mkdir -p /sys/fs/cgroup \
+    && mkdir -p /etc/containerd \
+    && mkdir -p /etc/crictl \
+    && mkdir -p /run/containerd \
+    && chmod 700 /root/.kube
+
+# Configure containerd with experimental features enabled
+RUN containerd config default > /etc/containerd/config.toml && \
+    sed -i 's/#disabled_plugins = \["cri"\]/disabled_plugins = []/' /etc/containerd/config.toml && \
+    echo '[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]' >> /etc/containerd/config.toml && \
+    echo '  SystemdCgroup = false' >> /etc/containerd/config.toml
+
+# Configure crictl for containerd
+RUN echo 'runtime-endpoint: unix:///run/containerd/containerd.sock' > /etc/crictl/crictl.yaml && \
+    echo 'image-endpoint: unix:///run/containerd/containerd.sock' >> /etc/crictl/crictl.yaml && \
+    echo 'timeout: 10' >> /etc/crictl/crictl.yaml && \
+    echo 'debug: false' >> /etc/crictl/crictl.yaml
+
+# Set environment variables for containerd
+ENV PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ENV KUBECONFIG="/root/.kube/config"
+ENV CONTAINERD_SOCKET="/run/containerd/containerd.sock"
+ENV CONTAINERD_NAMESPACE="k8s.io"
+ENV CRIU_PATH="/usr/sbin/criu"
+
+# Verify installations
+RUN kubectl version --client && \
+    crictl --version
+
+# Install Python dependencies (minimal set for migrator pods)
+RUN pip install --upgrade pip && \
+    pip install requests kubernetes
+
+# Create volume mount points for containerd operations
+VOLUME ["/root/.kube", "/sys", "/dev", "/var/run", "/sys/fs/cgroup", "/run/containerd", "/tmp/checkpoints"]
+
+# Set the entrypoint to sleep indefinitely (migrator pods run as daemons)
+ENTRYPOINT ["sleep", "infinity"]
