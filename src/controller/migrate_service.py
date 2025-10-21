@@ -14,9 +14,7 @@ from pydantic import BaseModel
 import uvicorn
 
 # Import the migration functions
-from utils.live_migration import criu_migrate_pod
-from utils.kubeapi import load_kubernetes_config
-from kubernetes import client
+from utils.live_migration import criu_migrate_pod, load_kubernetes_config
 
 # Set up logging
 logging.basicConfig(

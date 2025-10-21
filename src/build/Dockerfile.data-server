@@ -15,7 +15,6 @@ RUN pip install -r data_req.txt
 
 # Copy the Python code from controller/
 COPY controller/utils/db.py .
-COPY controller/utils/kubeapi.py .
 COPY controller/utils/metadata.py .
 
 # Run the script

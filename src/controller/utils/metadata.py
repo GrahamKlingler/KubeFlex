@@ -10,7 +10,6 @@ import matplotlib.pyplot as plt
 import pytz
 from io import BytesIO
 from db import *
-from kubeapi import *
 
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots

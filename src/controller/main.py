@@ -29,7 +29,6 @@ from kubernetes.client.rest import ApiException
 # Local imports
 from utils.cadvisor import *
 from utils.db import *
-from utils.kubeapi import *
 
 # Set up logging
 logging.basicConfig(

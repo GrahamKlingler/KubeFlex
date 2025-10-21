@@ -22,23 +22,32 @@ import socket
 import tarfile
 import io
 from datetime import datetime
-from kubernetes import client
+from kubernetes import client, config
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-# Import Kubernetes utilities
-from .kubeapi import load_kubernetes_config
-
 logger = logging.getLogger(__name__)
 
-
+def load_kubernetes_config():
+    """Load Kubernetes configuration."""
+    try:
+        # Try in-cluster config first
+        config.load_incluster_config()
+        logger.info("Using in-cluster Kubernetes configuration")
+    except:
+        try:
+            # Fall back to kubeconfig
+            config.load_kube_config()
+            logger.info("Using kubeconfig Kubernetes configuration")
+        except Exception as e:
+            logger.error(f"Failed to load Kubernetes configuration: {e}")
+            return False
+    return True
 
 def criu_migrate_pod(source_pod: str, source_node: str, target_node: str, namespace: str,
                      checkpoint_dir: str = "/tmp/checkpoints") -> Dict:
     """
     Perform CRIU-based migration of a pod to a target node.
-    
-
     
     Args:
         source_pod: Name of the source pod to migrate
@@ -433,7 +442,6 @@ class CriuMigrationTracker:
         try:
             self._update_step("getting_node_information", "node_discovery")
             
-            from kubernetes import client
             load_kubernetes_config()
             api = client.CoreV1Api()
             
@@ -441,14 +449,11 @@ class CriuMigrationTracker:
             source_pod = api.read_namespaced_pod(name=self.source_pod, namespace=self.namespace)
             self.source_node = source_pod.spec.node_name
             
-            logger.info(f"[NODE_INFO] Source node: {self.source_node}")
-            logger.info(f"[NODE_INFO] Target node: {self.target_node}")
-            
             return self.source_node, self.target_node
             
         except Exception as e:
-            # self._log_state(f"Failed to get node information: {e}", "ERROR")
-            raise
+            logger.error(f"Failed to get node information: {e}")
+            return None, None
     
 
     def get_container_info_via_crictl(self, node_name: str, pod_name: str) -> Dict:
