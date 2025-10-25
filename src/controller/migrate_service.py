@@ -11,6 +11,7 @@ import time
 from typing import Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from kubernetes import client, config
 import uvicorn
 
 # Import the migration functions

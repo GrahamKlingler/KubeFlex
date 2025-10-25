@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Flex-Nautilus Migration Service v3.0.0 - Simplified Test Script
+# Flex-Nautilus Migration Service - Test Script
 # Hardcoded values for easy testing
 
 set -e
@@ -136,19 +136,6 @@ EOF
         return 1
     fi
     
-    log_success "Migration completed successfully!"
-    
-    # Show additional info if available
-    local message=$(echo "$body" | jq -r '.message // ""')
-    if [ -n "$message" ] && [ "$message" != "null" ]; then
-        log_info "Message: $message"
-    fi
-    
-    local checkpoint_path=$(echo "$body" | jq -r '.checkpoint_path // ""')
-    if [ -n "$checkpoint_path" ] && [ "$checkpoint_path" != "null" ]; then
-        log_info "Checkpoint path: $checkpoint_path"
-    fi
-    
     return 0
 }
 
@@ -187,7 +174,7 @@ test_service_connectivity() {
 # Main function
 main() {
     log_info "============================================================"
-    log_info "Flex-Nautilus Migration Service v3.0.0 - Simplified Test"
+    log_info "Flex-Nautilus Migration Service"
     log_info "============================================================"
     log_info "Service URL: $URL (via port forwarding)"
     log_info "Namespace: $NAMESPACE"

@@ -11,14 +11,12 @@ metadata:
 spec:
   affinity:
     nodeAffinity:
-      preferredDuringSchedulingIgnoredDuringExecution:
-      - weight: 100
-        preference:
-          matchExpressions:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
           - key: "REGION"
             operator: In
-            values:
-            - "TEN"
+            values: ["TEN"]
   containers:
   - name: test-container
     image: salamander1223/testpod:latest

@@ -21,6 +21,7 @@ import threading
 import socket
 import tarfile
 import io
+import tempfile
 from datetime import datetime
 from kubernetes import client, config
 from pathlib import Path
@@ -257,7 +258,7 @@ class CriuMigrationTracker:
             
             # Test 1: Basic kubectl exec access to debug pod
             cmd = "echo 'Hello from debug pod'"
-            exit_code, stdout, stderr = self.execute_on_kind_node(node_name, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(node_name, cmd)
             
             if exit_code != 0:
                 logger.error(f"[NODE_TEST] Cannot access KIND node {node_name}: {stderr}")
@@ -267,7 +268,7 @@ class CriuMigrationTracker:
             
             # Test 2: Check if containerd is available
             cmd = "ctr version"
-            exit_code, stdout, stderr = self.execute_on_kind_node(node_name, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(node_name, cmd)
             
             if exit_code == 0:
                 logger.info(f"[NODE_TEST] Containerd available: {stdout.strip()}")
@@ -276,7 +277,7 @@ class CriuMigrationTracker:
             
             # Test 3: Check if crictl is available
             cmd = "crictl --version"
-            exit_code, stdout, stderr = self.execute_on_kind_node(node_name, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(node_name, cmd)
             
             if exit_code == 0:
                 logger.info(f"[NODE_TEST] Crictl available: {stdout.strip()}")
@@ -285,7 +286,7 @@ class CriuMigrationTracker:
             
             # Test 4: Check if Docker is available (it shouldn't be on KIND nodes)
             cmd = "docker version"
-            exit_code, stdout, stderr = self.execute_on_kind_node(node_name, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(node_name, cmd)
             
             if exit_code == 0:
                 logger.warning(f"[NODE_TEST] Docker is available on KIND node (unexpected): {stdout.strip()}")
@@ -294,13 +295,13 @@ class CriuMigrationTracker:
             
             # Test 5: Check available tools
             cmd = "which ctr crictl docker criu"
-            exit_code, stdout, stderr = self.execute_on_kind_node(node_name, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(node_name, cmd)
             
             logger.info(f"[NODE_TEST] Available tools: {stdout.strip()}")
             
             # Test 6: Check CRIU availability specifically
             cmd = "criu check"
-            exit_code, stdout, stderr = self.execute_on_kind_node(node_name, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(node_name, cmd)
             
             if exit_code == 0:
                 logger.info(f"[NODE_TEST] CRIU check passed: {stdout.strip()}")
@@ -320,7 +321,7 @@ class CriuMigrationTracker:
             
             # Check basic CRIU functionality
             cmd = "criu check"
-            exit_code, stdout, stderr = self.execute_on_kind_node(node_name, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(node_name, cmd)
             
             if exit_code != 0:
                 logger.error(f"[CRIU_CHECK] CRIU check failed: {stderr}")
@@ -330,7 +331,7 @@ class CriuMigrationTracker:
             
             # Check for mount namespace support
             cmd = "criu check --feature mnt_id"
-            exit_code, stdout, stderr = self.execute_on_kind_node(node_name, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(node_name, cmd)
             
             if exit_code == 0:
                 logger.info(f"[CRIU_CHECK] Mount namespace support available")
@@ -350,28 +351,28 @@ class CriuMigrationTracker:
             
             # Create cgroup yard directory structure
             cmd = "mkdir -p /cgroup-yard/{cpuset,cpu,memory,devices,freezer,blkio,perf_event}"
-            exit_code, stdout, stderr = self.execute_on_kind_node(node_name, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(node_name, cmd)
             
             if exit_code != 0:
                 logger.warning(f"[CGROUP_YARD] Failed to create cgroup directories: {stderr}")
             
             # Create unified cgroup v2 directory
             cmd = "mkdir -p /cgroup-yard/unified"
-            exit_code, stdout, stderr = self.execute_on_kind_node(node_name, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(node_name, cmd)
             
             # Mount cgroup controllers (ignore errors if already mounted)
             cgroup_controllers = ['cpu', 'memory', 'cpuset', 'devices', 'freezer']
             for controller in cgroup_controllers:
                 cmd = f"mount -t cgroup -o {controller} none /cgroup-yard/{controller} 2>/dev/null || true"
-                self.execute_on_kind_node(node_name, cmd)
+                self.execute_on_helper(node_name, cmd)
             
             # Mount cgroup v2
             cmd = "mount -t cgroup2 none /cgroup-yard/unified 2>/dev/null || true"
-            self.execute_on_kind_node(node_name, cmd)
+            self.execute_on_helper(node_name, cmd)
             
             # Verify cgroup yard setup
             cmd = "ls -la /cgroup-yard/"
-            exit_code, stdout, stderr = self.execute_on_kind_node(node_name, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(node_name, cmd)
             
             if exit_code == 0:
                 logger.info(f"[CGROUP_YARD] Cgroup yard setup completed: {stdout.strip()}")
@@ -391,7 +392,7 @@ class CriuMigrationTracker:
             
             # Create checkpoints directory
             cmd = f"mkdir -p {checkpoint_dir}"
-            exit_code, stdout, stderr = self.execute_on_kind_node(node_name, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(node_name, cmd)
             
             if exit_code != 0:
                 logger.error(f"[MOUNT_SETUP] Failed to create checkpoint directory: {stderr}")
@@ -404,7 +405,7 @@ class CriuMigrationTracker:
             logger.error(f"[MOUNT_SETUP] Failed to setup mount points: {e}")
             return False
 
-    def execute_on_kind_node(self, node_name: str, command: str, print_output: bool = True) -> Tuple[int, str, str]:
+    def execute_on_helper(self, node_name: str, command: str, print_output: bool = True) -> Tuple[int, str, str]:
         """Execute command on a KIND node via kubectl exec to debug pod with comprehensive logging."""
         try:
             debug_pod_name = f"migrator-{node_name}"
@@ -463,7 +464,7 @@ class CriuMigrationTracker:
             
             # Get pod ID using crictl
             cmd = f"crictl pods --name {pod_name} --namespace {self.namespace} -q"
-            exit_code, stdout, stderr = self.execute_on_kind_node(node_name, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(node_name, cmd)
             
             if exit_code != 0 or not stdout.strip():
                 logger.error(f"Failed to get pod ID: {stderr}")
@@ -474,7 +475,7 @@ class CriuMigrationTracker:
             
             # Get container ID for the pod
             cmd = f"crictl ps --pod {pod_id} -q"
-            exit_code, stdout, stderr = self.execute_on_kind_node(node_name, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(node_name, cmd)
             
             if exit_code != 0 or not stdout.strip():
                 logger.error(f"Failed to get container ID: {stderr}")
@@ -485,7 +486,7 @@ class CriuMigrationTracker:
             
             # Get detailed container information
             cmd = f"crictl inspect {container_id}"
-            exit_code, stdout, stderr = self.execute_on_kind_node(node_name, cmd, print_output=False)
+            exit_code, stdout, stderr = self.execute_on_helper(node_name, cmd, print_output=False)
             
             if exit_code != 0:
                 logger.error(f"Failed to inspect container: {stderr}")
@@ -495,7 +496,7 @@ class CriuMigrationTracker:
             
             # Get task ID for checkpointing
             cmd = f"crictl ps --id {container_id} --output table"
-            exit_code, stdout, stderr = self.execute_on_kind_node(node_name, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(node_name, cmd)
             
             task_id = None
             if exit_code == 0:
@@ -550,7 +551,7 @@ class CriuMigrationTracker:
             cmd += "fi; "
             cmd += "done'"
             
-            exit_code, stdout, stderr = self.execute_on_kind_node(node_name, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(node_name, cmd)
             
             if exit_code != 0:
                 logger.error(f"[MOUNT_DISCOVERY] Failed to parse mountinfo: {stderr}")
@@ -715,7 +716,7 @@ class CriuMigrationTracker:
         
         # Get the actual application PID (child of PID 1)
         cmd = f"kubectl exec -n {self.namespace} {self.source_pod} -- ps --ppid 1 -o pid= --no-headers"
-        exit_code, stdout, stderr = self.execute_on_kind_node(node_name, cmd)
+        exit_code, stdout, stderr = self.execute_on_helper(node_name, cmd)
         
         if exit_code != 0 or not stdout.strip():
             logger.warning(f"[CRIU_DUMP] Failed to get child process PID, using PID 1: {stderr}")
@@ -761,7 +762,7 @@ class CriuMigrationTracker:
             
             # Check checkpoint images for mount information
             cmd = f"ls -la {checkpoint_dir}/*img | grep -E '(mount|mnt)' || true"
-            exit_code, stdout, stderr = self.execute_on_kind_node(node_name, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(node_name, cmd)
             
             if stdout:
                 logger.info(f"[RESTORE_PREP] Mount-related images: {stdout}")
@@ -770,14 +771,14 @@ class CriuMigrationTracker:
             mount_images = ["mountpoints.img", "mntns.img"]
             for img in mount_images:
                 cmd = f"test -f {checkpoint_dir}/{img} && echo 'EXISTS' || echo 'MISSING'"
-                exit_code, stdout, stderr = self.execute_on_kind_node(node_name, cmd)
+                exit_code, stdout, stderr = self.execute_on_helper(node_name, cmd)
                 logger.info(f"[RESTORE_PREP] {img}: {stdout.strip()}")
             
             # Create safe restore directory structure
             safe_dirs = ["/proc", "/sys", "/dev", "/tmp"]
             for dir_path in safe_dirs:
                 cmd = f"mkdir -p {dir_path}"
-                self.execute_on_kind_node(node_name, cmd)
+                self.execute_on_helper(node_name, cmd)
             
             logger.info("[RESTORE_PREP] Mount analysis and preparation completed")
             return True
@@ -930,75 +931,78 @@ class CriuMigrationTracker:
             
             # First, ensure the checkpoint directory exists and is writable
             cmd = f"mkdir -p {self.checkpoint_dir} && touch {self.checkpoint_dir}/test_write && rm {self.checkpoint_dir}/test_write"
-            exit_code, stdout, stderr = self.execute_on_kind_node(self.target_node, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(self.target_node, cmd)
             if exit_code != 0:
                 logger.error(f"[TARGET_POD] Checkpoint directory {self.checkpoint_dir} is not writable: {stderr}")
                 # Try alternative location
                 pod_spec_path = "/tmp/target_pod.yaml"
                 logger.info(f"[TARGET_POD] Using alternative location: {pod_spec_path}")
+            else:
+                logger.info(f"[TARGET_POD] Checkpoint directory {self.checkpoint_dir} is writable")
             
             # Debug: Check which node we're actually writing to
             cmd = f"hostname"
-            exit_code, stdout, stderr = self.execute_on_kind_node(self.target_node, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(self.target_node, cmd)
             logger.info(f"[TARGET_POD] Writing to node: {stdout.strip()}")
             
-            # Create the file using a more reliable method
-            logger.info(f"[TARGET_POD] Creating pod spec file using reliable method")
+            # Debug: List the checkpoint directory contents before creating the file
+            cmd = f"ls -la {self.checkpoint_dir}"
+            exit_code, stdout, stderr = self.execute_on_helper(self.target_node, cmd)
+            logger.info(f"[TARGET_POD] Checkpoint directory contents before file creation: {stdout.strip()}")
+            
+            # Create the file using kubectl cp method (most reliable)
+            logger.info(f"[TARGET_POD] Creating pod spec file using kubectl cp method")
             pod_spec_content = "\n".join(pod_spec_lines)
             
-            # Method 1: Use base64 encoding to avoid shell escaping issues
-            import base64
-            encoded_content = base64.b64encode(pod_spec_content.encode()).decode()
-            cmd = f"echo '{encoded_content}' | base64 -d > {pod_spec_path}"
-            exit_code, stdout, stderr = self.execute_on_kind_node(self.target_node, cmd)
-            if exit_code == 0:
-                logger.info(f"[TARGET_POD] Base64 method succeeded")
-            else:
-                logger.warning(f"[TARGET_POD] Base64 method failed: {stderr}")
+            # Write the pod spec to a temporary local file
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as temp_file:
+                temp_file.write(pod_spec_content)
+                temp_file_path = temp_file.name
+            
+            try:
+                # Copy the file to the target node using kubectl cp
+                debug_pod_name = f"migrator-{self.target_node}"
+                cmd = f"kubectl cp {temp_file_path} monitor/{debug_pod_name}:{pod_spec_path}"
+                logger.info(f"[TARGET_POD] Copying file with command: {cmd}")
                 
-                # Method 2: Use printf with proper escaping
-                logger.info(f"[TARGET_POD] Trying printf method")
-                # Escape single quotes and newlines
-                escaped_content = pod_spec_content.replace("'", "'\"'\"'").replace('\n', '\\n')
-                cmd = f"printf '{escaped_content}' > {pod_spec_path}"
-            exit_code, stdout, stderr = self.execute_on_kind_node(self.target_node, cmd)
-            if exit_code == 0:
-                    logger.info(f"[TARGET_POD] Printf method succeeded")
-            else:
-                    logger.warning(f"[TARGET_POD] Printf method failed: {stderr}")
+                result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+                if result.returncode == 0:
+                    logger.info(f"[TARGET_POD] Kubectl cp method succeeded")
+                else:
+                    logger.error(f"[TARGET_POD] Kubectl cp method failed: {result.stderr}")
+                    raise Exception(f"Failed to copy pod spec file: {result.stderr}")
                     
-                    # Method 3: Fallback to echo method with proper escaping
-                    logger.info(f"[TARGET_POD] Trying echo method with proper escaping")
-                    cmd = f"rm -f {pod_spec_path}"  # Clear the file first
-                    self.execute_on_kind_node(self.target_node, cmd)
-                    
-                    for i, line in enumerate(pod_spec_lines):
-                        # Escape single quotes in the line
-                        escaped_line = line.replace("'", "'\"'\"'")
-                        cmd = f"echo '{escaped_line}' >> {pod_spec_path}"
-                        exit_code, stdout, stderr = self.execute_on_kind_node(self.target_node, cmd)
-                        if exit_code != 0:
-                            logger.error(f"[TARGET_POD] Failed to write pod spec line {i+1}: {stderr}")
-                            break
-                    else:
-                        logger.info(f"[TARGET_POD] Echo method succeeded")
+            finally:
+                # Clean up temporary file
+                try:
+                    os.unlink(temp_file_path)
+                except:
+                    pass
+            
+            # Debug: List the checkpoint directory contents after creating the file
+            cmd = f"ls -la {self.checkpoint_dir}"
+            exit_code, stdout, stderr = self.execute_on_helper(self.target_node, cmd)
+            logger.info(f"[TARGET_POD] Checkpoint directory contents after file creation: {stdout.strip()}")
             
             # Verify the file has content
             cmd = f"wc -l {pod_spec_path}"
-            exit_code, stdout, stderr = self.execute_on_kind_node(self.target_node, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(self.target_node, cmd)
             logger.info(f"[TARGET_POD] Final file line count: {stdout.strip()}")
             
             # If file is still empty, this is a critical error
             if exit_code == 0 and stdout.strip().startswith("0 "):
                 logger.error(f"[TARGET_POD] All file creation methods failed - file is empty")
                 raise Exception("Failed to create pod spec file with content - all methods failed")
+            elif exit_code != 0:
+                logger.error(f"[TARGET_POD] File verification failed: {stderr}")
+                raise Exception(f"Failed to verify pod spec file: {stderr}")
             
             # Apply the pod spec directly from the migrator pod (no file transfer needed)
             logger.info(f"[TARGET_POD] Applying pod spec directly from migrator pod")
             
             # Apply the pod spec using kubectl (run from the migrator pod, not inside it)
             cmd = f"kubectl apply -f {pod_spec_path}"
-            exit_code, stdout, stderr = self.execute_on_kind_node(self.target_node, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(self.target_node, cmd)
             
             if exit_code != 0:
                 raise Exception(f"Failed to create pod: {stderr}")
@@ -1006,15 +1010,15 @@ class CriuMigrationTracker:
             logger.info(f"[TARGET_POD] Successfully created pod: {container_name}")
             
             # Wait for pod to be ready
-            cmd = f"kubectl wait --for=condition=Ready pod {container_name} -n {self.namespace} --timeout=20s"
-            exit_code, stdout, stderr = self.execute_on_kind_node(self.target_node, cmd)
+            cmd = f"kubectl wait --for=condition=Ready pod {container_name} -n {self.namespace} --timeout=300s"
+            exit_code, stdout, stderr = self.execute_on_helper(self.target_node, cmd)
             
             if exit_code != 0:
                 logger.warning(f"Pod {container_name} did not become ready: {stderr}")
             
             # Get the container ID of the new pod on target node
             cmd = f"crictl pods --name {container_name} --namespace {self.namespace} -q"
-            exit_code, stdout, stderr = self.execute_on_kind_node(self.target_node, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(self.target_node, cmd)
             
             if exit_code != 0 or not stdout.strip():
                 logger.error(f"Failed to get pod ID for {container_name} on target node: {stderr}")
@@ -1024,7 +1028,7 @@ class CriuMigrationTracker:
             
             # Get container ID for the pod on target node
             cmd = f"crictl ps --pod {pod_id} -q"
-            exit_code, stdout, stderr = self.execute_on_kind_node(self.target_node, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(self.target_node, cmd)
             
             if exit_code != 0 or not stdout.strip():
                 logger.error(f"Failed to get container ID for pod {container_name} on target node: {stderr}")
@@ -1046,7 +1050,7 @@ class CriuMigrationTracker:
             
             # Get container PID
             cmd = f"crictl inspect {container_id} | jq -r '.info.pid'"
-            exit_code, stdout, stderr = self.execute_on_kind_node(source_node, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(source_node, cmd)
             
             if exit_code != 0 or not stdout.strip():
                 logger.error(f"Failed to get container PID for dump: {stderr}")
@@ -1060,7 +1064,7 @@ class CriuMigrationTracker:
             checkpoint_dir = f"{self.checkpoint_dir}/{checkpoint_name}"
             
             cmd = f"mkdir -p {checkpoint_dir}"
-            exit_code, stdout, stderr = self.execute_on_kind_node(source_node, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(source_node, cmd)
             
             if exit_code != 0:
                 raise Exception(f"Failed to create checkpoint directory: {stderr}")
@@ -1084,7 +1088,7 @@ class CriuMigrationTracker:
             
             # Execute the command with kubectl exec wrapper
             command = f"kubectl exec -n {self.namespace} {source_pod} -- {criu_dump_cmd}"
-            exit_code, stdout, stderr = self.execute_on_kind_node(source_node, command)
+            exit_code, stdout, stderr = self.execute_on_helper(source_node, command)
             
             if exit_code != 0:
                 logger.error(f"CRIU dump failed: {stderr}")
@@ -1107,7 +1111,7 @@ class CriuMigrationTracker:
             # Create tar archive on source node
             tar_file = f"/tmp/migration_checkpoint.tar"
             cmd = f"tar -czf {tar_file} -C {checkpoint_dir} ."
-            exit_code, _, stderr = self.execute_on_kind_node(self.source_node, cmd)
+            exit_code, _, stderr = self.execute_on_helper(self.source_node, cmd)
             
             if exit_code != 0:
                 raise Exception(f"Failed to create tar archive: {stderr}")
@@ -1128,13 +1132,13 @@ class CriuMigrationTracker:
             
             # Create target directory and extract
             cmd = f"mkdir -p {target_checkpoint_dir}"
-            exit_code, stdout, stderr = self.execute_on_kind_node(self.target_node, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(self.target_node, cmd)
             if exit_code != 0:
                 raise Exception(f"Failed to create target checkpoint directory: {stderr}")
             
             # Extract the tar file
             cmd = f"tar -xzf /tmp/migration_checkpoint.tar -C {target_checkpoint_dir}"
-            exit_code, stdout, stderr = self.execute_on_kind_node(self.target_node, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(self.target_node, cmd)
             
             if exit_code != 0:
                 raise Exception(f"Failed to extract checkpoint on target node: {stderr}")
@@ -1143,8 +1147,8 @@ class CriuMigrationTracker:
             
             # Cleanup temporary files
             cmd = f"rm -f /tmp/migration_checkpoint.tar"
-            self.execute_on_kind_node(self.source_node, cmd)
-            self.execute_on_kind_node(self.target_node, cmd)
+            self.execute_on_helper(self.source_node, cmd)
+            self.execute_on_helper(self.target_node, cmd)
             subprocess.run(f"rm -f {temp_file}", shell=True)
             
             return True
@@ -1160,7 +1164,7 @@ class CriuMigrationTracker:
             
             # First, check if /script-data exists in source container
             cmd = f"kubectl exec -n {self.namespace} {self.source_pod} -- test -d /script-data"
-            exit_code, stdout, stderr = self.execute_on_kind_node(self.source_node, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(self.source_node, cmd)
             
             if exit_code != 0:
                 logger.warning(f"[SCRIPT_DATA_COPY] /script-data directory not found in source container: {stderr}")
@@ -1169,36 +1173,38 @@ class CriuMigrationTracker:
             # Copy contents using tar through kubectl exec
             # First, create a tar archive in source container
             cmd = f"kubectl exec -n {self.namespace} {self.source_pod} -- tar -czf /script-data.tar.gz -C /script-data ."
-            exit_code, stdout, stderr = self.execute_on_kind_node(self.source_node, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(self.source_node, cmd)
             
             if exit_code != 0:
                 logger.error(f"[SCRIPT_DATA_COPY] Failed to create tar archive in source: {stderr}")
                 return False
             
-            # Copy the tar file using the shared checkpoint directory (same as checkpoint transfer)
-            # First, copy from source pod to shared checkpoint directory
-            shared_script_file = f"{self.checkpoint_dir}/script-data.tar.gz"
-            cmd = f"kubectl cp {self.namespace}/{self.source_pod}:/script-data.tar.gz {shared_script_file}"
-            exit_code, stdout, stderr = self.execute_on_kind_node(self.source_node, cmd)
+            # Copy the tar file using the same method as checkpoint transfer (via local filesystem)
+            # First, copy from source pod to local filesystem
+            temp_file = f"/tmp/script-data_{int(time.time())}.tar.gz"
             
-            if exit_code != 0:
-                logger.error(f"[SCRIPT_DATA_COPY] Failed to copy tar from source pod: {stderr}")
+            # Copy from source pod to local
+            cmd = f"kubectl cp {self.namespace}/{self.source_pod}:/script-data.tar.gz {temp_file}"
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+            if result.returncode != 0:
+                logger.error(f"[SCRIPT_DATA_COPY] Failed to copy tar from source pod to local: {result.stderr}")
                 return False
             
-            # Then, copy from shared checkpoint directory to target pod
-            cmd = f"kubectl cp {shared_script_file} {self.namespace}/{migrated_pod_name}:/script-data.tar.gz"
-            exit_code, stdout, stderr = self.execute_on_kind_node(self.target_node, cmd)
-            
-            if exit_code != 0:
-                logger.error(f"[SCRIPT_DATA_COPY] Failed to copy tar to target pod: {stderr}")
-                # Cleanup shared file
-                cmd = f"rm -f {shared_script_file}"
-                self.execute_on_kind_node(self.source_node, cmd)
+            # Then, copy from local to target pod
+            cmd = f"kubectl cp {temp_file} {self.namespace}/{migrated_pod_name}:/script-data.tar.gz"
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+            if result.returncode != 0:
+                logger.error(f"[SCRIPT_DATA_COPY] Failed to copy tar from local to target pod: {result.stderr}")
+                # Cleanup local file
+                subprocess.run(f"rm -f {temp_file}", shell=True)
                 return False
+            
+            # Cleanup local file
+            subprocess.run(f"rm -f {temp_file}", shell=True)
             
             # Extract the tar file in target container root directory
             cmd = f"kubectl exec -n {self.namespace} {migrated_pod_name} -- tar -xzf /script-data.tar.gz -C /script-data"
-            exit_code, stdout, stderr = self.execute_on_kind_node(self.target_node, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(self.target_node, cmd)
             
             if exit_code != 0:
                 logger.error(f"[SCRIPT_DATA_COPY] Failed to extract tar in target: {stderr}")
@@ -1206,18 +1212,14 @@ class CriuMigrationTracker:
             
             # Cleanup tar files
             cmd = f"kubectl exec -n {self.namespace} {self.source_pod} -- rm -f /script-data.tar.gz"
-            self.execute_on_kind_node(self.source_node, cmd)
+            self.execute_on_helper(self.source_node, cmd)
             
             cmd = f"kubectl exec -n {self.namespace} {migrated_pod_name} -- rm -f /script-data.tar.gz"
-            self.execute_on_kind_node(self.target_node, cmd)
-            
-            # Cleanup shared file
-            cmd = f"rm -f {shared_script_file}"
-            self.execute_on_kind_node(self.source_node, cmd)
+            self.execute_on_helper(self.target_node, cmd)
             
             # Verify the copy was successful
             cmd = f"kubectl exec -n {self.namespace} {migrated_pod_name} -- ls -la /script-data"
-            exit_code, stdout, stderr = self.execute_on_kind_node(self.target_node, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(self.target_node, cmd)
             
             if exit_code == 0:
                 logger.info(f"[SCRIPT_DATA_COPY] Successfully copied /script-data contents to target")
@@ -1248,7 +1250,7 @@ class CriuMigrationTracker:
             
             # Execute restore command with timeout and kubectl exec wrapper
             cmd = f"kubectl exec -n {self.namespace} {migrated_pod_name} -- {restore_command}"
-            exit_code, stdout, stderr = self.execute_on_kind_node(self.target_node, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(self.target_node, cmd)
             
             # Check if restore was successful based on output content, not just exit code
             restore_success = False
@@ -1264,13 +1266,13 @@ class CriuMigrationTracker:
                 
                 # Try to get detailed restore logs for debugging
                 cmd = f"kubectl exec -n {self.namespace} {migrated_pod_name} -- cat /tmp/restore.log"
-                exit_code, log_output, _ = self.execute_on_kind_node(self.target_node, cmd)
+                exit_code, log_output, _ = self.execute_on_helper(self.target_node, cmd)
                 if exit_code == 0:
                     logger.error(f"[CRIU_RESTORE] Restore log: {log_output}")
             
             # Verify restore worked by checking if processes are running
             cmd = f"kubectl exec -n {self.namespace} {migrated_pod_name} -- ps aux | grep simple_test || true"
-            exit_code, stdout, stderr = self.execute_on_kind_node(self.target_node, cmd)
+            exit_code, stdout, stderr = self.execute_on_helper(self.target_node, cmd)
             
             if 'simple_test' in stdout:
                 logger.info(f"[CRIU_RESTORE] Verified: simple_test.sh is running after restore")
@@ -1429,8 +1431,8 @@ class CriuMigrationTracker:
         try:
             # Clean up checkpoint directories on both nodes
             cmd = f"rm -rf {self.checkpoint_dir}/*"
-            self.execute_on_kind_node(self.source_node, cmd)
-            self.execute_on_kind_node(self.target_node, cmd)
+            self.execute_on_helper(self.source_node, cmd)
+            self.execute_on_helper(self.target_node, cmd)
             
             logger.info("=" * 80)
             logger.info("[MIGRATION] Cleanup completed")
