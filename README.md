@@ -1,13 +1,13 @@
 # Flex-Nautilus: Container Live Migration System
 
-Flex-Nautilus is a Kubernetes-based container live migration system designed to enable seamless migration of running containers between nodes in a KIND (Kubernetes in Docker) cluster. The system uses containerd's native checkpoint/restore capabilities to perform live migrations without service interruption.
+Flex-Nautilus is a Kubernetes-based container live migration system designed to enable seamless migration of running containers between nodes in a KIND (Kubernetes in Docker) cluster. The system uses CRIU (Checkpoint/Restore in Userspace) to perform live migrations without service interruption.
 
 ## 🎯 Project Goals
 
 - **Zero-downtime Migration**: Migrate running containers between nodes without service interruption
-- **Containerd Integration**: Leverage containerd's native checkpoint/restore functionality
+- **CRIU Integration**: Leverage CRIU (Checkpoint/Restore in Userspace) for process-level checkpointing
 - **KIND Cluster Support**: Optimized for Kubernetes in Docker (KIND) environments
-- **Streaming Migration**: Perform incremental checkpoint transfers for efficient migration
+- **Live Migration**: Perform complete container state migration with memory preservation
 - **Production Ready**: Robust error handling, logging, and monitoring capabilities
 
 ## 🏗️ Architecture Overview
@@ -21,9 +21,9 @@ Flex-Nautilus is a Kubernetes-based container live migration system designed to 
 │  ┌─────────────────┐  ┌─────────────────┐  ┌──────────────┐ │
 │  │Migration Service│  │   Controller    │  │   Database   │ │
 │  │                 │  │                 │  │              │ │
-│  │ • Live Migration│  │ • Orchestration │  │ • Metadata   │ │
-│  │ • Checkpointing │  │ • Scheduling    │  │ • State      │ │
-│  │ • Restore Logic │  │ • Monitoring    │  │ • History    │ │
+│  │• Live Migration │  │ • Orchestration │  │ • Metadata   │ │
+│  │• CRIU Checkpoint│  │ • Scheduling    │  │ • State      │ │
+│  │• Process Restore│  │ • Monitoring    │  │ • History    │ │
 │  └─────────────────┘  └─────────────────┘  └──────────────┘ │
 └─────────────────────────────────────────────────────────────┘
                               │
@@ -39,7 +39,7 @@ Flex-Nautilus is a Kubernetes-based container live migration system designed to 
 │  │ │             │ │  │ │             │ │  │              │ │
 │  │ │ • ctr       │ │  │ │ • ctr       │ │  │              │ │
 │  │ │ • crictl    │ │  │ │ • crictl    │ │  │              │ │
-│  │ │ • containerd│ │  │ │ • containerd│ │  │              │ │
+│  │ │ • CRIU      │ │  │ │ • CRIU      │ │  │              │ │
 │  │ └─────────────┘ │  │ └─────────────┘ │  │              │ │
 │  └─────────────────┘  └─────────────────┘  └──────────────┘ │
 └─────────────────────────────────────────────────────────────┘
@@ -47,31 +47,33 @@ Flex-Nautilus is a Kubernetes-based container live migration system designed to 
 
 ### Migration Flow
 
-1. **Discovery**: Identify source container and target node
-2. **Checkpoint Creation**: Create incremental checkpoints using `ctr tasks checkpoint`
-3. **Data Transfer**: Stream checkpoint data between nodes via shared volumes
-4. **Image Building**: Build new container image with checkpoint data
-5. **Container Creation**: Create target container with migrated state
-6. **Restore**: Restore container state from checkpoint data
-7. **Verification**: Verify migration success and cleanup
+1. **Discovery**: Identify source container and target node using crictl
+2. **Mount Analysis**: Discover container mount paths and external bind mounts
+3. **Target Pod Creation**: Create target pod with CRIU capabilities and privileged access
+4. **CRIU Checkpoint**: Create complete container checkpoint using `criu dump` with external mount handling
+5. **Data Transfer**: Transfer checkpoint data and script data between nodes via kubectl cp
+6. **CRIU Restore**: Restore container state using `criu restore` with matching mount configuration
+7. **Verification**: Verify migration success and cleanup resources
 
 ## 🚀 Key Features
 
 ### Live Migration Capabilities
-- **Streaming Checkpoints**: Multiple incremental checkpoints for minimal downtime
-- **State Preservation**: Complete container state including memory, file system, and network
+- **Complete State Preservation**: Full container state including memory, file system, and network connections
+- **Mount Namespace Handling**: Intelligent discovery and handling of external bind mounts
 - **Cross-Node Migration**: Seamless migration between KIND worker nodes
-- **Entrypoint Modification**: Prevent re-initialization of migrated containers
+- **Process Continuity**: Maintain running processes and application state
 
-### Containerd Integration
-- **Native Checkpoint/Restore**: Uses containerd's built-in checkpoint functionality
-- **CRI Compatibility**: Works with Kubernetes CRI (Container Runtime Interface)
-- **Task Management**: Direct interaction with containerd tasks and containers
+### CRIU Integration
+- **Process-Level Checkpointing**: Uses CRIU for complete process state capture
+- **External Mount Support**: Handles Docker volumes and bind mounts during checkpoint/restore
+- **Cgroup Yard Management**: Proper cgroup setup for CRIU operations
+- **Container Runtime Integration**: Works with containerd via crictl and ctr
 
 ### KIND Cluster Optimization
-- **Node-Specific Pods**: Migrator pods deployed on each KIND worker node
-- **Shared Volumes**: Checkpoint data sharing via host path volumes
-- **Privileged Access**: Full access to containerd socket and system resources
+- **Node-Specific Pods**: Migrator pods deployed on each KIND worker node with CRIU installed
+- **Privileged Containers**: Full access to containerd socket, CRIU, and system resources
+- **Host Path Volumes**: Checkpoint data sharing via host path volumes
+- **Debug Pod Access**: Direct kubectl exec access to migrator pods for CRIU operations
 
 ## 📁 Project Structure
 
@@ -82,8 +84,9 @@ Flex-Nautilus/
 │   │   ├── main.py          # Controller service
 │   │   ├── migrate_service.py # Migration API service
 │   │   └── utils/           # Utility modules
-│   │       ├── kubeapi.py   # Kubernetes API interactions
-│   │       └── live_migration.py # Core migration logic
+│   │       ├── db.py           # Database utilities
+│   │       ├── metadata.py     # Metadata management
+│   │       └── live_migration.py # CRIU-based migration logic
 │   ├── manifests/           # Kubernetes manifests
 │   │   ├── cluster.yml      # KIND cluster configuration
 │   │   ├── python-migrate.yml # Migration service deployment
@@ -100,11 +103,12 @@ Flex-Nautilus/
 
 ## 🛠️ Technology Stack
 
-- **Container Runtime**: containerd with CRIU checkpoint/restore
+- **Checkpoint/Restore**: CRIU (Checkpoint/Restore in Userspace)
+- **Container Runtime**: containerd with crictl and ctr tools
 - **Orchestration**: Kubernetes with KIND
 - **Language**: Python 3.9+ with FastAPI
 - **Database**: PostgreSQL for metadata storage
-- **Monitoring**: Kubernetes metrics and custom logging
+- **Monitoring**: Kubernetes metrics and structured logging
 - **Build**: Docker containers with multi-stage builds
 
 ## 🚀 Quick Start
@@ -114,6 +118,7 @@ Flex-Nautilus/
 - KIND (Kubernetes in Docker)
 - kubectl
 - Python 3.9+
+- CRIU installed in migrator pods (handled automatically)
 
 ### Deployment
 
@@ -134,7 +139,7 @@ Flex-Nautilus/
    kubectl port-forward -n monitor svc/python-migrate-service 8000:8000
    curl -X POST http://localhost:8000/live-migrate \
      -H "Content-Type: application/json" \
-     -d '{"pod": "test-pod", "target_node": "kind-worker2", "namespace": "foo"}'
+     -d '{"pod": "test-pod", "target_node": "kind-worker2", "namespace": "test-namespace"}'
    ```
 
 ### API Endpoints
@@ -147,21 +152,30 @@ Flex-Nautilus/
 
 ### Environment Variables
 - `KUBECONFIG`: Kubernetes configuration path
-- `CHECKPOINT_DIR`: Directory for checkpoint storage
+- `CHECKPOINT_DIR`: Directory for checkpoint storage (default: `/tmp/checkpoints`)
 - `NAMESPACE`: Kubernetes namespace for deployment
+
+### CRIU Configuration
+The system automatically configures CRIU for optimal migration:
+- **Cgroup Yard**: Sets up `/cgroup-yard` for proper cgroup handling
+- **External Mounts**: Automatically discovers and handles Docker volumes and bind mounts
+- **Privileged Access**: Required capabilities for CRIU operations
+- **Mount Namespace**: Intelligent mount point discovery and external mount mapping
 
 ### KIND Cluster Configuration
 The system is optimized for KIND clusters with:
 - Multiple worker nodes (`kind-worker`, `kind-worker2`)
-- Region-based node labeling
-- Shared storage for checkpoint data
+- Migrator pods with CRIU capabilities on each worker node
+- Privileged containers for containerd socket access
+- Host path volumes for checkpoint data sharing
 
 ## 📊 Monitoring and Observability
 
-- **Structured Logging**: Comprehensive logging with state tracking
-- **Migration Metrics**: Checkpoint creation, transfer, and restore statistics
+- **Structured Logging**: Comprehensive logging with state tracking and migration phases
+- **CRIU Metrics**: Checkpoint creation, transfer, and restore statistics
 - **Health Checks**: Service availability and readiness probes
 - **Error Handling**: Detailed error reporting and recovery mechanisms
+- **Migration State Tracking**: Real-time migration progress and status
 
 ## 🧪 Testing and Benchmarking
 
@@ -172,36 +186,15 @@ The project includes comprehensive testing tools:
 
 ## 🔒 Security Considerations
 
-- **Privileged Containers**: Required for containerd socket access
+- **Privileged Containers**: Required for containerd socket access and CRIU operations
 - **RBAC**: Kubernetes role-based access control
 - **Network Policies**: Secure inter-pod communication
 - **Resource Limits**: CPU and memory constraints
+- **CRIU Capabilities**: SYS_ADMIN, CHECKPOINT_RESTORE, and other required capabilities
 
 ## 📈 Performance Characteristics
 
-- **Migration Time**: Typically 5-10 seconds for small containers
-- **Checkpoint Size**: Optimized for minimal data transfer
-- **Resource Usage**: Low overhead during migration process
-- **Scalability**: Supports multiple concurrent migrations
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Submit a pull request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🙏 Acknowledgments
-
-- containerd project for checkpoint/restore capabilities
-- Kubernetes community for KIND and CRI
-- CRIU project for checkpoint/restore technology
-
----
-
-**Flex-Nautilus**: Enabling seamless container migration in Kubernetes environments.
+- **Migration Time**: Typically 10-30 seconds depending on container size and checkpoint data
+- **Checkpoint Size**: Complete process state including memory pages and file descriptors
+- **Resource Usage**: Low overhead during migration process with CRIU optimization
+- **Scalability**: Supports multiple concurrent migrations with proper resource isolation

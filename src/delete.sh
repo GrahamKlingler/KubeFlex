@@ -25,66 +25,49 @@ log_error() {
 }
 
 # Parse command line arguments
-DELETE_STORAGE=false
+# Everything is always deleted except DB and cluster (which require flags)
+DELETE_STORAGE=true
 DELETE_CLUSTER=false
 DELETE_DB=false
-DELETE_MIGRATE=false
-DELETE_CONTROLLER=false
-DELETE_ALL=false
+DELETE_MIGRATE=true
+DELETE_CONTROLLER=true
+DELETE_METRICS=true
+DELETE_ALL=true
 
 for arg in "$@"; do
     case $arg in
-        --all)
-            DELETE_ALL=true
-            DELETE_STORAGE=true
+        --include-db)
             DELETE_DB=true
-            DELETE_MIGRATE=true
-            DELETE_CONTROLLER=true
             shift
             ;;
-        --cluster)
+        --include-cluster)
             DELETE_CLUSTER=true
             shift
             ;;
-        --db)
-            DELETE_DB=true
-            shift
-            ;;
-        --migrate)
-            DELETE_MIGRATE=true
-            shift
-            ;;
-        --controller)
-            DELETE_CONTROLLER=true
-            shift
-            ;;
         --help)
-            echo "Usage: $0 [--all] [--cluster] [--db] [--migrate] [--controller] [--help]"
-            echo "  --all        Delete all resources including storage and database"
-            echo "  --cluster    Delete the entire kind cluster"
-            echo "  --db         Delete database resources"
-            echo "  --migrate    Delete migration service resources"
-            echo "  --controller Delete controller resources"
-            echo "  --help       Show this help message"
+            echo "Usage: $0 [--include-db] [--include-cluster] [--help]"
+            echo "  --include-db       Delete the database and storage components (includes metadata service sidecar)"
+            echo "                    Without this flag, everything else is deleted but database is skipped"
+            echo "  --include-cluster  Delete the KIND cluster"
+            echo "                    Without this flag, the cluster is left intact"
+            echo "  --help            Show this help message"
+            echo ""
+            echo "By default, the script deletes:"
+            echo "  - Metrics-server"
+            echo "  - Migration service and migrators"
+            echo "  - Controller (scheduler)"
+            echo "  - Test pods"
+            echo "  - All namespaces and resources"
             echo ""
             echo "Examples:"
-            echo "  $0 --all                    # Delete everything"
-            echo "  $0 --cluster --db           # Delete cluster and database only"
-            echo "  $0 --migrate --controller   # Delete migration and controller only"
+            echo "  $0                      # Delete everything except database and cluster"
+            echo "  $0 --include-db         # Delete everything including database"
+            echo "  $0 --include-cluster    # Delete everything including cluster"
+            echo "  $0 --include-db --include-cluster  # Delete everything including database and cluster"
             exit 0
             ;;
     esac
 done
-
-# If no flags specified, default to all
-if [ "$DELETE_STORAGE" = false ] && [ "$DELETE_DB" = false ] && [ "$DELETE_MIGRATE" = false ] && [ "$DELETE_CONTROLLER" = false ] && [ "$DELETE_CLUSTER" = false ] && [ "$DELETE_ALL" = false ]; then
-    DELETE_ALL=true
-    DELETE_STORAGE=true
-    DELETE_DB=true
-    DELETE_MIGRATE=true
-    DELETE_CONTROLLER=true
-    log_info "No specific components specified, deleting all components"
-fi
 
 log_info "=========================================="
 log_info "FLEX-NAUTILUS CLEANUP SCRIPT"
@@ -107,25 +90,57 @@ log_info "Connected to cluster: $(kubectl config current-context)"
 # Delete configmaps (ignore if not found)
 log_info "Cleaning up configmaps..."
 kubectl delete configmap pod-selector-config -n monitor 2>/dev/null || log_warning "ConfigMap pod-selector-config not found"
+kubectl delete configmap scheduler-config -n monitor 2>/dev/null || log_warning "ConfigMap scheduler-config not found in monitor namespace"
+kubectl delete configmap scheduler-config -n test-namespace 2>/dev/null || log_warning "ConfigMap scheduler-config not found in test-namespace namespace"
 
 # Delete specific components based on flags
-if [ "$DELETE_ALL" = true ]; then
-    log_info "Deleting all Flex-Nautilus resources..."
-    kubectl delete -k manifests/ 2>/dev/null || log_warning "Some resources may not exist"
+# Always delete everything except database (which requires --include-db)
+log_info "Deleting Flex-Nautilus resources..."
+
+# Delete migration service
+log_info "Deleting migration service..."
+kubectl delete pod -n monitor -l name=python-migrate-service 2>/dev/null || log_warning "Migration service may not exist"
+
+# Delete all migrator pods across all nodes
+log_info "Deleting all migrator pods..."
+# Get all migrator pods (they have names like migrator-{node-name})
+MIGRATOR_PODS=$(kubectl get pods -n monitor --no-headers -o custom-columns=":metadata.name" 2>/dev/null | grep "^migrator-" || true)
+if [ -n "$MIGRATOR_PODS" ]; then
+    for MIGRATOR_POD in $MIGRATOR_PODS; do
+        log_info "Deleting migrator pod: $MIGRATOR_POD"
+        kubectl delete pod "$MIGRATOR_POD" -n monitor 2>/dev/null || log_warning "Failed to delete migrator pod $MIGRATOR_POD"
+    done
 else
-    # Delete specific components
-    if [ "$DELETE_MIGRATE" = true ]; then
-        log_info "Deleting migration service..."
-        kubectl delete pod -n monitor -l name=python-migrate-service 2>/dev/null || log_warning "Migration service may not exist"
-        kubectl delete pod -n monitor -l name=migrator-kind-worker2 2>/dev/null || log_warning "Extractor pods may not exist"
-        kubectl delete pod -n monitor -l name=migrator-kind-worker 2>/dev/null || log_warning "Extractor pods may not exist"
-    fi
-    
-    if [ "$DELETE_CONTROLLER" = true ]; then
+    log_info "No migrator pods found to delete"
+fi
+
+# Also try deleting by label selector (if migrator pods have a common label)
+kubectl delete pod -n monitor -l purpose=containerd-access 2>/dev/null || log_warning "No migrator pods found with purpose=containerd-access label"
+
+kubectl delete -f manifests/python-migrate.yml 2>/dev/null || log_warning "Migration service manifest may not exist"
+kubectl delete -f manifests/migrator.yml 2>/dev/null || log_warning "Migrator manifest may not exist"
+
+# Delete controller
         log_info "Deleting controller..."
         kubectl delete -f manifests/controller.yml 2>/dev/null || log_warning "Controller may not exist"
-    fi
-    
+
+# Delete testpod
+log_info "Deleting test pod..."
+kubectl delete -f manifests/testpod.yml 2>/dev/null || log_warning "Test pod may not exist"
+
+# Delete metrics-server
+log_info "Deleting metrics-server..."
+kubectl delete -f manifests/metrics-server.yaml 2>/dev/null || log_warning "Metrics-server may not exist"
+
+# Delete roles
+log_info "Deleting roles..."
+kubectl delete -f manifests/roles.yml 2>/dev/null || log_warning "Roles may not exist"
+
+# Delete scheduler-config
+log_info "Deleting scheduler-config..."
+kubectl delete -f manifests/scheduler-config.yml 2>/dev/null || log_warning "Scheduler-config may not exist"
+
+# Delete database only if --include-db was provided
     if [ "$DELETE_DB" = true ]; then
         log_info "Deleting database resources..."
         kubectl delete -f manifests/storage.yml 2>/dev/null || log_warning "Storage resources may not exist"
@@ -134,17 +149,18 @@ else
         log_info "Performing additional database cleanup..."
         kubectl delete job db-upload -n monitor 2>/dev/null || log_warning "DB upload job may not exist"
         kubectl delete pvc -l app=postgres -n monitor 2>/dev/null || log_warning "PostgreSQL PVCs may not exist"
-    fi
+else
+    log_info "Skipping database deletion (use --include-db to delete database)"
 fi
 
 # Delete all pods in all namespaces that begin with "test"
 log_info "Deleting all pods in all namespaces that begin with 'test'..."
 
-# Get all pods in foo namespace and delete those starting with "test"
-kubectl get pods -n foo --no-headers -o custom-columns=":metadata.name" 2>/dev/null | grep "^test" | while read pod_name; do
+# Get all pods in test-namespace namespace and delete those starting with "test"
+kubectl get pods -n test-namespace --no-headers -o custom-columns=":metadata.name" 2>/dev/null | grep "^test" | while read pod_name; do
     if [ -n "$pod_name" ]; then
-        log_info "Deleting pod: $pod_name in namespace foo"
-        kubectl delete pod "$pod_name" -n foo 2>/dev/null || log_warning "Failed to delete pod $pod_name in foo namespace"
+        log_info "Deleting pod: $pod_name in namespace test-namespace"
+        kubectl delete pod "$pod_name" -n test-namespace 2>/dev/null || log_warning "Failed to delete pod $pod_name in test-namespace namespace"
     fi
 done
 
@@ -156,25 +172,28 @@ kubectl get pods -n monitor --no-headers -o custom-columns=":metadata.name" 2>/d
     fi
 done
 
-# Remove node labels (only if cluster is being deleted)
-if [ "$DELETE_CLUSTER" = true ]; then
+# Remove node labels (always done)
     log_info "Removing node labels..."
-    kubectl label node kind-worker2 REGION- 2>/dev/null || log_warning "Node kind-worker2 not labeled"
-    kubectl label node kind-worker REGION- 2>/dev/null || log_warning "Node kind-worker not labeled"
+WORKER_NODES=$(kubectl get nodes --no-headers | grep -v control-plane | awk '{print $1}' 2>/dev/null)
+if [ -n "$WORKER_NODES" ]; then
+    for NODE_NAME in $WORKER_NODES; do
+        kubectl label node ${NODE_NAME} REGION- 2>/dev/null || log_warning "Node ${NODE_NAME} not labeled"
+    done
+else
+    log_warning "No worker nodes found to unlabel"
 fi
 
-# Delete namespaces (only if all components are being deleted)
-if [ "$DELETE_ALL" = true ]; then
-    log_info "Cleaning up namespaces..."
-    kubectl delete namespace monitor 2>/dev/null || log_warning "Namespace monitor not found"
-    kubectl delete namespace foo 2>/dev/null || log_warning "Namespace foo not found"
-fi
-
-# Delete kind cluster if --cluster flag is set
+# Delete kind cluster only if --include-cluster was provided
 if [ "$DELETE_CLUSTER" = true ]; then
     log_info "Deleting kind cluster..."
-    kind delete cluster
-    log_success "Kind cluster deleted"
+    if command -v kind &> /dev/null; then
+        kind delete cluster 2>/dev/null || log_warning "Kind cluster may not exist or already deleted"
+        log_success "Kind cluster deletion attempted"
+    else
+        log_warning "kind command not found, skipping cluster deletion"
+    fi
+else
+    log_info "Skipping cluster deletion (use --include-cluster to delete cluster)"
 fi
 
 log_info "=========================================="

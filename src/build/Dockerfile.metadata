@@ -1,0 +1,21 @@
+FROM python:3.9-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install
+COPY build/data_req.txt .
+RUN pip install -r data_req.txt
+
+# Copy the Python code from controller/db/ maintaining directory structure
+COPY controller/db/db.py ./db.py
+COPY controller/db/metadata.py ./metadata.py
+
+# Run the metadata server
+CMD ["python3", "metadata.py"]
+

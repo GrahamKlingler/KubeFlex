@@ -2,21 +2,22 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: test-pod
-  namespace: foo
+  namespace: test-namespace
   labels:
     name: test-pod
   annotations:
-    REGION: "TEN"
-    EXPECTED_DURATION: "12"
+    REGION: "NE"
+    EXPECTED_DURATION: "72"
 spec:
   affinity:
     nodeAffinity:
-      requiredDuringSchedulingIgnoredDuringExecution:
-        nodeSelectorTerms:
-        - matchExpressions:
-          - key: "REGION"
-            operator: In
-            values: ["TEN"]
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+            - key: "REGION"
+              operator: In
+              values: ["NE"]
   containers:
   - name: test-container
     image: salamander1223/testpod:latest
@@ -31,6 +32,7 @@ spec:
         - SYS_RESOURCE  
         - NET_ADMIN
         - SYS_ADMIN
+        - SYS_TIME
         - CHECKPOINT_RESTORE
         - SYS_CHROOT
         - SETPCAP
@@ -41,11 +43,11 @@ spec:
       allowPrivilegeEscalation: true
     resources:
       requests:
-        memory: "10Mi"
-        cpu: "10m"
-      limits:
-        memory: "1000Mi"
+        memory: "5Mi"
         cpu: "500m"
+      limits:
+        memory: "100Mi"
+        cpu: "1000m"
     ports:
     - name: http
       containerPort: 8080

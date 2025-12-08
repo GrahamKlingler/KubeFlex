@@ -39,6 +39,7 @@ spec:
                 operator: In
                 values:
                 - kind-worker
+                - kind-worker2
       containers:
       - name: python-controller
         image: salamander1223/python-controller:latest
@@ -62,6 +63,11 @@ spec:
         - name: main-http
           containerPort: 8081
           protocol: TCP
+        command: ["python3", "controller/main.py"]
+        args:
+        - "--namespace"
+        - "test-namespace"
+        - "--skip-migration"
         env:
         - name: CADVISOR_URL
           value: "http://127.0.0.1:8080"
@@ -70,9 +76,19 @@ spec:
         - name: STORAGE_PATH
           value: "/storage"
         - name: POD_SELECTOR
-          value: "io.kubernetes.pod.namespace=foo"
+          value: "io.kubernetes.pod.namespace=test-namespace"
         - name: CARBON_SERVER_URL
-          value: "http://metadata:8008"
+          value: "http://metadata-service:8008"
+        - name: SCHEDULER_TIME
+          valueFrom:
+            configMapKeyRef:
+              name: scheduler-config
+              key: scheduler-time
+        - name: SCHEDULING_POLICY
+          valueFrom:
+            configMapKeyRef:
+              name: scheduler-config
+              key: scheduling-policy
       
       volumes:
       - name: kube-config
@@ -83,52 +99,3 @@ spec:
         hostPath:
           path: /var/run
           type: Directory
-
-      # - name: cadvsior
-      #   image: gcr.io/cadvisor/cadvisor:v0.47.2
-      #   args:
-      #   - --storage_duration=1m0s
-      #   - --allow_dynamic_housekeeping=true
-      #   - --docker=unix:///var/run/docker.sock
-      #   - --docker_only=true
-      #   - --port=8080
-      #   - --enable_metrics=app,cpu,cpuLoad,memory
-      #   # All metrics: advtcp,app,cpu,cpuLoad,cpu_topology,cpuset,disk,diskIO,hugetlb,memory,memory_numa,network,oom_event,percpu,perf_event,process,referenced_memory,resctrl,sched,tcp,udp
-      #   securityContext:
-      #     privileged: true
-      #   resources:
-      #     limits:
-      #       cpu: 300m
-      #       memory: 2000Mi
-      #     requests:
-      #       cpu: 150m
-      #       memory: 200Mi
-      #   volumeMounts:
-      #   - name: machine-id
-      #     mountPath: /etc/machine-id
-      #     readOnly: true
-      #   - name: rootfs
-      #     mountPath: /rootfs
-      #     readOnly: true 
-      #   - name: var-log
-      #     mountPath: /var/log
-      #     readOnly: true 
-      #   - name: var-run
-      #     mountPath: /var/run
-      #     readOnly: true 
-      #   - name: sys
-      #     mountPath: /sys
-      #     readOnly: true 
-      #   - name: containers
-      #     mountPath: /var/lib/containers
-      #     readOnly: true 
-      #   - name: docker
-      #     mountPath: /var/lib/docker
-      #     readOnly: true 
-      #   - name: disk
-      #     mountPath: /dev/disk
-      #     readOnly: true 
-      #   ports:
-      #   - name: http
-      #     containerPort: 8080
-      #     protocol: TCP

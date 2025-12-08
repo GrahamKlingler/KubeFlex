@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: scheduler-config
+  namespace: monitor
+  # Note: This ConfigMap will be created in both 'monitor' and 'test-namespace' namespaces by run.sh
+  # The actual scheduler-time and scheduling-policy values will be set by run.sh when deploying
+data:
+  # Scheduler time in Unix timestamp format
+  # Valid range: 1577836800 (2020-01-01 00:00:00) to 1672527600 (2022-12-31 23:00:00)
+  # Default: beginning of interval (2020-01-01 00:00:00) - will be set by run.sh
+  scheduler-time: "1577836800"
+  # Scheduling policy: 1, 2, or 3
+  # 1 = Initial placement only (assign to lowest region at runtime)
+  # 2 = Hourly migration (migrate all pods to minimum region every hour)
+  # 3 = Forecast-based (compare forecasts for all regions over EXPECTED_DURATION)
+  # Default: 3 (will be set by run.sh)
+  scheduling-policy: "3"
+

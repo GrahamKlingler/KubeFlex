@@ -7,8 +7,9 @@ COPY build/main_req.txt .
 RUN pip install -r main_req.txt
 
 # Copy the Python code from controller/
-COPY controller/main.py .
-COPY controller/utils/ ./utils/
+COPY controller/controller/ ./controller/
+COPY controller/db/ ./db/
+COPY controller/migrator/ ./migrator/
 
 # Run the script
-CMD ["python3", "main.py"]
+CMD ["python3", "controller/main.py"]

@@ -171,11 +171,11 @@ def plot_carbon_data(csv_files, columns_to_plot, output_dir=None, show_plot=True
         
         # Plot directory averages if requested
         if plot_averages:
-            for dir_name, avg_data in dir_averages.items():
+            for dir_name, sample_data in dir_averages.items():
                 for column in columns_to_plot:
-                    if column in avg_data and avg_data[column] is not None:
+                    if column in sample_data and sample_data[column] is not None:
                         # Plot horizontal line for the average
-                        avg_value = avg_data[column]
+                        avg_value = sample_data[column]
                         label = f"AVG {dir_name} - {column_labels.get(column, column)}"
                         
                         # Find time range for this directory

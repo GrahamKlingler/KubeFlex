@@ -12,7 +12,7 @@ spec:
   containers:
   - name: python-migrate
     image: salamander1223/python-migrate:latest
-    imagePullPolicy: Always
+    imagePullPolicy: IfNotPresent
     command: ["/start.sh"]
     ports:
     - name: http
@@ -24,7 +24,7 @@ spec:
     - name: CONTAINERD_SOCKET
       value: /run/containerd/containerd.sock
     - name: CONTAINERD_NAMESPACE
-      value: "foo"
+      value: "test-namespace"
     - name: CRIU_PATH
       value: /usr/sbin/criu
     volumeMounts:

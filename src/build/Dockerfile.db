@@ -2,14 +2,14 @@ FROM python:3.9-slim
 
 WORKDIR /app
 
-ENV DATADIR="avg_data"
+ENV DATADIR="sample_data"
 
 # Install dependencies
 COPY build/upload_data_req.txt .
 RUN pip install -r upload_data_req.txt
 
 # Copy script into the container
-COPY controller/upload_data.py .
+COPY controller/db/upload_data.py .
 COPY ${DATADIR}/*csv .
 
 # Set the entrypoint to run the script

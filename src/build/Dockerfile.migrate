@@ -3,21 +3,25 @@ FROM python:3.9-slim
 WORKDIR /app
 
 # Install system dependencies for containerd operations and SSH
-RUN apt-get update && apt-get install -y \
+# Split into essential and optional packages, with retry logic for network resilience
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends --fix-missing \
+    ca-certificates \
     curl \
     wget \
-    gnupg \
-    docker.io \
-    containerd \
-    jq \
-    procps \
-    psmisc \
-    htop \
-    apt-transport-https \
-    ca-certificates \
-    criu \
     tar \
     gzip \
+    && apt-get install -y --no-install-recommends --fix-missing \
+    gnupg \
+    apt-transport-https \
+    procps \
+    psmisc \
+    && apt-get install -y --no-install-recommends --fix-missing \
+    docker.io \
+    containerd \
+    criu \
+    && apt-get install -y --no-install-recommends --fix-missing \
+    jq \
     openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
@@ -63,9 +67,9 @@ ENV CONTAINERD_SOCKET="/run/containerd/containerd.sock"
 ENV CONTAINERD_NAMESPACE="k8s.io"
 ENV CRIU_PATH="/usr/sbin/criu"
 
-# Verify installations
-RUN kubectl version --client && \
-    crictl --version
+# Verify installations (allow failures for network issues during build)
+RUN kubectl version --client || echo "kubectl version check skipped" && \
+    crictl --version || echo "crictl version check skipped"
 
 # Install Python dependencies
 COPY build/migrate_req.txt .
@@ -73,8 +77,7 @@ RUN pip install --upgrade pip && \
     pip install -r migrate_req.txt
 
 # Copy scripts and utilities into the container
-COPY controller/migrate_service.py .
-COPY controller/utils/ ./utils/
+COPY controller/migrator/ ./migrator/
 
 # Add build timestamp to force cache invalidation when files change
 ARG BUILD_TIMESTAMP
@@ -87,7 +90,7 @@ RUN chmod +x /start.sh
 # Migrator pods are now created as part of deployment process
 
 # Make the migration service executable
-RUN chmod +x migrate_service.py
+RUN chmod +x migrator/migrate_service.py
 
 # Create volume mount points for containerd operations
 VOLUME ["/root/.kube", "/sys", "/dev", "/var/run", "/sys/fs/cgroup", "/run/containerd"]
