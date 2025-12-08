@@ -109,6 +109,21 @@ install_docker_linux() {
     
     log_info "Installing Docker Engine..."
     
+    # Detect Linux distribution
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        DISTRO=$ID
+        VERSION_CODENAME=$VERSION_CODENAME
+        if [ -z "$VERSION_CODENAME" ]; then
+            VERSION_CODENAME=$(lsb_release -cs)
+        fi
+    else
+        DISTRO="ubuntu"
+        VERSION_CODENAME=$(lsb_release -cs)
+    fi
+    
+    log_info "Detected distribution: $DISTRO ($VERSION_CODENAME)"
+    
     # Update package index
     sudo apt-get update
     
@@ -121,12 +136,20 @@ install_docker_linux() {
     
     # Add Docker's official GPG key
     sudo mkdir -p /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    curl -fsSL https://download.docker.com/linux/${DISTRO}/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
     
-    # Set up repository
-    echo \
-      "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-      $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+    # Set up repository based on distribution
+    if [ "$DISTRO" = "debian" ]; then
+        log_info "Setting up Docker repository for Debian..."
+        echo \
+          "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian \
+          $VERSION_CODENAME stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+    else
+        log_info "Setting up Docker repository for Ubuntu..."
+        echo \
+          "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+          $VERSION_CODENAME stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+    fi
     
     # Install Docker Engine
     sudo apt-get update

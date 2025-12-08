@@ -45,8 +45,14 @@ for arg in "$@"; do
             ;;
         --help)
             echo "Usage: $0 [--load-kind] [--help]"
+            echo ""
+            echo "Options:"
             echo "  --load-kind  Load images into KIND cluster after building (avoids Docker Hub rate limits)"
+            echo "               Recommended for local development. Requires KIND cluster to be running."
             echo "  --help       Show this help message"
+            echo ""
+            echo "Note: Without --load-kind, you must be logged into Docker Hub (docker login)"
+            echo "      to push images. Use --load-kind to avoid Docker Hub authentication."
             exit 0
             ;;
     esac
@@ -58,10 +64,31 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
-# Check if we're logged into Docker Hub
+# Check if Docker daemon is running
 if ! docker info &> /dev/null; then
     log_error "Docker daemon is not running or not accessible"
     exit 1
+fi
+
+# Check Docker Hub authentication (only if not using --load-kind)
+if [ "$LOAD_KIND" = false ]; then
+    if ! docker login &> /dev/null; then
+        log_warning "Not logged into Docker Hub. Attempting to push will fail."
+        log_info "Options:"
+        log_info "  1. Login to Docker Hub: docker login"
+        log_info "  2. Use --load-kind flag to load images directly into KIND (recommended for local development)"
+        read -p "Do you want to login to Docker Hub now? (y/N) " -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            docker login
+        else
+            log_info "Skipping Docker Hub login. Use --load-kind to avoid pushing to Docker Hub."
+            log_info "Or run: docker login"
+            exit 1
+        fi
+    else
+        log_success "Authenticated with Docker Hub"
+    fi
 fi
 
 # If loading into KIND, check if kind is available and get cluster name
