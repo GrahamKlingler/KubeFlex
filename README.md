@@ -1,60 +1,9 @@
-# Flex-Nautilus: Carbon-Aware Container Live Migration System
+# KubeFlex: Carbon-Aware Container Live Migration System
 
-Flex-Nautilus is a Kubernetes-based container live migration system designed to enable seamless, carbon-aware migration of running containers between nodes in a KIND (Kubernetes in Docker) cluster. The system uses CRIU (Checkpoint/Restore in Userspace) to perform live migrations without service interruption, while optimizing for carbon intensity based on regional power grid data.
+KubeFlex is a Kubernetes-based container live migration system designed to enable seamless, carbon-aware migration of running containers between nodes in a KIND (Kubernetes in Docker) cluster. The system uses CRIU (Checkpoint/Restore in Userspace) to perform live migrations without service interruption, while optimizing for carbon intensity based on regional power grid data.
 
-## 🎯 Project Goals
 
-- **Zero-downtime Migration**: Migrate running containers between nodes without service interruption
-- **Carbon-Aware Scheduling**: Optimize pod placement based on real-time carbon intensity forecasts
-- **CRIU Integration**: Leverage CRIU (Checkpoint/Restore in Userspace) for process-level checkpointing
-- **KIND Cluster Support**: Optimized for Kubernetes in Docker (KIND) environments
-- **Live Migration**: Perform complete container state migration with memory preservation
-- **Production Ready**: Robust error handling, logging, and monitoring capabilities
-
-## 🏗️ Architecture Overview
-
-### Core Components
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Flex-Nautilus System                     │
-├─────────────────────────────────────────────────────────────┤
-│  ┌─────────────────┐  ┌─────────────────┐  ┌──────────────┐ │
-│  │Migration Service│  │   Controller    │  │   Database   │ │
-│  │                 │  │                 │  │              │ │
-│  │• Live Migration │  │ • Orchestration │  │ • Metadata   │ │
-│  │• CRIU Checkpoint│  │ • Scheduling    │  │ • State      │ │
-│  │• Process Restore│  │ • Monitoring    │  │ • History    │ │
-│  └─────────────────┘  └─────────────────┘  └──────────────┘ │
-│                                                             │
-│  ┌─────────────────┐                                        │
-│  │ Metadata Service│                                        │
-│  │                 │                                        │
-│  │• Carbon Forecast│                                        │
-│  │• Region Data    │                                        │
-│  └─────────────────┘                                        │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    KIND Cluster                             │
-├─────────────────────────────────────────────────────────────┤
-│  ┌─────────────────┐  ┌─────────────────┐  ┌──────────────┐ │
-│  │ kind-worker     │  │ kind-worker2    │  │ kind-worker3 │ │
-│  │ (REGION=NE)     │  │ (REGION=TEN)    │  │ (REGION=CENT)│ │
-│  │                 │  │                 │  │              │ │
-│  │ ┌─────────────┐ │  │ ┌─────────────┐ │  │ ┌──────────┐ │ │
-│  │ │Migrator Pod │ │  │ │Migrator Pod │ │  │ │Migrator  │ │ │
-│  │ │             │ │  │ │             │ │  │ │Pod       │ │ │
-│  │ │ • ctr       │ │  │ │ • ctr       │ │  │ │ • ctr    │ │ │
-│  │ │ • crictl    │ │  │ │ • crictl    │ │  │ │ • crictl │ │ │
-│  │ │ • CRIU      │ │  │ │ • CRIU      │ │  │ │ • CRIU   │ │ │
-│  │ └─────────────┘ │  │ └─────────────┘ │  │ └──────────┘ │ │
-│  └─────────────────┘  └─────────────────┘  └──────────────┘ │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Migration Flow
+## Migration Flow
 
 1. **Discovery**: Identify source container and target node using Kubernetes API
 2. **Mount Analysis**: Discover container mount paths and external bind mounts
@@ -65,56 +14,17 @@ Flex-Nautilus is a Kubernetes-based container live migration system designed to 
 7. **Pod Deletion**: Optionally delete original pod after successful migration
 8. **Verification**: Verify migration success and cleanup resources
 
-## 📁 Project Structure
-
-```
-Flex-Nautilus/
-├── src/
-│   ├── controller/              # Main application code
-│   │   ├── controller/
-│   │   │   └── main.py          # Controller service (carbon-aware scheduling)
-│   │   ├── migrator/
-│   │   │   ├── migrate_service.py  # FastAPI migration service
-│   │   │   └── live_migration.py   # CRIU-based migration logic
-│   │   ├── db/
-│   │   │   ├── db.py            # Database utilities
-│   │   │   ├── metadata.py      # HTTP metadata service
-│   │   │   └── upload_data.py   # Data upload job
-│   │   └── utils/
-│   │       └── live_migration.py  # Legacy migration utilities
-│   ├── manifests/               # Kubernetes manifests
-│   │   ├── cluster.yml          # KIND cluster configuration
-│   │   ├── python-migrate.yml   # Migration service deployment
-│   │   ├── migrator.yml         # Migrator pod template
-│   │   ├── controller.yml       # Controller deployment
-│   │   ├── storage.yml          # Database and storage
-│   │   ├── scheduler-config.yml # Scheduler configuration
-│   │   ├── roles.yml            # RBAC configuration
-│   │   ├── metrics-server.yaml  # Metrics server
-│   │   └── testpod.yml          # Test pod manifest
-│   ├── build/                   # Build configurations
-│   │   ├── Dockerfile.migrate   # Migration service image
-│   │   ├── Dockerfile.main      # Controller image
-│   │   ├── Dockerfile.db        # Database image
-│   │   ├── Dockerfile.migrator   # Migrator pod image
-│   │   ├── Dockerfile.testpod   # Test pod image
-│   │   ├── start.sh             # Service startup script
-│   │   └── *.txt                # Python requirements files
-│   ├── run.sh                   # Main deployment script
-│   ├── delete.sh                # Cleanup script
-│   ├── test.sh                  # Testing script
-│   └── update.sh                # Update script
-├── data/                        # Carbon intensity data
-│   ├── real_data/               # Real carbon intensity CSV files
-│   └── regions/                 # Regional data organized by region
-└── README.md                    # This file
-```
+**For detailed documentation on each directory:**
+- **Source Code**: 
+  - [`src/README.md`](src/README.md) - Usage guide, shell commands, and quick start
+  - [`src/ARCHITECTURE.md`](src/ARCHITECTURE.md) - Architecture, design choices, modules, and limitations
+- **Data Directory**: See [`data/README.md`](data/README.md) for data structure, processing, and analysis tools
 
 ## 🔌 Module Interfaces
 
 ### Controller Module (`controller/controller/main.py`)
 
-**Class**: `FlexNautilusController`
+**Class**: `KubeFlexController`
 
 **Key Methods**:
 - `__init__(scheduler_time: Optional[float], scheduling_policy: int)` - Initialize controller with scheduler time and policy
@@ -334,7 +244,10 @@ def criu_migrate_pod(
 - **RAM**: Minimum 8GB, recommended 16GB
 - **CPU**: 4+ cores recommended
 - **Disk**: 20GB+ free space for Docker images and checkpoints
-- **OS**: macOS 10.15+, Linux (Ubuntu 20.04+), or Windows 10/11 with WSL2
+- **OS**: 
+  - **Linux (Ubuntu 20.04+)** - **Required for CRIU functionality**
+  - macOS 10.15+ or Windows 10/11 with WSL2 - Can run KIND cluster, but CRIU migration requires Linux kernel
+  - **Note**: CRIU only works on Linux systems. While KIND can run on macOS/Windows, the actual CRIU checkpoint/restore operations require a Linux kernel with sudo features (SYS_ADMIN capability, etc.)
 
 ## 🚀 Quick Start
 
@@ -342,10 +255,17 @@ def criu_migrate_pod(
 
 ```bash
 git clone <repository-url>
-cd Flex-Nautilus
+cd KubeFlex
 ```
 
-### 2. Deploy the System
+### 2. Build the Docker Images
+**Note: you don't need to do this more than once, but you do need to use your own Docker profile**;
+**Learn the basics here: [`Building Docker Images`](https://docs.docker.com/get-started/introduction/build-and-push-first-image/)**
+```bash
+./update.sh
+```
+
+### 3. Deploy the System
 
 **Deploy everything (cluster, database, services)**:
 ```bash
@@ -365,26 +285,15 @@ cd src
 ./run.sh --all --include-cluster --include-db --policy 3
 ```
 
-### 3. Test the Migration Service
 
-```bash
-# Port forward the migration service
-kubectl port-forward -n monitor svc/python-migrate-service 8000:8000
 
-# In another terminal, run migration test
-cd src
-./test.sh --migrate --pod test-pod --source kind-worker --target kind-worker2
-```
+### 5. Test Carbon Forecast & Migration
 
-### 4. Test Carbon Forecast
-
-```bash
-# Port forward the metadata service
-kubectl port-forward -n monitor svc/metadata-service 8008:8008
-
+```bash# Port forward the metadata service
 # Generate forecast
 cd src
 ./test.sh --forecast 24
+./test.sh --migration
 ```
 
 ## 🔧 Configuration
@@ -572,6 +481,8 @@ cd src
 - **Resource Usage**: Low overhead during migration process with CRIU optimization
 - **Scalability**: Supports multiple concurrent migrations with proper resource isolation
 - **Forecast Query Time**: < 1 second for 24-hour forecasts
+- **Data Range**: Historical data from 2020-01-01 to 2022-12-31 (hourly resolution)
+- **Regional Coverage**: 14 major US power grid regions with 50+ sub-regions
 
 ## 🗑️ Cleanup
 
@@ -589,6 +500,57 @@ cd src
 ./delete.sh
 ```
 
+## 📚 Documentation
+
+This repository includes comprehensive documentation:
+
+- **Main README** (`README.md`): This file - overview and quick start guide
+- **Source Code README** (`src/README.md`): Usage guide, shell commands, and quick start
+- **Architecture Documentation** (`src/ARCHITECTURE.md`): Detailed architecture, design choices, modules, limitations, and future work
+- **Data Directory README** (`data/README.md`): Data structure, processing pipeline, benchmarking, and visualization tools
+
+## ⚠️ Known Limitations
+
+### System Limitations
+- **KIND-Specific**: Designed for KIND clusters, may not work with production Kubernetes clusters
+- **Historical Data**: Uses 2020-2022 carbon intensity data, no real-time integration
+- **Fixed Node Configuration**: Assumes exactly 3 worker nodes with specific region labels
+- **Single Namespace Focus**: Primarily tested with `test-namespace`
+
+### Migration Limitations
+- **CRIU Container Compatibility**: Migration currently only works with the specific testpod and its Docker image; not generic for arbitrary containers
+- **CRIU Versioning**: CRIU versioning is sparsely supported and requires strict version/dependency management
+- **Platform Requirements**: **CRIU only works on Linux systems - will not work on non-Linux machines** (macOS, Windows)
+- **File Mounting**: Complex mount namespace handling with limitations on mount discovery and external mount migration
+- **Network Limitations**: **TCP connections are not preserved** - active connections are lost during migration
+- **State Preservation**: Some state may not be fully preserved; network connections are interrupted
+- **Performance**: Migration time depends on container size (typically 10-30 seconds)
+
+**Note**: Future iterations must address these CRIU-related limitations for broader applicability.
+
+### Scheduling Limitations
+- **Policy Constraints**: Only three predefined policies, no custom policy support
+- **Forecast Accuracy**: Uses historical data, not real-time forecasts
+- **Migration Cost**: Doesn't account for migration overhead in scheduling decisions
+
+For detailed limitations and future work, see:
+- [`src/ARCHITECTURE.md`](src/ARCHITECTURE.md#-shortcomings-and-limitations) - Architecture limitations and design constraints
+- [`data/README.md`](data/README.md#-shortcomings-and-limitations) - Data limitations
+
+## 🚀 Future Work
+
+### Planned Enhancements
+- Real-time carbon intensity data integration
+- Support for production Kubernetes clusters
+- Custom scheduling policy framework
+- Enhanced migration performance and state preservation
+- Multi-namespace and dynamic node support
+- **CRIU Improvements**: Generic container migration support, TCP connection preservation, improved mount handling, better CRIU version management
+
+For detailed future work plans, see:
+- [`src/ARCHITECTURE.md`](src/ARCHITECTURE.md#-future-work) - Architecture and system enhancements
+- [`data/README.md`](data/README.md#-future-work) - Data and analysis improvements
+
 ## 📚 Additional Resources
 
 - [CRIU Documentation](https://criu.org/)
@@ -601,7 +563,7 @@ cd src
 Contributions are welcome! Please ensure:
 - Code follows existing style and patterns
 - Tests are added for new features
-- Documentation is updated
+- Documentation is updated (including relevant README files)
 - Migration compatibility is maintained
 
 ## 📄 License

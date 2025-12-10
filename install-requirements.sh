@@ -1,9 +1,40 @@
 #!/bin/bash
 
-# Flex-Nautilus Requirements Installation Script
-# This script installs all required dependencies for Flex-Nautilus
+# KubeFlex Requirements Installation Script
+# This script installs all required dependencies for KubeFlex
 
 set -e
+
+# Configuration
+GITHUB_TOKEN=""
+
+# Parse command line arguments
+for arg in "$@"; do
+    case $arg in
+        --github-token=*)
+            GITHUB_TOKEN="${arg#*=}"
+            shift
+            ;;
+        --github-token)
+            shift
+            GITHUB_TOKEN="$1"
+            shift
+            ;;
+        --help)
+            echo "Usage: $0 [--github-token=TOKEN] [--help]"
+            echo ""
+            echo "Options:"
+            echo "  --github-token=TOKEN  GitHub Personal Access Token for authentication"
+            echo "  --github-token TOKEN  Alternative syntax for token"
+            echo "  --help                Show this help message"
+            echo ""
+            echo "The GitHub token is used to authenticate with GitHub for cloning private repos"
+            echo "and avoiding rate limits. You can create a token at:"
+            echo "  https://github.com/settings/tokens"
+            exit 0
+            ;;
+    esac
+done
 
 # Colors for output
 RED='\033[0;31m'
@@ -322,6 +353,47 @@ install_python() {
     fi
 }
 
+# Install GitHub CLI and authenticate
+install_github_cli() {
+    log_step "Setting up GitHub authentication..."
+    
+    # Install GitHub CLI if not present
+    if ! command_exists gh; then
+        log_info "Installing GitHub CLI..."
+        if [[ "$OS" == "macos" ]]; then
+            if command_exists brew; then
+                brew install gh
+            else
+                log_warning "Homebrew not found. Please install GitHub CLI manually: https://cli.github.com/"
+                return 1
+            fi
+        elif [[ "$OS" == "linux" ]]; then
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+            sudo apt-get update
+            sudo apt-get install -y gh
+        else
+            log_warning "GitHub CLI installation not supported for $OS"
+            return 1
+        fi
+    fi
+    
+    # Authenticate with GitHub if token provided
+    if [ -n "$GITHUB_TOKEN" ]; then
+        log_info "Authenticating with GitHub using provided token..."
+        echo "$GITHUB_TOKEN" | gh auth login --with-token
+        if [ $? -eq 0 ]; then
+            log_success "GitHub authentication successful"
+        else
+            log_warning "GitHub authentication failed. You may need to authenticate manually: gh auth login"
+        fi
+    else
+        log_info "No GitHub token provided. Skipping authentication."
+        log_info "To authenticate later, run: gh auth login"
+        log_info "Or provide token with: $0 --github-token=YOUR_TOKEN"
+    fi
+}
+
 # Verify installations
 verify_installations() {
     log_step "Verifying installations..."
@@ -382,7 +454,7 @@ verify_installations() {
 # Main installation function
 main() {
     echo "=========================================="
-    echo "  Flex-Nautilus Requirements Installer"
+    echo "  KubeFlex Requirements Installer"
     echo "=========================================="
     echo ""
     
@@ -406,6 +478,14 @@ main() {
     log_info "  - kubectl (v1.33.1 recommended, >= v1.32.0)"
     log_info "  - KIND (v0.27.0 recommended, >= v0.20.0)"
     log_info "  - Python (3.9+)"
+    log_info "  - GitHub CLI (gh) and authentication (if token provided)"
+    echo ""
+    
+    if [ -n "$GITHUB_TOKEN" ]; then
+        log_info "GitHub token provided - will authenticate with GitHub"
+    else
+        log_info "No GitHub token provided - GitHub authentication will be skipped"
+    fi
     echo ""
     
     read -p "Do you want to continue? (y/N) " -n 1 -r
@@ -430,6 +510,9 @@ main() {
     
     # Install Python
     install_python
+    
+    # Install and authenticate GitHub CLI
+    install_github_cli
     
     # Verify installations
     echo ""
