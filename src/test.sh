@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Flex-Nautilus Migration Service - Test Script
+# KubeFlex Migration Service - Test Script
 # Supports migration testing and carbon forecast generation
 
 set -euo pipefail
@@ -24,7 +24,7 @@ OUTPUT_DIR="./output"
 FORECAST_DURATION=""
 RUN_MIGRATION_TEST=false
 RUN_FORECAST=false
-KEEP_POD=false  # If true, don't delete original pod after migration
+KEEP_POD=true  # If true, don't delete original pod after migration (default: true - keep pod)
 
 # Port forwarding variables
 MIGRATION_PORT_FORWARD_PID=""
@@ -67,7 +67,8 @@ Options:
     --target-node NODE      Target node for migration (default: kind-worker2)
     --migration-url URL      Migration service URL (default: http://localhost:8000)
     --metadata-url URL      Metadata service URL (default: http://localhost:8008)
-    --keep-pod              Keep the original pod after migration (default: original pod is deleted)
+    --keep-pod              Keep the original pod after migration (default: true - pod is kept)
+    --delete-pod            Delete the original pod after migration (overrides default keep behavior)
     --help                  Show this help message
 
 Examples:
@@ -133,6 +134,10 @@ parse_arguments() {
                 ;;
             --keep-pod)
                 KEEP_POD=true
+                shift
+                ;;
+            --delete-pod)
+                KEEP_POD=false
                 shift
                 ;;
             --help)
@@ -307,9 +312,9 @@ EOF
     
     # Pod deletion is now handled by the migration service
     if [ "$KEEP_POD" = true ]; then
-        log_info "Original pod $POD will be kept (--keep-pod flag set, migration service will not delete it)"
+        log_info "Original pod $POD will be kept (default behavior - migration service will not delete it)"
     else
-        log_info "Original pod $POD will be deleted by the migration service after successful migration"
+        log_info "Original pod $POD will be deleted by the migration service after successful migration (--delete-pod flag set)"
     fi
     
     return 0
@@ -420,7 +425,7 @@ EOF
 # Main function
 main() {
     log_info "============================================================"
-    log_info "Flex-Nautilus Test Script"
+    log_info "KubeFlex Test Script"
     log_info "============================================================"
     
     # Parse arguments
@@ -434,9 +439,9 @@ main() {
         log_info "  Pod: $POD"
         log_info "  Target Node: $TARGET_NODE"
         if [ "$KEEP_POD" = true ]; then
-            log_info "  Keep Original Pod: Yes (--keep-pod flag set)"
+            log_info "  Keep Original Pod: Yes (default - original pod will be kept after migration)"
         else
-            log_info "  Keep Original Pod: No (original pod will be deleted after migration)"
+            log_info "  Keep Original Pod: No (--delete-pod flag set - original pod will be deleted after migration)"
         fi
     fi
     

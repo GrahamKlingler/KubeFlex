@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Flex-Nautilus Deployment Script
-# This script deploys the updated Flex-Nautilus system with Docker checkpoint functionality
+# KubeFlex Deployment Script
+# This script deploys the updated KubeFlex system with Docker checkpoint functionality
 
 set -e
 
@@ -97,7 +97,7 @@ for arg in "$@"; do
 done
 
 log_info "=========================================="
-log_info "FLEX-NAUTILUS DEPLOYMENT SCRIPT"
+log_info "KubeFlex DEPLOYMENT SCRIPT"
 log_info "=========================================="
 
 # Check if kubectl is available
@@ -292,7 +292,7 @@ else
 fi
 
 # Deploy the manifests based on flags
-log_info "Deploying Flex-Nautilus manifests..."
+log_info "Deploying KubeFlex manifests..."
 
 # Always deploy roles first (needed for RBAC)
 log_info "Applying roles.yml..."
@@ -378,8 +378,22 @@ if [ "$CREATE_MIGRATE" = true ]; then
     done
 fi
 
+sleep 3
 
-# STEP 4: Deploy controller (scheduler) - SECOND TO LAST
+# STEP 5: Deploy test pod - SECOND TO LAST
+if [ "$CREATE_ALL" = true ]; then
+log_info "Applying testpod.yml..."
+if kubectl apply -f $MANIFESTS_DIR/testpod.yml; then
+    log_success "Successfully applied testpod.yml"
+else
+    log_error "Failed to apply testpod.yml"
+    exit 1
+    fi
+fi
+
+sleep 3
+
+# STEP 4: Deploy controller (scheduler) - LAST
 if [ "$CREATE_CONTROLLER" = true ]; then
     log_info "Applying controller.yml..."
     if kubectl apply -f $MANIFESTS_DIR/controller.yml; then
@@ -390,16 +404,6 @@ if [ "$CREATE_CONTROLLER" = true ]; then
     fi
 fi
 
-# STEP 5: Deploy test pod - LAST (always deployed when --all is used)
-if [ "$CREATE_ALL" = true ]; then
-log_info "Applying testpod.yml..."
-if kubectl apply -f $MANIFESTS_DIR/testpod.yml; then
-    log_success "Successfully applied testpod.yml"
-else
-    log_error "Failed to apply testpod.yml"
-    exit 1
-    fi
-fi
 
 # Wait for pods to be ready based on what was deployed
 log_info "Waiting for deployed components to be ready..."
@@ -531,4 +535,4 @@ log_info "   To update scheduler time and policy:"
 log_info "     kubectl create configmap scheduler-config --from-literal=scheduler-time=<timestamp> --from-literal=scheduling-policy=<1|2|3> -n monitor --dry-run=client -o yaml | kubectl apply -f -"
 log_info "     kubectl create configmap scheduler-config --from-literal=scheduler-time=<timestamp> --from-literal=scheduling-policy=<1|2|3> -n test-namespace --dry-run=client -o yaml | kubectl apply -f -"
 
-log_success "Flex-Nautilus deployment completed!"
+log_success "KubeFlex deployment completed!"

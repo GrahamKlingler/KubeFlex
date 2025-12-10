@@ -70,7 +70,7 @@ for arg in "$@"; do
 done
 
 log_info "=========================================="
-log_info "FLEX-NAUTILUS CLEANUP SCRIPT"
+log_info "KubeFlex CLEANUP SCRIPT"
 log_info "=========================================="
 
 # Check if kubectl is available
@@ -95,7 +95,7 @@ kubectl delete configmap scheduler-config -n test-namespace 2>/dev/null || log_w
 
 # Delete specific components based on flags
 # Always delete everything except database (which requires --include-db)
-log_info "Deleting Flex-Nautilus resources..."
+log_info "Deleting KubeFlex resources..."
 
 # Delete migration service
 log_info "Deleting migration service..."
@@ -171,17 +171,6 @@ kubectl get pods -n monitor --no-headers -o custom-columns=":metadata.name" 2>/d
         kubectl delete pod "$pod_name" -n monitor 2>/dev/null || log_warning "Failed to delete pod $pod_name in monitor namespace"
     fi
 done
-
-# Remove node labels (always done)
-    log_info "Removing node labels..."
-WORKER_NODES=$(kubectl get nodes --no-headers | grep -v control-plane | awk '{print $1}' 2>/dev/null)
-if [ -n "$WORKER_NODES" ]; then
-    for NODE_NAME in $WORKER_NODES; do
-        kubectl label node ${NODE_NAME} REGION- 2>/dev/null || log_warning "Node ${NODE_NAME} not labeled"
-    done
-else
-    log_warning "No worker nodes found to unlabel"
-fi
 
 # Delete kind cluster only if --include-cluster was provided
 if [ "$DELETE_CLUSTER" = true ]; then

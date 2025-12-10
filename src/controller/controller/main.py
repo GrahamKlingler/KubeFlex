@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Flex-Nautilus Controller Main Module
+KubeFlex Controller Main Module
 
-This module provides the main controller functionality for the Flex-Nautilus system,
+This module provides the main controller functionality for the KubeFlex system,
 including carbon-aware pod migration, job management, and testing capabilities.
 """
 
@@ -39,8 +39,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-class FlexNautilusController:
-    """Main controller class for Flex-Nautilus system."""
+class KubeFlexController:
+    """Main controller class for KubeFlex system."""
     
     def __init__(self, scheduler_time: Optional[float] = None, scheduling_policy: int = 3):
         self.scheduler = None
@@ -99,7 +99,7 @@ class FlexNautilusController:
     def initialize(self) -> bool:
         """Initialize the controller with all required connections."""
         try:
-            logger.info("Initializing Flex-Nautilus Controller...")
+            logger.info("Initializing KubeFlex Controller...")
             
             # Connect to PostgreSQL database
             self.db_conn = connect_to_db(db_config)
@@ -163,7 +163,7 @@ class FlexNautilusController:
             return False
     
     def migrate_pod(self, namespace: str, pod: str, target_node: str, 
-                   delete_original: bool = True, debug: bool = True) -> Dict:
+                   delete_original: bool = False, debug: bool = True) -> Dict:
         """Migrate a pod to another node using the migration service (matches live_migration.py interface)."""
         try:
             logger.info(f"[MIGRATION] Starting migration: {pod} -> {target_node} in namespace {namespace}")
@@ -897,7 +897,7 @@ class FlexNautilusController:
                     namespace=namespace,
                     pod=pod_name,
                     target_node=target_node,
-                    delete_original=True,
+                    delete_original=False,
                     debug=True
                 )
                 
@@ -1021,7 +1021,7 @@ class FlexNautilusController:
                     namespace=namespace,
                     pod=pod_name,
                     target_node=target_node,
-                    delete_original=True,
+                    delete_original=False,
                     debug=True
                 )
                 
@@ -1075,9 +1075,9 @@ class FlexNautilusController:
 
 
 def main():
-    """Main entry point for the Flex-Nautilus Controller (matches live_migration.py and test.sh patterns)."""
+    """Main entry point for the KubeFlex Controller (matches live_migration.py and test.sh patterns)."""
     parser = argparse.ArgumentParser(
-        description='Flex-Nautilus Controller - Carbon-aware pod migration scheduler',
+        description='KubeFlex Controller - Carbon-aware pod migration scheduler',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -1145,7 +1145,7 @@ Scheduling Policies:
     
     # Initialize controller with scheduler time and scheduling policy
     try:
-        controller = FlexNautilusController(scheduler_time=scheduler_time, scheduling_policy=scheduling_policy)
+        controller = KubeFlexController(scheduler_time=scheduler_time, scheduling_policy=scheduling_policy)
     except ValueError as e:
         logger.error(f"Invalid configuration: {e}")
         sys.exit(1)
@@ -1157,7 +1157,7 @@ Scheduling Policies:
     # Run migration workflow only if not skipped
     if args.skip_migration:
         logger.info("=" * 80)
-        logger.info("Flex-Nautilus Controller - Running in scheduled mode")
+        logger.info("KubeFlex Controller - Running in scheduled mode")
         logger.info("Initial migration workflow skipped (--skip-migration flag set)")
         logger.info("Hourly migration checks are active and will run automatically")
         logger.info("=" * 80)
@@ -1172,7 +1172,7 @@ Scheduling Policies:
                 controller.scheduler.shutdown()
     else:
         logger.info("=" * 80)
-        logger.info("Flex-Nautilus Controller - Starting Initial Migration Workflow")
+        logger.info("KubeFlex Controller - Starting Initial Migration Workflow")
         logger.info("=" * 80)
         
         results = controller.run_migration_test(

@@ -28,7 +28,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # FastAPI app
-app = FastAPI(title="Flex-Nautilus Migration Service", version="3.0.0")
+app = FastAPI(title="KubeFlex Migration Service", version="3.0.0")
 
 # Define input model
 class MigrateRequest(BaseModel):
@@ -45,7 +45,7 @@ class MigrateRequest(BaseModel):
 async def root():
     """Root endpoint for service health check."""
     return {
-        "message": "Flex-Nautilus Migration Service v3.0.0", 
+        "message": "KubeFlex Migration Service v3.0.0", 
         "status": "running",
         "version": "3.0.0"
     }
@@ -64,7 +64,7 @@ async def health():
 async def info():
     """Service information endpoint."""
     return {
-        "service": "Flex-Nautilus Migration Service",
+        "service": "KubeFlex Migration Service",
         "version": "3.0.0",
         "description": "Kubernetes pod migration service with CRIU-based migration",
         "endpoints": {
@@ -264,7 +264,7 @@ async def list_pods(namespace: str):
         )
 
 if __name__ == "__main__":
-    logger.info("[SERVER] Starting Flex-Nautilus Migration Service v3.0.0")
+    logger.info("[SERVER] Starting KubeFlex Migration Service v3.0.0")
     logger.info("[SERVER] Using CRIU-based migration")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
