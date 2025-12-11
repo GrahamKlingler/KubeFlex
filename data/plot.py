@@ -1002,26 +1002,41 @@ def plot_all_benchmark_graphs(csv_path, output_base_dir=None):
         print("Error: CSV file is empty")
         return
     
-    # Get policy difference columns
+    # Get policy carbon intensity columns (for duration chart)
+    policy_intensity_columns = [col for col in df.columns if 'Carbon_Intensity' in col]
+    policy_intensity_columns = sorted(policy_intensity_columns)  # Sort for consistent ordering
+    
+    # Get policy difference columns (for timestamp chart and overall scatter plot)
     policy_diff_columns = [col for col in df.columns if 'Difference' in col]
     policy_diff_columns = sorted(policy_diff_columns)  # Sort for consistent ordering
     
-    print(f"Found {len(df)} rows before filtering")
-    print(f"Policy difference columns: {', '.join(policy_diff_columns)}")
+    if not policy_intensity_columns:
+        print("Error: No policy carbon intensity columns found in CSV")
+        return
     
-    # Filter out rows where any Policy Difference is < 0 or > 1
-    initial_count = len(df)
-    for col in policy_diff_columns:
+    print(f"Found {len(df)} rows")
+    print(f"Policy carbon intensity columns: {', '.join(policy_intensity_columns)}")
+    if policy_diff_columns:
+        print(f"Policy difference columns: {', '.join(policy_diff_columns)}")
+    
+    # Convert carbon intensity columns to numeric (no filtering needed for carbon intensity)
+    for col in policy_intensity_columns:
         df[col] = pd.to_numeric(df[col], errors='coerce')
-        mask = (df[col] >= 0) & (df[col] <= 1) | df[col].isna()
-        df = df[mask].copy()
     
-    filtered_count = len(df)
-    print(f"Filtered out {initial_count - filtered_count} rows with policy differences outside [0, 1]")
-    print(f"Remaining rows: {filtered_count}")
+    # Convert and filter difference columns (for timestamp chart)
+    if policy_diff_columns:
+        initial_count = len(df)
+        for col in policy_diff_columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+            mask = (df[col] >= 0) & (df[col] <= 1) | df[col].isna()
+            df = df[mask].copy()
+        
+        filtered_count = len(df)
+        print(f"Filtered out {initial_count - filtered_count} rows with policy differences outside [0, 1]")
+        print(f"Remaining rows: {filtered_count}")
     
     if df.empty:
-        print("Error: No data remaining after filtering")
+        print("Error: CSV file is empty")
         return
     
     # Convert Timestamp to datetime
@@ -1046,19 +1061,19 @@ def plot_all_benchmark_graphs(csv_path, output_base_dir=None):
     
     # Policy colors (matching the color palette)
     policy_colors = {
-        'Policy1_Difference': '#1f77b4',  # Blue
-        'Policy2_Difference': '#ff7f0e',  # Orange
-        'Policy3_1_Difference': '#2ca02c',  # Green
-        'Policy3_2_Difference': '#d62728',  # Red
-        'Policy3_3_Difference': '#9467bd',  # Purple
+        'Policy1_Carbon_Intensity': '#1f77b4',  # Blue
+        'Policy2_Carbon_Intensity': '#ff7f0e',  # Orange
+        'Policy3_1_Carbon_Intensity': '#2ca02c',  # Green
+        'Policy3_2_Carbon_Intensity': '#d62728',  # Red
+        'Policy3_3_Carbon_Intensity': '#9467bd',  # Purple
     }
     
     policy_names = {
-        'Policy1_Difference': 'Policy 1',
-        'Policy2_Difference': 'Policy 2',
-        'Policy3_1_Difference': 'Policy 3 (1 migration)',
-        'Policy3_2_Difference': 'Policy 3 (2 migrations)',
-        'Policy3_3_Difference': 'Policy 3 (3 migrations)',
+        'Policy1_Carbon_Intensity': 'Policy 1',
+        'Policy2_Carbon_Intensity': 'Policy 2',
+        'Policy3_1_Carbon_Intensity': 'Policy 3 (1 migration)',
+        'Policy3_2_Carbon_Intensity': 'Policy 3 (2 migrations)',
+        'Policy3_3_Carbon_Intensity': 'Policy 3 (3 migrations)',
     }
     
     # Group by day
@@ -1087,20 +1102,24 @@ def plot_all_benchmark_graphs(csv_path, output_base_dir=None):
         # Collect all values to determine y-axis range
         all_values = []
         
-        for i, policy_col in enumerate(policy_diff_columns):
+        for i, policy_col in enumerate(policy_intensity_columns):
             policy_values = []
             for duration in durations:
                 duration_data = day_df[day_df['Duration'] == duration]
                 if not duration_data.empty:
-                    # Average the differences for this duration
-                    avg_diff = duration_data[policy_col].mean()
-                    if not pd.isna(avg_diff):
-                        policy_values.append(avg_diff)
-                        all_values.append(avg_diff)
+                    # Convert to numeric and filter out NaN/empty values
+                    intensity_values = pd.to_numeric(duration_data[policy_col], errors='coerce')
+                    intensity_values = intensity_values.dropna()
+                    if not intensity_values.empty:
+                        # Calculate average carbon intensity per hour (gCO₂eq/kWh)
+                        # Divide total carbon intensity by duration to get average per hour
+                        avg_intensity = intensity_values.mean() / duration
+                        policy_values.append(avg_intensity)
+                        all_values.append(avg_intensity)
                     else:
-                        policy_values.append(0)
+                        policy_values.append(None)
                 else:
-                    policy_values.append(0)
+                    policy_values.append(None)
             
             fig_bar.add_trace(
                 go.Bar(
@@ -1110,43 +1129,39 @@ def plot_all_benchmark_graphs(csv_path, output_base_dir=None):
                     marker_color=policy_colors.get(policy_col, COLOR_PALETTE[i % len(COLOR_PALETTE)]),
                     hovertemplate=
                     f'<b>%{{x}}</b><br>' +
-                    f'{policy_names.get(policy_col, policy_col)}: %{{y:.4f}}<br>' +
+                    f'{policy_names.get(policy_col, policy_col)}: %{{y:.2f}} gCO₂eq/kWh<br>' +
                     '<extra></extra>'
                 )
             )
         
-        # Calculate dynamic y-axis range based on data
-        if all_values:
-            min_val = min(all_values)
-            max_val = max(all_values)
-            # Add 5% padding on each side, but ensure we don't go below 0 or above 1
-            value_range = max_val - min_val
+        # Calculate dynamic y-axis range based on data with balanced scaling
+        # Filter out None values
+        valid_values = [v for v in all_values if v is not None]
+        if valid_values:
+            max_val = max(valid_values)
+            value_range = max_val
             if value_range == 0:
-                # All values are the same, add small padding
-                if min_val > 0.05:
-                    padding = min_val * 0.1  # 10% of the value
-                else:
-                    padding = 0.01  # Small fixed padding
-                y_min = max(0, min_val - padding)
-                y_max = min(1, max_val + padding)
+                # All values are zero, use small default range
+                y_min = 0
+                y_max = 10
             else:
-                # Add 5% padding on each side to use nearly all chart space
-                padding = value_range * 0.05
-                y_min = max(0, min_val - padding)
-                y_max = min(1, max_val + padding)
+                # Add 10% padding on top, always start at 0
+                padding = value_range * 0.1
+                y_min = 0
+                y_max = max_val + padding
         else:
-            # Fallback if no values
+            # Fallback if no values (typical carbon intensity per hour is around 100-500 gCO₂eq/kWh)
             y_min = 0
-            y_max = 1.1
+            y_max = 500
         
         fig_bar.update_layout(
-            title=f'Policy Differences by Duration - {day_str}',
+            title=f'Policy Average Carbon Intensity by Duration - {day_str}',
             xaxis=dict(
                 title='Duration (hours)',
                 type='category'
             ),
             yaxis=dict(
-                title='Policy Efficency (0-1)',
+                title='Average Carbon Intensity (gCO₂eq/kWh)',
                 range=[y_min, y_max]
             ),
             barmode='group',

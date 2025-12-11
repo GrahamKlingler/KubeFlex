@@ -1612,6 +1612,189 @@ def plot_duration_comparison(duration, duration_results, output_dir):
     return output_path
 
 
+def plot_policy_by_duration_from_csv(csv_path, output_base_dir=None):
+    """
+    Create policy_by_duration plots using Carbon Intensity instead of Difference.
+    
+    Args:
+        csv_path: Path to benchmark_data.csv file
+        output_base_dir: Base directory for output (default: data/outputs)
+    """
+    if not os.path.isfile(csv_path):
+        print(f"Error: CSV file not found: {csv_path}")
+        return
+    
+    df = pd.read_csv(csv_path)
+    
+    if df.empty:
+        print("Error: CSV file is empty")
+        return
+    
+    # Get policy carbon intensity columns
+    policy_intensity_columns = [col for col in df.columns if 'Carbon_Intensity' in col]
+    policy_intensity_columns = sorted(policy_intensity_columns)  # Sort for consistent ordering
+    
+    if not policy_intensity_columns:
+        print("Error: No policy carbon intensity columns found in CSV")
+        return
+    
+    print(f"Found {len(df)} rows")
+    print(f"Policy carbon intensity columns: {', '.join(policy_intensity_columns)}")
+    
+    # Convert Timestamp to datetime
+    if 'Timestamp' not in df.columns:
+        print("Error: 'Timestamp' column not found")
+        return
+    
+    df['Timestamp'] = pd.to_datetime(df['Timestamp'], utc=True, errors='coerce')
+    df = df.dropna(subset=['Timestamp'])
+    df['Day'] = df['Timestamp'].dt.date
+    
+    # Set up output directory
+    if output_base_dir is None:
+        csv_dir = os.path.dirname(os.path.abspath(csv_path))
+        if 'outputs' in csv_dir:
+            output_base_dir = csv_dir
+        else:
+            output_base_dir = os.path.join(csv_dir, 'outputs')
+    os.makedirs(output_base_dir, exist_ok=True)
+    
+    # Policy colors (matching the color palette)
+    policy_colors = {
+        'Policy1_Carbon_Intensity': '#1f77b4',  # Blue
+        'Policy2_Carbon_Intensity': '#ff7f0e',  # Orange
+        'Policy3_1_Carbon_Intensity': '#2ca02c',  # Green
+        'Policy3_2_Carbon_Intensity': '#d62728',  # Red
+        'Policy3_3_Carbon_Intensity': '#9467bd',  # Purple
+    }
+    
+    policy_names = {
+        'Policy1_Carbon_Intensity': 'Policy 1',
+        'Policy2_Carbon_Intensity': 'Policy 2',
+        'Policy3_1_Carbon_Intensity': 'Policy 3 (1 migration)',
+        'Policy3_2_Carbon_Intensity': 'Policy 3 (2 migrations)',
+        'Policy3_3_Carbon_Intensity': 'Policy 3 (3 migrations)',
+    }
+    
+    # Group by day
+    days = sorted(df['Day'].unique())
+    print(f"\nCreating graphs for {len(days)} day(s)...")
+    
+    durations = [6, 12, 18, 24, 30, 36, 42, 48]
+    
+    for day in days:
+        day_df = df[df['Day'] == day].copy()
+        if day_df.empty:
+            continue
+        
+        day_str = day.strftime('%Y-%m-%d')
+        day_dir = os.path.join(output_base_dir, day_str)
+        os.makedirs(day_dir, exist_ok=True)
+        
+        print(f"\nProcessing {day_str} ({len(day_df)} rows)...")
+        
+        # Create bar chart: 8 columns (durations), 5 subcolumns (policies)
+        fig_bar = go.Figure()
+        
+        # Prepare data for grouped bar chart
+        duration_labels = [f"{d}h" for d in durations]
+        
+        # Collect all values to determine y-axis range
+        all_values = []
+        
+        for i, policy_col in enumerate(policy_intensity_columns):
+            policy_values = []
+            for duration in durations:
+                duration_data = day_df[day_df['Duration'] == duration]
+                if not duration_data.empty:
+                    # Convert to numeric and filter out NaN/empty values
+                    intensity_values = pd.to_numeric(duration_data[policy_col], errors='coerce')
+                    intensity_values = intensity_values.dropna()
+                    if not intensity_values.empty:
+                        # Average the carbon intensities for this duration
+                        avg_intensity = intensity_values.mean()
+                        policy_values.append(avg_intensity)
+                        all_values.append(avg_intensity)
+                    else:
+                        policy_values.append(None)
+                else:
+                    policy_values.append(None)
+            
+            fig_bar.add_trace(
+                go.Bar(
+                    name=policy_names.get(policy_col, policy_col),
+                    x=duration_labels,
+                    y=policy_values,
+                    marker_color=policy_colors.get(policy_col, '#7f7f7f'),
+                    hovertemplate=
+                    f'<b>%{{x}}</b><br>' +
+                    f'{policy_names.get(policy_col, policy_col)}: %{{y:.2f}}<br>' +
+                    '<extra></extra>'
+                )
+            )
+        
+        # Calculate dynamic y-axis range based on data with balanced scaling
+        # Filter out None values
+        valid_values = [v for v in all_values if v is not None]
+        if valid_values:
+            min_val = min(valid_values)
+            max_val = max(valid_values)
+            value_range = max_val - min_val
+            if value_range == 0:
+                # All values are the same, add small padding
+                if min_val > 0:
+                    padding = min_val * 0.1  # 10% of the value
+                else:
+                    padding = 10  # Small fixed padding
+                y_min = max(0, min_val - padding)
+                y_max = max_val + padding
+            else:
+                # Add 10% padding on each side to balance the chart
+                padding = value_range * 0.1
+                y_min = max(0, min_val - padding)
+                y_max = max_val + padding
+        else:
+            # Fallback if no values
+            y_min = 0
+            y_max = 1000
+        
+        fig_bar.update_layout(
+            title=f'Policy Carbon Intensity by Duration - {day_str}',
+            xaxis=dict(
+                title='Duration (hours)',
+                type='category'
+            ),
+            yaxis=dict(
+                title='Carbon Intensity',
+                range=[y_min, y_max]
+            ),
+            barmode='group',
+            legend=dict(
+                title='Policy',
+                orientation="v",
+                yanchor="top",
+                y=1,
+                xanchor="left",
+                x=1.02
+            ),
+            template="plotly_white",
+            height=600,
+            width=1200,
+        )
+        
+        bar_output = os.path.join(day_dir, f"policy_by_duration_{day_str}.html")
+        fig_bar.write_html(bar_output, include_plotlyjs=True, full_html=True)
+        print(f"  Bar chart (by duration) saved: {bar_output}")
+        
+        # Save bar chart as PNG
+        bar_png_output = os.path.join(day_dir, f"policy_by_duration_{day_str}.png")
+        try:
+            fig_bar.write_image(bar_png_output)
+            print(f"  Bar chart (by duration) PNG saved: {bar_png_output}")
+        except Exception as e:
+            print(f"  Could not save bar chart (by duration) PNG (requires kaleido package): {str(e)}")
+
+
 def identify_breakpoints_from_csv(min_carbon_csv_path):
     """
     Load min_carbon_sources.csv and identify breakpoints where REGION changes (not subregion).
@@ -2026,6 +2209,21 @@ def run_benchmark_suite(regions_directory, start_year=2020, end_year=2022,
         
         if duration_results:
             plot_duration_comparison(duration, duration_results, output_dir)
+    
+    # Generate policy_by_duration plots using Carbon Intensity
+    if stdout:
+        print("=" * 80)
+        print("GENERATING POLICY BY DURATION PLOTS (CARBON INTENSITY)")
+        print("=" * 80)
+        print()
+    
+    # Create policy_by_duration plots from the CSV file
+    csv_path = os.path.join(output_dir, 'benchmark_data.csv')
+    if os.path.isfile(csv_path):
+        plot_policy_by_duration_from_csv(csv_path, output_dir)
+    else:
+        if stdout:
+            print(f"Warning: CSV file not found at {csv_path}, skipping policy_by_duration plots")
     
     # Continue with summary statistics...
     
