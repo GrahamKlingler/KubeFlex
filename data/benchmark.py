@@ -1669,11 +1669,11 @@ def plot_policy_by_duration_from_csv(csv_path, output_base_dir=None):
     }
     
     policy_names = {
-        'Policy1_Carbon_Intensity': 'Policy 1',
-        'Policy2_Carbon_Intensity': 'Policy 2',
-        'Policy3_1_Carbon_Intensity': 'Policy 3 (1 migration)',
-        'Policy3_2_Carbon_Intensity': 'Policy 3 (2 migrations)',
-        'Policy3_3_Carbon_Intensity': 'Policy 3 (3 migrations)',
+        'Policy1_Carbon_Intensity': 'Immediate Minimum Placement',
+        'Policy2_Carbon_Intensity': 'Average Minimum Placement',
+        'Policy3_1_Carbon_Intensity': 'Forecast-based Migration (1x)',
+        'Policy3_2_Carbon_Intensity': 'Forecast-based Migration (2x)',
+        'Policy3_3_Carbon_Intensity': 'Forecast-based Migration (3x)',
     }
     
     # Group by day

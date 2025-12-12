@@ -11,54 +11,62 @@ from collections import defaultdict
 
 # Define color palette for regions
 # Each region gets a distinct color, and all subregions within that region share the same color
+# Using darker, more vibrant colors for better visibility
 REGION_COLORS = {
-    'CAL': '#1f77b4',   # Blue
-    'CAR': '#ff7f0e',   # Orange
-    'CENT': '#2ca02c',  # Green
-    'FLA': '#d62728',   # Red
-    'HI': '#9467bd',    # Purple
-    'MIDA': '#8c564b',  # Brown
-    'MIDW': '#e377c2',  # Pink
-    'NE': '#7f7f7f',    # Gray
-    'NW': '#bcbd22',    # Yellow-green
-    'NY': '#17becf',    # Cyan
-    'SE': '#ff9896',    # Light red
-    'SW': '#c5b0d5',    # Light purple
-    'TEN': '#c49c94',   # Light brown
-    'TEX': '#f7b6d3',   # Light pink
+    'CAL': '#0066CC',   # Dark Blue
+    'CAR': '#FF6600',   # Dark Orange
+    'CENT': '#008000',  # Dark Green
+    'FLA': '#CC0000',   # Dark Red
+    'HI': '#6600CC',    # Dark Purple
+    'MIDA': '#8B4513',  # Dark Brown
+    'MIDW': '#CC0066',  # Dark Pink/Magenta
+    'NE': '#000000',    # Black
+    'NW': '#808000',    # Dark Olive
+    'NY': '#006666',    # Dark Cyan/Teal
+    'SE': '#CC3333',    # Dark Red
+    'SW': '#663399',    # Dark Purple
+    'TEN': '#8B4513',   # Dark Brown
+    'TEX': '#CC0066',   # Dark Pink/Magenta
 }
 
 # Default color for regions not in the mapping
-DEFAULT_COLOR = '#aec7e8'  # Light blue
+DEFAULT_COLOR = '#000080'  # Dark Blue (Navy)
 
-# Fixed color palette for legend (Plotly default colors)
+# Fixed color palette for legend (darker, more vibrant colors)
 COLOR_PALETTE = [
-    '#1f77b4',  # Blue
-    '#ff7f0e',  # Orange
-    '#2ca02c',  # Green
-    '#d62728',  # Red
-    '#9467bd',  # Purple
-    '#8c564b',  # Brown
-    '#e377c2',  # Pink
-    '#7f7f7f',  # Gray
-    '#bcbd22',  # Yellow-green
-    '#17becf',  # Cyan
-    '#ff9896',  # Light red
-    '#c5b0d5',  # Light purple
-    '#c49c94',  # Light brown
-    '#f7b6d3',  # Light pink
-    '#aec7e8',  # Light blue
-    '#ffbb78',  # Light orange
-    '#98df8a',  # Light green
-    '#ff9896',  # Light red
-    '#c5b0d5',  # Light purple
-    '#ff9896',  # Light red
+    '#0066CC',  # Dark Blue
+    '#FF6600',  # Dark Orange
+    '#008000',  # Dark Green
+    '#CC0000',  # Dark Red
+    '#6600CC',  # Dark Purple
+    '#8B4513',  # Dark Brown
+    '#CC0066',  # Dark Pink/Magenta
+    '#000000',  # Black
+    '#808000',  # Dark Olive
+    '#006666',  # Dark Cyan/Teal
+    '#CC3333',  # Dark Red
+    '#663399',  # Dark Purple
+    '#8B4513',  # Dark Brown
+    '#CC0066',  # Dark Pink/Magenta
+    '#000080',  # Navy Blue
+    '#800080',  # Dark Purple
+    '#008080',  # Dark Teal
+    '#800000',  # Dark Maroon
+    '#4B0082',  # Indigo
+    '#2F4F4F',  # Dark Slate Gray
 ]
 
 # Color for the minimum slope line
 MIN_SLOPE_COLOR = '#000000'  # Black
 MIN_SLOPE_WIDTH = 3  # Thicker line for visibility
 MIN_SLOPE_OPACITY = 0.5  # Reduced opacity for min slope
+
+# Static mapping for subregion names in legends
+SUBREGION_NAME_MAPPING = {
+    'US-CENT-SWPP': 'Southwest Power Pool',
+    'US-NE-ISNE': 'ISO New England',
+    'US-TEN-TVA': 'Tennessee Valley Authority',
+}
 
 
 def get_region_from_path(file_path):
@@ -473,41 +481,21 @@ def plot_data(plot_specs, x_column='datetime', y_column='carbon_intensity_direct
     # Process each plot specification
     print(f"Processing {len(plot_specs)} plot specification(s)...")
     
-    # Track all regions and subregions to determine if we should use full color width
-    all_regions = set()
-    all_subregions = []
+    # Track all CSV files to assign unique colors to each line
+    all_csv_files = []
     
-    # First pass: collect all regions and subregions
+    # First pass: collect all CSV files
     for plot_type, source in plot_specs:
         if plot_type == 'plot':
             csv_files = collect_csv_files_from_source(source)
-            for csv_file in csv_files:
-                region = get_region_from_path(csv_file)
-                if region:
-                    all_regions.add(region)
-                all_subregions.append((csv_file, region))
+            all_csv_files.extend(csv_files)
     
-    # Determine if we should use full color width (only one region)
-    use_full_color_width = len(all_regions) == 1
-    
-    # Create color mapping
+    # Create color mapping - assign unique color to each CSV file
     color_index = 0
-    subregion_color_map = {}
-    
-    if use_full_color_width:
-        # Assign different colors to each subregion
-        for csv_file, region in all_subregions:
-            subregion_color_map[csv_file] = COLOR_PALETTE[color_index % len(COLOR_PALETTE)]
-            color_index += 1
-    else:
-        # Use region-based coloring
-        region_color_map = {}
-        for region in all_regions:
-            if region in REGION_COLORS:
-                region_color_map[region] = REGION_COLORS[region]
-            else:
-                region_color_map[region] = COLOR_PALETTE[color_index % len(COLOR_PALETTE)]
-                color_index += 1
+    file_color_map = {}
+    for csv_file in all_csv_files:
+        file_color_map[csv_file] = COLOR_PALETTE[color_index % len(COLOR_PALETTE)]
+        color_index += 1
     
     for plot_type, source in plot_specs:
         print(f"\nProcessing {plot_type}: {source}")
@@ -550,24 +538,38 @@ def plot_data(plot_specs, x_column='datetime', y_column='carbon_intensity_direct
                     region = get_region_from_path(csv_file)
                     filename = os.path.basename(csv_file)
                     file_label = os.path.splitext(filename)[0]
+                    
+                    # Apply subregion name mapping if available
+                    if file_label in SUBREGION_NAME_MAPPING:
+                        file_label = SUBREGION_NAME_MAPPING[file_label]
+                    
                     display_label = f"{region} - {file_label}" if region else file_label
                     
-                    # Determine color based on whether we're using full color width
-                    if use_full_color_width and csv_file in subregion_color_map:
-                        region_color = subregion_color_map[csv_file]
-                    elif not use_full_color_width:
-                        region_color = get_region_color(region)
-                    else:
-                        # Fallback
-                        region_color = get_region_color(region)
+                    # Assign unique color to each file
+                    line_color = file_color_map.get(csv_file, COLOR_PALETTE[0])
+                    
+                    # Ensure x and y data are properly formatted
+                    x_data = df[x_column]
+                    y_data = df[y_column]
+                    
+                    # Remove any NaN or invalid values
+                    valid_mask = ~(pd.isna(x_data) | pd.isna(y_data))
+                    x_data = x_data[valid_mask]
+                    y_data = y_data[valid_mask]
+                    
+                    if len(x_data) == 0:
+                        print(f"  Warning: No valid data points for {display_label} after filtering")
+                        continue
+                    
+                    print(f"  Added trace for {display_label}: {len(x_data)} data points")
                     
                     fig.add_trace(
                         go.Scatter(
-                            x=df[x_column],
-                            y=df[y_column],
+                            x=x_data,
+                            y=y_data,
                             name=display_label,
                             mode='lines',
-                            line=dict(width=2, color=region_color),
+                            line=dict(width=4, color=line_color),  # Thicker lines (width 4 instead of 2)
                             hovertemplate=
                             f'<b>%{{x}}</b><br>' +
                             f'{y_column}: %{{y:.2f}}<br>' +
@@ -653,26 +655,52 @@ def plot_data(plot_specs, x_column='datetime', y_column='carbon_intensity_direct
     
     # Set up the plot appearance
     y_axis_title = y_column.replace('_', ' ').title()
+    # Use specific label for carbon intensity
+    if y_column.lower() == 'carbon_intensity_direct_avg':
+        y_axis_title = 'Carbon Intensity (gCO₂eq / kWh)'
     x_axis_title = x_column.replace('_', ' ').title()
     
     title = f"{y_axis_title} vs {x_axis_title}"
     
     fig.update_layout(
-        title=title,
-        title_font_size=20,
-        xaxis_title=x_axis_title,
-        yaxis_title=y_axis_title,
-        legend_title="Regions & Subregions",
+        title=dict(
+            text=title,
+            font=dict(size=24, color='#000000')  # Larger, darker title
+        ),
+        xaxis_title=dict(
+            text=x_axis_title,
+            font=dict(size=18, color='#000000')  # Larger, darker x-axis title
+        ),
+        yaxis_title=dict(
+            text=y_axis_title,
+            font=dict(size=18, color='#000000')  # Larger, darker y-axis title
+        ),
+        yaxis=dict(
+            range=[0, None]  # Always start Y-axis from 0
+        ),
+        legend=dict(
+            title=dict(
+                text="Regions & Subregions",
+                font=dict(size=16, color='#000000')  # Larger, darker legend title
+            ),
+            font=dict(size=14, color='#000000')  # Larger, darker legend text
+        ),
         hovermode="closest",
         template="plotly_white",
         height=600,
         width=1200,
         colorway=COLOR_PALETTE,  # Set fixed color palette
+        font=dict(size=14, color='#000000'),  # Default font for all text
     )
     
     # Add date range selector if x-axis is time-based
     if use_datetime_filtering:
-        fig.update_xaxes(
+        # Set X-axis to date type with proper formatting to avoid scientific notation
+        xaxis_config = dict(
+            type='date',
+            tickformat='%Y-%m-%d %H:%M',
+            tickangle=-45,  # Rotate labels to avoid crowding
+            tickfont=dict(size=14, color='#000000'),  # Larger, darker tick labels
             rangeslider_visible=True,
             rangeselector=dict(
                 buttons=list([
@@ -681,9 +709,47 @@ def plot_data(plot_specs, x_column='datetime', y_column='carbon_intensity_direct
                     dict(count=1, label="1m", step="month", stepmode="backward"),
                     dict(count=6, label="6m", step="month", stepmode="backward"),
                     dict(step="all")
-                ])
+                ]),
+                font=dict(size=12, color='#000000'),  # Darker rangeselector text
+                bgcolor='rgba(255, 255, 255, 0.8)',  # Slightly transparent white background
+                bordercolor='#000000',  # Dark border
+                borderwidth=1
             )
         )
+        
+        # Set X-axis range if start_date and/or end_date are provided
+        # For X-axis range, we want to include the full day for end_date
+        if start_date is not None or end_date is not None:
+            xaxis_range = []
+            if start_date is not None:
+                # Start at beginning of the start date
+                xaxis_range.append(pd.to_datetime(start_date, utc=True))
+            else:
+                xaxis_range.append(None)
+            if end_date is not None:
+                # End at the end of the end date (23:59:59.999999 of that day)
+                end_dt = pd.to_datetime(end_date, utc=True)
+                # Add 1 day and subtract 1 microsecond to get end of the specified day
+                end_dt = end_dt + timedelta(days=1) - timedelta(microseconds=1)
+                xaxis_range.append(end_dt)
+            else:
+                xaxis_range.append(None)
+            
+            # Only set range if at least one bound is specified
+            if xaxis_range[0] is not None or xaxis_range[1] is not None:
+                xaxis_config['range'] = xaxis_range
+        
+        fig.update_xaxes(**xaxis_config)
+    else:
+        # Even if not datetime, update X-axis tick labels
+        fig.update_xaxes(
+            tickfont=dict(size=14, color='#000000')  # Larger, darker X-axis tick labels
+        )
+    
+    # Always update Y-axis tick labels to be larger and darker
+    fig.update_yaxes(
+        tickfont=dict(size=14, color='#000000')  # Larger, darker Y-axis tick labels
+    )
     
     # Set default output file if not provided
     if not output_file:
@@ -1069,11 +1135,11 @@ def plot_all_benchmark_graphs(csv_path, output_base_dir=None):
     }
     
     policy_names = {
-        'Policy1_Carbon_Intensity': 'Policy 1',
-        'Policy2_Carbon_Intensity': 'Policy 2',
-        'Policy3_1_Carbon_Intensity': 'Policy 3 (1 migration)',
-        'Policy3_2_Carbon_Intensity': 'Policy 3 (2 migrations)',
-        'Policy3_3_Carbon_Intensity': 'Policy 3 (3 migrations)',
+        'Policy1_Carbon_Intensity': 'Immediate Minimum Placement',
+        'Policy2_Carbon_Intensity': 'Average Minimum Placement',
+        'Policy3_1_Carbon_Intensity': 'Forecast-based Migration (1x)',
+        'Policy3_2_Carbon_Intensity': 'Forecast-based Migration (2x)',
+        'Policy3_3_Carbon_Intensity': 'Forecast-based Migration (3x)',
     }
     
     # Group by day
@@ -1161,7 +1227,7 @@ def plot_all_benchmark_graphs(csv_path, output_base_dir=None):
                 type='category'
             ),
             yaxis=dict(
-                title='Average Carbon Intensity (gCO₂eq/kWh)',
+                title='Average Carbon Emissions (gCO₂eq)',
                 range=[y_min, y_max]
             ),
             barmode='group',
@@ -1439,11 +1505,16 @@ Examples:
   # Create all benchmark graphs organized by day
   %(prog)s --plot-benchmark data/outputs/benchmark_data.csv --all
 
-  # Plot individual CSV files
+  # Plot individual CSV files (multiple ways)
   %(prog)s --plot file1.csv --plot file2.csv
+  %(prog)s --plot file1.csv file2.csv file3.csv
+  %(prog)s --plot data/regions/CAL/US-CAL-CISO.csv data/regions/CAR/US-CAR-SPA.csv
 
   # Plot all CSVs in a directory
   %(prog)s --plot data/regions
+
+  # Plot multiple directories and files together
+  %(prog)s --plot data/regions/CAL data/regions/CAR file1.csv
 
   # Aggregate directory and plot minimum
   %(prog)s --plot-min data/regions/CAL
@@ -1454,8 +1525,9 @@ Examples:
   # Combine multiple plot types
   %(prog)s --plot file1.csv --plot-min data/regions/CAL --plot-avg data/regions/CAR
 
-  # Plot with date range
+  # Plot with date range (filters data and sets X-axis bounds)
   %(prog)s --plot data/regions --start 2020-01-01 --end 2020-12-31
+  %(prog)s --plot file1.csv file2.csv --start 2020-06-01 --end 2020-06-30
 
   # Extract minimum values with source CSV information
   %(prog)s --extract-min data/regions --extract-min-output min_values.csv
@@ -1467,9 +1539,10 @@ Examples:
     parser.add_argument(
         "--plot",
         action="append",
+        nargs='+',
         dest="plot_sources",
         default=[],
-        help="CSV file or directory to plot individually (can be used multiple times)"
+        help="CSV file(s) or directory(ies) to plot individually (can be used multiple times, accepts multiple paths per call)"
     )
     parser.add_argument(
         "--plot-min",
@@ -1500,12 +1573,12 @@ Examples:
     parser.add_argument(
         "--start",
         dest="start_date",
-        help="Start date for the plot (YYYY-MM-DD) if x-axis is datetime"
+        help="Start date for data filtering and X-axis lower bound (YYYY-MM-DD) if x-axis is datetime"
     )
     parser.add_argument(
         "--end",
         dest="end_date",
-        help="End date for the plot (YYYY-MM-DD) if x-axis is datetime"
+        help="End date for data filtering and X-axis upper bound (YYYY-MM-DD) if x-axis is datetime"
     )
     parser.add_argument(
         "-o", "--output",
@@ -1666,8 +1739,13 @@ Examples:
     
     # Build plot specifications list
     plot_specs = []
-    for source in args.plot_sources:
-        plot_specs.append(('plot', source))
+    # Flatten plot_sources since each --plot call can now have multiple arguments
+    for source_list in args.plot_sources:
+        if isinstance(source_list, list):
+            for source in source_list:
+                plot_specs.append(('plot', source))
+        else:
+            plot_specs.append(('plot', source_list))
     for source in args.plot_min_sources:
         plot_specs.append(('plot-min', source))
     for source in args.plot_avg_sources:
