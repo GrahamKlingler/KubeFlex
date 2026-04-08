@@ -39,8 +39,9 @@ CREATE_MIGRATE=true
 CREATE_CONTROLLER=true
 CREATE_METRICS=true
 CREATE_ALL=true
+SKIP_TESTPOD=false
 SCHEDULER_TIME=""  # Unix timestamp, will be set from --time flag or default to current time
-SCHEDULING_POLICY="3"  # Scheduling policy: 1, 2, or 3 (default: 3)
+SCHEDULING_POLICY="3"  # Scheduling policy: 1, 2, 3, or 4 (default: 3)
 
 # Parse command line arguments
 for arg in "$@"; do
@@ -63,18 +64,25 @@ for arg in "$@"; do
             shift
             shift
             ;;
+        --skip-testpod)
+            SKIP_TESTPOD=true
+            shift
+            ;;
         --help)
-            echo "Usage: $0 [--include-db] [--include-cluster] [--time TIMESTAMP] [--policy POLICY] [--help]"
+            echo "Usage: $0 [--include-db] [--include-cluster] [--time TIMESTAMP] [--policy POLICY] [--skip-testpod] [--help]"
             echo "  --include-db       Deploy the database and storage components (includes metadata service as sidecar)"
             echo "                     Without this flag, everything else is deployed but database is skipped"
             echo "  --include-cluster  Create the KIND cluster (if it doesn't exist)"
             echo "                     Without this flag, the script assumes a cluster already exists"
             echo "  --time             Set scheduler time (Unix timestamp, default: beginning of interval)"
             echo "                     Valid range: 1577836800 (2020-01-01) to 1672527600 (2022-12-31)"
-            echo "  --policy           Set scheduling policy (1, 2, or 3, default: 3)"
+            echo "  --policy           Set scheduling policy (1, 2, 3, 4, or 5, default: 3)"
             echo "                     1 = Initial placement only (assign to lowest region at runtime)"
             echo "                     2 = Hourly migration (migrate all pods to minimum region every hour)"
             echo "                     3 = Forecast-based (compare forecasts for all regions over EXPECTED_DURATION)"
+            echo "                     4 = Forecast-aware adaptive (sliding-window forecast with migration cost threshold)"
+            echo "                     5 = Always-best-region (migrate whenever a better region exists, no heuristic)"
+            echo "  --skip-testpod     Do not deploy the default test pod (use when running custom test harnesses)"
             echo "  --help             Show this help message"
             echo ""
             echo "By default, the script deploys:"
@@ -240,8 +248,8 @@ else
 fi
 
 # Validate scheduling policy
-if ! [[ "$SCHEDULING_POLICY" =~ ^[123]$ ]]; then
-    log_error "Invalid scheduling policy: $SCHEDULING_POLICY (must be 1, 2, or 3)"
+if ! [[ "$SCHEDULING_POLICY" =~ ^[12345]$ ]]; then
+    log_error "Invalid scheduling policy: $SCHEDULING_POLICY (must be 1, 2, 3, 4, or 5)"
     exit 1
 fi
 
@@ -255,6 +263,12 @@ case "$SCHEDULING_POLICY" in
         ;;
     3)
         log_info "  Policy 3: Forecast-based (compare forecasts for all regions over EXPECTED_DURATION)"
+        ;;
+    4)
+        log_info "  Policy 4: Forecast-aware adaptive (sliding-window forecast with migration cost threshold)"
+        ;;
+    5)
+        log_info "  Policy 5: Always-best-region (migrate whenever a better region exists)"
         ;;
 esac
 
@@ -381,14 +395,16 @@ fi
 sleep 3
 
 # STEP 5: Deploy test pod - SECOND TO LAST
-if [ "$CREATE_ALL" = true ]; then
-log_info "Applying testpod.yml..."
-if kubectl apply -f $MANIFESTS_DIR/testpod.yml; then
-    log_success "Successfully applied testpod.yml"
-else
-    log_error "Failed to apply testpod.yml"
-    exit 1
+if [ "$CREATE_ALL" = true ] && [ "$SKIP_TESTPOD" = false ]; then
+    log_info "Applying testpod.yml..."
+    if kubectl apply -f $MANIFESTS_DIR/testpod.yml; then
+        log_success "Successfully applied testpod.yml"
+    else
+        log_error "Failed to apply testpod.yml"
+        exit 1
     fi
+elif [ "$SKIP_TESTPOD" = true ]; then
+    log_info "Skipping testpod.yml deployment (--skip-testpod)"
 fi
 
 sleep 3
@@ -402,6 +418,13 @@ if [ "$CREATE_CONTROLLER" = true ]; then
         log_error "Failed to apply controller.yml"
         exit 1
     fi
+
+    # Force pod restart so it picks up the current ConfigMap values.
+    # Patching a timestamp annotation changes the pod template, triggering a rollout.
+    log_info "Restarting controller deployment to pick up scheduler-config..."
+    kubectl patch deployment controller -n $NAMESPACE \
+        -p "{\"spec\":{\"template\":{\"metadata\":{\"annotations\":{\"kubeflex/config-hash\":\"policy=${SCHEDULING_POLICY}-time=${SCHEDULER_TIME}\"}}}}}" \
+        > /dev/null 2>&1 || true
 fi
 
 
@@ -495,6 +518,14 @@ log_info "=========================================="
 log_success "DEPLOYMENT COMPLETED SUCCESSFULLY"
 log_info "=========================================="
 
+# # Custom local images
+# log_info "Loading custom image gklingler/cpp-test:local into cluster"
+# if kind load docker-image gklingler/cpp-test:local; then
+#     log_success "Loaded local docker images onto kind nodes succesfully"
+# else 
+#     log_error "Failed to load custom images onto kind nodes"
+# fi
+
 # Show next steps based on what was deployed
 log_info "Next steps:"
 
@@ -532,7 +563,7 @@ log_info "   Scheduler time: $SCHEDULER_TIME ($SCHEDULER_DATETIME UTC)"
 log_info "   Scheduling policy: $SCHEDULING_POLICY"
 log_info "   ConfigMap: scheduler-config (in both monitor and test-namespace namespaces)"
 log_info "   To update scheduler time and policy:"
-log_info "     kubectl create configmap scheduler-config --from-literal=scheduler-time=<timestamp> --from-literal=scheduling-policy=<1|2|3> -n monitor --dry-run=client -o yaml | kubectl apply -f -"
-log_info "     kubectl create configmap scheduler-config --from-literal=scheduler-time=<timestamp> --from-literal=scheduling-policy=<1|2|3> -n test-namespace --dry-run=client -o yaml | kubectl apply -f -"
+log_info "     kubectl create configmap scheduler-config --from-literal=scheduler-time=<timestamp> --from-literal=scheduling-policy=<1|2|3|4|5> -n monitor --dry-run=client -o yaml | kubectl apply -f -"
+log_info "     kubectl create configmap scheduler-config --from-literal=scheduler-time=<timestamp> --from-literal=scheduling-policy=<1|2|3|4|5> -n test-namespace --dry-run=client -o yaml | kubectl apply -f -"
 
 log_success "KubeFlex deployment completed!"

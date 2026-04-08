@@ -10,7 +10,7 @@ import logging
 import time
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from kubernetes import client, config
@@ -19,6 +19,7 @@ import uvicorn
 # Import the migration functions - adjust path to find migrator module
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from migrator.live_migration import criu_migrate_pod, load_kubernetes_config
+from migrator.distributed_migration import distributed_migrate
 
 # Set up logging
 logging.basicConfig(
@@ -40,6 +41,16 @@ class MigrateRequest(BaseModel):
     target_region: Optional[str] = None  # Region of the target node (for node selection, not naming)
     delete_original: bool = True
     debug: bool = True
+
+
+class DistributedMigrateRequest(BaseModel):
+    job_name: str
+    namespace: str = "test-namespace"
+    target_nodes: List[str]
+    mpijob_yaml: Optional[str] = None
+    checkpoint_path_in_pod: Optional[str] = None
+    target_region: Optional[str] = None
+    delete_original: bool = True
 
 @app.get("/")
 async def root():
@@ -68,7 +79,8 @@ async def info():
         "version": "3.0.0",
         "description": "Kubernetes pod migration service with CRIU-based migration",
         "endpoints": {
-            "migrate": "POST /live-migrate - CRIU-based migration with checkpointing",
+            "migrate": "POST /live-migrate - CRIU-based single-pod migration",
+            "distributed-migrate": "POST /distributed-migrate - Application-checkpoint-based MPI job migration",
             "health": "GET /health - Health check",
             "info": "GET /info - Service information",
             "nodes": "GET /nodes - List nodes",
@@ -152,6 +164,64 @@ async def live_migrate(req: MigrateRequest):
             status_code=500,
             detail=f"Migration failed: {str(e)}"
         )
+
+@app.post("/distributed-migrate")
+async def distributed_migrate_endpoint(req: DistributedMigrateRequest):
+    """
+    Migrate all workers of an MPI job using application-level checkpoints.
+
+    Instead of CRIU, this extracts the application's own checkpoint file,
+    deletes the old MPIJob, and redeploys with the -r (restore) flag on
+    the target nodes.
+
+    target_nodes must have one entry per worker, in rank order.
+    """
+    try:
+        logger.info(
+            f"[API] Distributed migrate: job={req.job_name} "
+            f"ns={req.namespace} targets={req.target_nodes}"
+        )
+
+        result = distributed_migrate(
+            job_name=req.job_name,
+            namespace=req.namespace,
+            target_nodes=req.target_nodes,
+            mpijob_yaml=req.mpijob_yaml,
+            checkpoint_path_in_pod=req.checkpoint_path_in_pod,
+            target_region=req.target_region,
+            delete_original=req.delete_original,
+        )
+
+        resp = {
+            "status": "success" if result.success else "failed",
+            "elapsed_s": result.elapsed_s,
+            "job_name": result.job_name,
+            "new_job_name": result.new_job_name,
+            "checkpoint_iteration": result.checkpoint_iteration,
+            "workers_migrated": len(result.old_workers),
+            "workers": [
+                {
+                    "source_pod": w.pod_name,
+                    "source_node": w.node_name,
+                    "rank": w.rank,
+                }
+                for w in result.old_workers
+            ],
+            "errors": result.errors,
+            "steps": result.steps_completed,
+        }
+
+        if not result.success:
+            raise HTTPException(status_code=500, detail=resp)
+
+        return resp
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("[API] Distributed migration failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/nodes")
 async def list_nodes():

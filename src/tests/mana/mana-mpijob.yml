@@ -1,0 +1,78 @@
+apiVersion: kubeflow.org/v2beta1
+kind: MPIJob
+metadata:
+  name: nbody-mana
+  namespace: test-namespace
+spec:
+  slotsPerWorker: 1
+  runPolicy:
+    cleanPodPolicy: Running
+    ttlSecondsAfterFinished: 600
+  sshAuthMountPath: /root/.ssh
+  mpiReplicaSpecs:
+    Launcher:
+      replicas: 1
+      template:
+        spec:
+          containers:
+          - name: launcher
+            image: nbody-mana:local
+            imagePullPolicy: IfNotPresent
+            command:
+            - /tmp/run_nbody_mana.sh
+            args:
+            - --bodies=1000
+            - --iters=100
+            - --np=2
+            - --checkpoint-interval=10
+            resources:
+              requests:
+                cpu: "500m"
+                memory: "256Mi"
+              limits:
+                cpu: "1000m"
+                memory: "512Mi"
+            volumeMounts:
+            - name: mana-ckpt
+              mountPath: /tmp/mana-ckpt
+          volumes:
+          - name: mana-ckpt
+            hostPath:
+              path: /tmp/mana-ckpt
+              type: DirectoryOrCreate
+    Worker:
+      replicas: 2
+      template:
+        spec:
+          containers:
+          - name: worker
+            image: nbody-mana:local
+            imagePullPolicy: IfNotPresent
+            command:
+            - /usr/sbin/sshd
+            - -De
+            resources:
+              requests:
+                cpu: "500m"
+                memory: "256Mi"
+              limits:
+                cpu: "1000m"
+                memory: "512Mi"
+            volumeMounts:
+            - name: checkpoint-volume
+              mountPath: /tmp/checkpoints
+            - name: mana-ckpt
+              mountPath: /tmp/mana-ckpt
+            - name: results
+              mountPath: /results
+          volumes:
+          - name: checkpoint-volume
+            hostPath:
+              path: /tmp/checkpoints
+              type: DirectoryOrCreate
+          - name: mana-ckpt
+            hostPath:
+              path: /tmp/mana-ckpt
+              type: DirectoryOrCreate
+          - name: results
+            emptyDir: {}

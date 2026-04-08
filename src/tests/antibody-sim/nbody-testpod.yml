@@ -1,0 +1,65 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nbody-pod
+  namespace: test-namespace
+  labels:
+    name: nbody-pod
+  annotations:
+    REGION: "NE"
+    EXPECTED_DURATION: "120"
+spec:
+  restartPolicy: Never
+  containers:
+  - name: test-container
+    image: nbody-mpi:local
+    imagePullPolicy: IfNotPresent
+    command: ["/usr/bin/tini", "--"]
+    args: ["/bin/bash", "-c", "echo 'Test pod started' && /tmp/run_nbody.sh --bodies=__BODIES__ --iters=__ITERS__ --checkpoint-interval=__CHECKPOINT__ --results-folder=/results/"]
+    securityContext:
+      privileged: true
+      capabilities:
+        add:
+        - SYS_PTRACE
+        - SYS_RESOURCE
+        - NET_ADMIN
+        - SYS_ADMIN
+        - SYS_TIME
+        - CHECKPOINT_RESTORE
+        - SYS_CHROOT
+        - SETPCAP
+        - SETGID
+        - SETUID
+      seccompProfile:
+        type: Unconfined
+      allowPrivilegeEscalation: true
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "500m"
+      limits:
+        memory: "512Mi"
+        cpu: "1000m"
+    ports:
+    - name: http
+      containerPort: 8080
+      protocol: TCP
+    - name: ssh
+      containerPort: 22
+      protocol: TCP
+    volumeMounts:
+    - name: checkpoint-volume
+      mountPath: /tmp/checkpoints
+    - name: script-data
+      mountPath: /script-data
+    - name: results
+      mountPath: /results
+  volumes:
+  - name: checkpoint-volume
+    hostPath:
+      path: /tmp/checkpoints
+      type: DirectoryOrCreate
+  - name: script-data
+    emptyDir: {}
+  - name: results
+    emptyDir: {}

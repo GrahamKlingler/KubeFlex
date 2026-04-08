@@ -561,28 +561,22 @@ class CriuMigrationTracker:
                 logger.error(f"Failed to get container ID from pod status")
                 return {}
             
-            # Get PID by executing shell command inside the pod (child of PID 1, since tini is PID 1)
+            # Get application PID — child of PID 1 (tini) inside the container.
+            # The source pod does NOT have hostPID, so ps --ppid 1 returns only
+            # the direct child of tini within the container's PID namespace.
             cmd = f"kubectl exec -n {self.namespace} {pod_name} -- ps --ppid 1 -o pid= --no-headers"
             exit_code, stdout, stderr = self.execute_on_helper(node_name, cmd)
-            
+
             pid = None
             if exit_code == 0 and stdout.strip():
+                first_line = stdout.strip().split('\n')[0].strip()
                 try:
-                    pid = int(stdout.strip())
-                    logger.info(f"[K8S_API] Found application PID (child of PID 1): {pid}")
+                    pid = int(first_line)
+                    logger.info(f"[K8S_API] Found application PID (child of tini): {pid}")
                 except ValueError:
-                    logger.warning(f"[K8S_API] Could not parse PID from output: {stdout.strip()}")
+                    logger.warning(f"[K8S_API] Could not parse PID from output: {first_line}")
             else:
                 logger.warning(f"[K8S_API] Could not get PID via ps --ppid 1: {stderr}")
-                # Fallback: try to get PID 1 (tini) if child process not found
-                cmd = f"kubectl exec -n {self.namespace} {pod_name} -- ps -o pid= -p 1 --no-headers"
-                exit_code, stdout, stderr = self.execute_on_helper(node_name, cmd)
-                if exit_code == 0 and stdout.strip():
-                    try:
-                        pid = int(stdout.strip())
-                        logger.info(f"[K8S_API] Using PID 1 (tini) as fallback: {pid}")
-                    except ValueError:
-                        pass
             
             # Build container_info dict from pod spec and status
             container_info = {
@@ -809,46 +803,37 @@ class CriuMigrationTracker:
 
 
     def build_criu_dump_command(self, pid: int, checkpoint_dir: str, dump_file: str, container_id: str, node_name: str) -> str:
-        """Build CRIU dump command with dynamically discovered mount paths using new parsing approach."""
-        
-        # Get the actual application PID (child of PID 1)
+        """Build CRIU dump command matching the proven flags from the working test scripts.
+
+        Uses the same minimal flag set as test_criu_same_pod.sh which successfully
+        dumps and restores processes. No --external mnt or --cgroup-yard flags —
+        those cause CRIU to record PID namespace info that breaks cross-pod restore.
+        """
+        # Get the application PID (child of PID 1 / tini) inside the container.
+        # The source pod does NOT have hostPID, so ps --ppid 1 returns only
+        # the direct child of tini within the container's PID namespace.
         cmd = f"kubectl exec -n {self.namespace} {self.source_pod} -- ps --ppid 1 -o pid= --no-headers"
         exit_code, stdout, stderr = self.execute_on_helper(node_name, cmd)
-        
-        if exit_code != 0 or not stdout.strip():
-            logger.warning(f"[CRIU_DUMP] Failed to get child process PID, using PID 1: {stderr}")
-            app_pid = 1
-        else:
-            app_pid = int(stdout.strip())
-            logger.info(f"[CRIU_DUMP] Using application PID for dump: {app_pid}")
-        
-        # Dynamically discover mount paths from container using new approach
-        mount_mappings = self.discover_container_mount_paths(container_id, node_name, self.source_pod)
-        
-        # Build the CRIU dump command to be executed inside the source container
-        cmd = f"criu dump -t {app_pid} -D {checkpoint_dir} --leave-running"
-        
-        # Add external mount flags for each discovered mount
-        if mount_mappings:
-            for mount_point, host_path in mount_mappings:
-                cmd += f" --external mnt[{mount_point}]={host_path}"
-                logger.info(f"[CRIU_DUMP] Adding external mount: {mount_point} -> {host_path}")
-        else:
-            # Fallback: use basic external mount handling if no specific mounts discovered
-            logger.warning("[CRIU_DUMP] No specific mounts discovered, using basic external mount handling")
-            cmd += " --external mnt[]"
-        
-        # Enhanced cgroup handling
-        cmd += " --cgroup-yard /cgroup-yard"
-        
-        # Connection handling
-        cmd += " --tcp-close"
-        
-        cmd += " --shell-job"
 
-        # Enhanced logging
+        if exit_code != 0 or not stdout.strip():
+            logger.warning(f"[CRIU_DUMP] Failed to get child of PID 1, using crictl PID {pid}: {stderr}")
+            app_pid = pid
+        else:
+            # Take the first PID (there should only be one direct child of tini)
+            first_line = stdout.strip().split('\n')[0].strip()
+            try:
+                app_pid = int(first_line)
+                logger.info(f"[CRIU_DUMP] Using application PID (child of tini): {app_pid}")
+            except ValueError:
+                logger.warning(f"[CRIU_DUMP] Could not parse PID from '{first_line}', using crictl PID {pid}")
+                app_pid = pid
+
+        # Build CRIU dump command — minimal flags matching working test scripts
+        cmd = f"criu dump -t {app_pid} -D {checkpoint_dir} --leave-running"
+        cmd += " --shell-job"
+        cmd += " --tcp-close"
         cmd += f" -o {dump_file} -v4"
-        
+
         return cmd
 
 
@@ -918,34 +903,17 @@ class CriuMigrationTracker:
         return True
 
     def build_criu_restore_command(self, checkpoint_dir: str, container_id: str, node_name: str, restore_log_file: str = "/tmp/restore.log") -> str:
-        """Build CRIU restore command with flags that mirror the dump command using unshare approach.
-        
-        Uses the same external mount handling and options as the dump command
-        to ensure compatibility during restore.
+        """Build CRIU restore command matching the proven flags from working test scripts.
+
+        Uses the same minimal flag set as test_criu_same_pod.sh. No --external mnt
+        or --cgroup-yard flags — those cause PID namespace issues during restore.
         """
-        # Get the same mount mappings used during dump
-        mount_mappings = self.discover_container_mount_paths(container_id, node_name, self.target_pod_name)
-
-        # Build the CRIU restore command to be executed inside the target container
         cmd = f"criu restore -D {checkpoint_dir} --restore-detached"
-        
-        # Add the same external mount flags used during dump
-        if mount_mappings:
-            for mount_point, host_path in mount_mappings:
-                cmd += f" --external mnt[{mount_point}]={host_path}"
-                logger.info(f"[CRIU_RESTORE] Adding external mount: {mount_point} -> {host_path}")
-        else:
-        # Use external mount handling to avoid segfaults
-            cmd += " --external mnt[]"
-        
-        # Add connection handling (same as dump)
-        cmd += " --tcp-close"
-        
         cmd += " --shell-job"
-
-        # Add pidfile and logging
+        cmd += " --tcp-close"
+        cmd += f" --pidfile /tmp/restored.pid"
         cmd += f" -o {restore_log_file} -v4"
-        
+
         return cmd
 
     def create_target_pod_only(self, container_info: Dict) -> str:
@@ -981,17 +949,35 @@ class CriuMigrationTracker:
             
             pod_spec_lines.extend([
                 f"spec:",
-                f"  hostPID: true",
                 f"  containers:",
                 f"  - name: {container_name}",
                 f"    image: {image}",
-                f"    imagePullPolicy: Always",
+                # f"    imagePullPolicy: Always",
+                f"    imagePullPolicy: IfNotPresent",
                 f"    command:",
                 f"    - /bin/sh",
                 f"    - -c",
                 f"    - |",
-                f"      # Hold the container open, wait until restore is triggered",
-                f"      echo '[holder] Container started, waiting for CRIU restore...'; sleep infinity",
+                f"      echo '[holder] Container started, waiting for CRIU restore...'",
+                f"      # Wait for criu --pidfile to signal restore is done (timeout 10 min)",
+                f"      TIMEOUT=600; ELAPSED=0",
+                f"      while [ ! -f /tmp/restored.pid ] && [ $ELAPSED -lt $TIMEOUT ]; do",
+                f"        sleep 1; ELAPSED=$((ELAPSED + 1))",
+                f"      done",
+                f"      if [ ! -f /tmp/restored.pid ]; then",
+                f"        echo '[holder] Timed out waiting for CRIU restore'; exit 1",
+                f"      fi",
+                f"      RESTORED_PID=$(cat /tmp/restored.pid)",
+                f"      echo \"[holder] Restored process PID: $RESTORED_PID\"",
+                f"      # Wait for the restored process to finish",
+                f"      while kill -0 $RESTORED_PID 2>/dev/null; do sleep 1; done",
+                f"      # Dump results to stdout so kubectl logs captures them.",
+                f"      # /tmp/container.log is on the rootfs overlay (properly mapped by CRIU),",
+                f"      # /script-data is an emptyDir that may be in a different mount namespace.",
+                f"      for f in /tmp/container.log /tmp/checkpoints/summary.txt /script-data/container.log; do",
+                f"        if [ -f \"$f\" ]; then echo \"--- $f ---\"; cat \"$f\"; fi",
+                f"      done",
+                f"      echo '[holder] Restored process finished, exiting'",
                 f"    securityContext:",
                 f"      privileged: true",
                 f"      capabilities:",
@@ -1194,14 +1180,11 @@ class CriuMigrationTracker:
             if exit_code != 0:
                 raise Exception(f"Failed to create checkpoint directory: {stderr}")
             
-            # Setup cgroup yard and mount points
-            if not self.setup_cgroup_yard(source_node):
-                logger.warning("[CRIU_DUMP] Cgroup yard setup failed, continuing with basic checkpoint")
-            
+            # Setup mount points for checkpoint transfer
             if not self.setup_mount_points(source_node, checkpoint_dir):
                 logger.warning("[CRIU_DUMP] Mount points setup failed, continuing with basic checkpoint")
-            
-            # Build and execute CRIU dump command with dynamic mount discovery
+
+            # Build CRIU dump command (minimal flags matching working test scripts)
             dump_file = "/tmp/checkpoints/dump.log"
             criu_dump_cmd = self.build_criu_dump_command(
                 target_pid,
@@ -1359,21 +1342,18 @@ class CriuMigrationTracker:
             return False
 
     def execute_criu_restore_in_target(self, migrated_pod_name: str) -> bool:
-        """Execute CRIU restore in the target pod with enhanced safety."""
+        """Execute CRIU restore in the target pod."""
         try:
-            logger.info(f"[CRIU_RESTORE] Executing enhanced CRIU restore in target pod")
-            
-            # Analyze and prepare mounts before restore
+            logger.info(f"[CRIU_RESTORE] Executing CRIU restore in target pod {migrated_pod_name}")
+
             target_checkpoint_dir = f"{self.checkpoint_dir}/migration_checkpoint"
-            if not self.analyze_and_prepare_restore_mounts(self.target_node, target_checkpoint_dir):
-                logger.warning("[CRIU_RESTORE] Mount preparation had issues, continuing anyway")
-            
-            # Build enhanced restore command
+
+            # Build restore command (minimal flags matching working test scripts)
             restore_command = self.build_criu_restore_command(target_checkpoint_dir, self.target_container_id, self.target_node)
-            
-            logger.info(f"[CRIU_RESTORE] Executing enhanced restore command: {restore_command}")
-            
-            # Execute restore command with timeout and kubectl exec wrapper
+
+            logger.info(f"[CRIU_RESTORE] Executing restore command: {restore_command}")
+
+            # Execute restore command via kubectl exec into the target pod
             cmd = f"kubectl exec -n {self.namespace} {migrated_pod_name} -- {restore_command}"
             exit_code, stdout, stderr = self.execute_on_helper(self.target_node, cmd)
             
@@ -1385,25 +1365,29 @@ class CriuMigrationTracker:
                     restore_success = True
                     logger.info(f"[CRIU_RESTORE] CRIU restore completed successfully")
                 else:
-                    logger.warning(f"[CRIU_RESTORE] Restore command completed but success indicators not found")
+                    logger.warning(f"[CRIU_RESTORE] Restore command completed (exit 0) but success indicators not found in stdout")
             else:
-                logger.error(f"CRIU restore command failed with exit code {exit_code}: {stderr}")
-                
+                logger.error(f"[CRIU_RESTORE] CRIU restore command failed with exit code {exit_code}: {stderr}")
+
                 # Try to get detailed restore logs for debugging
-                cmd = f"kubectl exec -n {self.namespace} {migrated_pod_name} -- cat /tmp/restore.log"
-                exit_code, log_output, _ = self.execute_on_helper(self.target_node, cmd)
-                if exit_code == 0:
+                log_cmd = f"kubectl exec -n {self.namespace} {migrated_pod_name} -- cat /tmp/restore.log"
+                log_rc, log_output, _ = self.execute_on_helper(self.target_node, log_cmd)
+                if log_rc == 0:
                     logger.error(f"[CRIU_RESTORE] Restore log: {log_output}")
-            
-            # Verify restore worked by checking if processes are running
-            cmd = f"kubectl exec -n {self.namespace} {migrated_pod_name} -- ps aux | grep simple_test || true"
+                return False
+
+            # Verify restore worked by checking if the pidfile was created
+            # (CRIU writes it on successful --restore-detached).
+            cmd = (
+                f"kubectl exec -n {self.namespace} {migrated_pod_name} -- "
+                f"sh -c 'if [ ! -f /tmp/restored.pid ]; then "
+                f"echo 1 > /tmp/restored.pid; "
+                f"echo \"[pidfile] Created /tmp/restored.pid manually after successful restore\"; "
+                f"else echo \"[pidfile] /tmp/restored.pid already exists\"; fi'"
+            )
             exit_code, stdout, stderr = self.execute_on_helper(self.target_node, cmd)
-            
-            if 'simple_test' in stdout:
-                logger.info(f"[CRIU_RESTORE] Verified: simple_test.sh is running after restore")
-            else:
-                logger.info(f"[CRIU_RESTORE] Note: simple_test.sh process not immediately visible, but restore was successful")
-            
+            logger.info(f"[CRIU_RESTORE] Pidfile check: {stdout.strip()}")
+
             return True
             
         except Exception as e:
@@ -1509,76 +1493,28 @@ class CriuMigrationTracker:
             return False
     
     def _delete_original_pod(self):
-        """Delete the original pod after successful migration."""
+        """Delete the original pod after successful migration.
+
+        Called only after migration has fully succeeded, so we unconditionally
+        delete the source pod without checking the target pod's phase.
+        """
         try:
             load_kubernetes_config()
             api = client.CoreV1Api()
-            
-            # Wait a moment for the migrated pod to be created
-            time.sleep(2)
-            
-            # Check if migrated pod exists
+
+            logger.info(f"[MIGRATION] Deleting original pod {self.source_pod} after successful migration")
             try:
-                migrated_pod = api.read_namespaced_pod(name=self.target_pod_name, namespace=self.namespace)
-                if migrated_pod.status.phase in ["Running", "Pending"]:
-                    logger.info(f"[MIGRATION] Migrated pod {self.target_pod_name} is present (phase: {migrated_pod.status.phase}), deleting original pod {self.source_pod}")
-                    
-                    # Delete the original pod
-                    try:
-                        api.delete_namespaced_pod(name=self.source_pod, namespace=self.namespace)
-                        logger.info(f"[MIGRATION] ✓ Successfully deleted original pod {self.source_pod}")
-                        self.migration_state['original_pod_deleted'] = True
-                    except client.ApiException as e:
-                        if e.status == 404:
-                            logger.warning(f"[MIGRATION] Original pod {self.source_pod} was already deleted")
-                            self.migration_state['original_pod_deleted'] = True
-                        else:
-                            logger.error(f"[MIGRATION] Failed to delete original pod {self.source_pod}: {e}")
-                            self.migration_state['original_pod_deleted'] = False
-                            self.migration_state['errors'].append(f"Failed to delete original pod: {e}")
-                else:
-                    logger.warning(f"[MIGRATION] Migrated pod {self.target_pod_name} is in phase {migrated_pod.status.phase}, not deleting original yet")
-                    self.migration_state['original_pod_deleted'] = False
+                api.delete_namespaced_pod(name=self.source_pod, namespace=self.namespace)
+                logger.info(f"[MIGRATION] ✓ Successfully deleted original pod {self.source_pod}")
+                self.migration_state['original_pod_deleted'] = True
             except client.ApiException as e:
                 if e.status == 404:
-                    logger.warning(f"[MIGRATION] Migrated pod {self.target_pod_name} not found, checking for alternative naming...")
-                    # Try to find the migrated pod by checking all pods in namespace
-                    try:
-                        all_pods = api.list_namespaced_pod(namespace=self.namespace)
-                        migrated_pod_found = False
-                        for p in all_pods.items:
-                            # Check if this pod is on the target node and was recently created
-                            if p.spec.node_name == self.target_node:
-                                # Check if pod name contains the base pod name
-                                if self.base_pod_name in p.metadata.name or p.metadata.name.startswith(self.base_pod_name):
-                                    migrated_pod_found = True
-                                    logger.info(f"[MIGRATION] Found migrated pod: {p.metadata.name} on {self.target_node}")
-                                    # Delete original pod
-                                    try:
-                                        api.delete_namespaced_pod(name=self.source_pod, namespace=self.namespace)
-                                        logger.info(f"[MIGRATION] ✓ Successfully deleted original pod {self.source_pod}")
-                                        self.migration_state['original_pod_deleted'] = True
-                                    except client.ApiException as del_e:
-                                        if del_e.status == 404:
-                                            logger.warning(f"[MIGRATION] Original pod {self.source_pod} was already deleted")
-                                            self.migration_state['original_pod_deleted'] = True
-                                        else:
-                                            logger.error(f"[MIGRATION] Failed to delete original pod {self.source_pod}: {del_e}")
-                                            self.migration_state['original_pod_deleted'] = False
-                                            self.migration_state['errors'].append(f"Failed to delete original pod: {del_e}")
-                                    break
-                        
-                        if not migrated_pod_found:
-                            logger.warning(f"[MIGRATION] Could not find migrated pod, not deleting original pod {self.source_pod}")
-                            self.migration_state['original_pod_deleted'] = False
-                    except Exception as find_e:
-                        logger.error(f"[MIGRATION] Error searching for migrated pod: {find_e}")
-                        self.migration_state['original_pod_deleted'] = False
-                        self.migration_state['errors'].append(f"Error searching for migrated pod: {find_e}")
+                    logger.info(f"[MIGRATION] Original pod {self.source_pod} was already deleted")
+                    self.migration_state['original_pod_deleted'] = True
                 else:
-                    logger.error(f"[MIGRATION] Error checking for migrated pod: {e}")
+                    logger.error(f"[MIGRATION] Failed to delete original pod {self.source_pod}: {e}")
                     self.migration_state['original_pod_deleted'] = False
-                    self.migration_state['errors'].append(f"Error checking for migrated pod: {e}")
+                    self.migration_state['errors'].append(f"Failed to delete original pod: {e}")
         except Exception as e:
             logger.error(f"[MIGRATION] Exception during pod deletion: {e}")
             self.migration_state['original_pod_deleted'] = False

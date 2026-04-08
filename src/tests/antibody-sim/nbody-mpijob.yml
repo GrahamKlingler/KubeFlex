@@ -1,0 +1,88 @@
+apiVersion: kubeflow.org/v2beta1
+kind: MPIJob
+metadata:
+  name: nbody-sim
+  namespace: test-namespace
+spec:
+  slotsPerWorker: 1
+  runPolicy:
+    cleanPodPolicy: Running
+    ttlSecondsAfterFinished: 600
+  sshAuthMountPath: /root/.ssh
+  mpiReplicaSpecs:
+    Launcher:
+      replicas: 1
+      template:
+        spec:
+          containers:
+          - name: launcher
+            image: nbody-mpi:local
+            imagePullPolicy: IfNotPresent
+            command:
+            - mpirun
+            - --allow-run-as-root
+            - -np
+            - "2"
+            - /app/nbody/elastic_nbody
+            - -b
+            - "1000"
+            - -i
+            - "100"
+            - -c
+            - "10"
+            - -f
+            - /results/
+            resources:
+              requests:
+                cpu: "500m"
+                memory: "256Mi"
+              limits:
+                cpu: "1000m"
+                memory: "512Mi"
+    Worker:
+      replicas: 2
+      template:
+        spec:
+          containers:
+          - name: worker
+            image: nbody-mpi:local
+            imagePullPolicy: IfNotPresent
+            command:
+            - /usr/sbin/sshd
+            - -De
+            securityContext:
+              privileged: true
+              capabilities:
+                add:
+                - SYS_PTRACE
+                - SYS_RESOURCE
+                - NET_ADMIN
+                - SYS_ADMIN
+                - SYS_TIME
+                - CHECKPOINT_RESTORE
+                - SYS_CHROOT
+                - SETPCAP
+                - SETGID
+                - SETUID
+              seccompProfile:
+                type: Unconfined
+              allowPrivilegeEscalation: true
+            resources:
+              requests:
+                cpu: "500m"
+                memory: "256Mi"
+              limits:
+                cpu: "1000m"
+                memory: "512Mi"
+            volumeMounts:
+            - name: checkpoint-volume
+              mountPath: /tmp/checkpoints
+            - name: results
+              mountPath: /results
+          volumes:
+          - name: checkpoint-volume
+            hostPath:
+              path: /tmp/checkpoints
+              type: DirectoryOrCreate
+          - name: results
+            emptyDir: {}

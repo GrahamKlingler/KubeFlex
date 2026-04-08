@@ -1,0 +1,72 @@
+# N-Body MPI simulation with MANA (DMTCP) transparent checkpointing
+FROM ubuntu:22.04
+
+USER root
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install build dependencies and OpenMPI
+RUN apt-get update && apt-get install -y \
+    git build-essential pkg-config cmake gcc make g++ \
+    libopenmpi-dev openmpi-bin \
+    openssh-server openssh-client \
+    python3 \
+    autoconf automake libtool \
+    linux-libc-dev \
+    tini \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build DMTCP + MANA from source
+# Update the DMTCP submodule to latest main — the pinned version has an
+# unguarded #include <asm/prctl.h> that fails on aarch64 (Apple Silicon).
+# Current DMTCP main wraps it in #ifdef __x86_64__.
+RUN git clone https://github.com/mpickpt/mana.git /tmp/mana \
+    && cd /tmp/mana \
+    && git submodule init \
+    && git submodule update \
+    && cd /tmp/mana/dmtcp && git checkout main && git pull && cd /tmp/mana \
+    # Patch: asm/prctl.h is x86-only and doesn't exist on aarch64.
+    # Wrap every unguarded include with an arch check, and provide the
+    # constants via sys/prctl.h + manual defines as a fallback.
+    && find /tmp/mana -name '*.h' -o -name '*.cpp' -o -name '*.c' | \
+       xargs grep -l 'include.*<asm/prctl.h>' 2>/dev/null | while read f; do \
+         sed -i 's|^#include <asm/prctl.h>|#ifdef __x86_64__\n#include <asm/prctl.h>\n#endif|' "$f"; \
+       done \
+    && ./configure --prefix=/usr/local \
+    && make -j$(nproc) \
+    && make install \
+    && rm -rf /tmp/mana
+
+# Configure SSH for MPI communication between pods
+RUN mkdir -p /var/run/sshd \
+    && ssh-keygen -A \
+    && ssh-keygen -t rsa -N "" -f /root/.ssh/id_rsa \
+    && cp /root/.ssh/id_rsa.pub /root/.ssh/authorized_keys \
+    && chmod 600 /root/.ssh/authorized_keys \
+    && echo "StrictHostKeyChecking no" >> /etc/ssh/ssh_config \
+    && echo "UserKnownHostsFile /dev/null" >> /etc/ssh/ssh_config \
+    && echo "PermitRootLogin yes" >> /etc/ssh/sshd_config \
+    && echo "StrictModes no" >> /etc/ssh/sshd_config
+
+# Copy N-body source code (reuse from antibody-sim workload)
+COPY ./tests/antibody-sim/MPI-Workload-main/nbody/ /app/nbody/
+COPY ./tests/antibody-sim/MPI-Workload-main/utils/ /app/utils/
+
+# Build the MPI version of the N-body simulation
+WORKDIR /app/nbody
+RUN cmake CMakeLists.txt && make
+
+# Copy MANA wrapper scripts
+COPY ./tests/mana/run_nbody_mana.sh /tmp/run_nbody_mana.sh
+RUN chmod +x /tmp/run_nbody_mana.sh
+
+# Create required directories
+RUN mkdir -p /tmp/checkpoints /tmp/mana-ckpt /results /script-data \
+    && chmod 777 /tmp/checkpoints /tmp/mana-ckpt /results /script-data
+
+VOLUME ["/tmp/checkpoints"]
+VOLUME ["/tmp/mana-ckpt"]
+VOLUME ["/results"]
+
+WORKDIR /app/nbody
+
+ENTRYPOINT ["/usr/bin/tini", "--"]

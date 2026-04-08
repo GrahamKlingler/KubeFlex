@@ -105,10 +105,10 @@ Test migration functionality and carbon forecast generation.
 ```
 
 **Options**:
-- `--migrate`: Run migration test
+- `--migration`: Run migration test
 - `--pod POD_NAME`: Pod name to migrate (default: `test-pod`)
-- `--source SOURCE_NODE`: Source node name (default: `kind-worker`)
-- `--target TARGET_NODE`: Target node name (default: `kind-worker2`)
+- `--source-node SOURCE_NODE`: Source node name (default: `kind-worker`)
+- `--target-node TARGET_NODE`: Target node name (default: `kind-worker2`)
 - `--namespace NAMESPACE`: Kubernetes namespace (default: `test-namespace`)
 - `--forecast DURATION`: Generate carbon forecast for specified duration (hours)
 - `--keep-pod`: Keep original pod after migration (default: true)
@@ -118,7 +118,7 @@ Test migration functionality and carbon forecast generation.
 **Examples**:
 ```bash
 # Test migration
-./test.sh --migrate --pod test-pod --source kind-worker --target kind-worker2
+./test.sh --migration --pod test-pod --source-node kind-worker --target-node kind-worker2
 
 # Generate 24-hour carbon forecast
 ./test.sh --forecast 24

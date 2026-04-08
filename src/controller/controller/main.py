@@ -54,11 +54,22 @@ class KubeFlexController:
         self.server_url = os.getenv('CARBON_SERVER_URL', 'http://metadata-service:8008')
         self.server_port = int(os.getenv('SERVER_PORT', 8008))
         
-        # Scheduling policy: 1=initial placement only, 2=hourly migration, 3=forecast-based
-        if scheduling_policy not in [1, 2, 3]:
-            raise ValueError(f"Invalid scheduling policy: {scheduling_policy}. Must be 1, 2, or 3.")
+        # Scheduling policy: 1=initial placement only, 2=hourly migration, 3=forecast-based,
+        # 4=forecast-aware adaptive, 5=always-best-region (migrate whenever a better region exists)
+        if scheduling_policy not in [1, 2, 3, 4, 5]:
+            raise ValueError(f"Invalid scheduling policy: {scheduling_policy}. Must be 1, 2, 3, 4, or 5.")
         self.scheduling_policy = scheduling_policy
         logger.info(f"Using scheduling policy: {scheduling_policy}")
+
+        # Check interval: how often (in seconds of real time) to run migration checks,
+        # and how many simulated hours to advance per check.
+        self.check_interval_seconds = int(os.getenv('CHECK_INTERVAL_SECONDS', '3600'))
+        self.sim_hours_per_check = int(os.getenv('SIM_HOURS_PER_CHECK', '1'))
+        logger.info(f"Check interval: {self.check_interval_seconds}s real time, advancing {self.sim_hours_per_check}h sim time per check")
+
+        # Policy 4 parameters
+        self.forecast_window = int(os.getenv('FORECAST_WINDOW', '4'))
+        self.cost_multiplier = float(os.getenv('MIGRATION_COST_MULTIPLIER', '2.0'))
         
         # Scheduler time (Unix timestamp) - defaults to current time if not provided
         # Valid range: 1577836800 (2020-01-01 00:00:00) to 1672527600 (2022-12-31 23:00:00)
@@ -134,12 +145,12 @@ class KubeFlexController:
             scheduler_datetime = datetime.fromtimestamp(self.scheduler_time, tz=pytz.UTC)
             logger.info(f"Scheduler initialized with time: {scheduler_datetime.strftime('%Y-%m-%d %H:%M:%S')} UTC (timestamp: {self.scheduler_time})")
             
-            # Schedule hourly migration checks only for policy 2 and 3
-            if self.scheduling_policy in [2, 3]:
-                # Run immediately on startup, then every hour
+            # Schedule hourly migration checks only for policy 2, 3, 4, and 5
+            if self.scheduling_policy in [2, 3, 4, 5]:
+                # Run on a configurable interval (default: every hour)
                 self.scheduler.add_job(
                     self.hourly_migration_check,
-                    trigger=IntervalTrigger(hours=1),
+                    trigger=IntervalTrigger(seconds=self.check_interval_seconds),
                     id='hourly_migration_check',
                     name='Hourly migration check',
                     replace_existing=True
@@ -383,30 +394,51 @@ class KubeFlexController:
             # Fallback to counter 1 if we can't query existing pods
             return f"{base_name}-1"
     
+    def _get_pod_counter(self, pod_name: str, base_name: str) -> int:
+        """Get the numeric counter suffix from a pod name. Returns 0 for the base pod."""
+        if pod_name == base_name:
+            return 0
+        suffix = pod_name[len(base_name) + 1:]  # skip the "-"
+        try:
+            return int(suffix)
+        except ValueError:
+            return 0
+
     def discover_pods_for_migration(self, namespace: str = "test-namespace") -> List[Dict]:
-        """Discover pods that can be migrated based on pod selector (matches test.sh pattern)."""
+        """Discover pods that can be migrated based on pod selector.
+
+        For each migration chain (same base name), only the pod with the highest
+        counter is returned — older replicas are stale and should not be migrated.
+        """
         try:
             api = client.CoreV1Api()
             pods = api.list_namespaced_pod(namespace=namespace)
-            
-            candidate_pods = []
+
+            # Group running pods by base name, keep only the latest (highest counter)
+            best_per_base = {}  # base_name -> (counter, pod_info)
             for pod in pods.items:
-                # Check if pod matches selector (e.g., namespace)
                 if pod.status.phase == "Running" and pod.spec.node_name:
-                    # Extract base pod name (in case pod has already been migrated)
                     base_pod_name = self._extract_base_pod_name(pod.metadata.name)
-                    
+                    counter = self._get_pod_counter(pod.metadata.name, base_pod_name)
+
                     pod_info = {
-                        "name": pod.metadata.name,  # Keep full name for migration
-                        "base_name": base_pod_name,  # Store base name for reference
+                        "name": pod.metadata.name,
+                        "base_name": base_pod_name,
                         "namespace": pod.metadata.namespace,
                         "node": pod.spec.node_name,
                         "region": pod.metadata.labels.get("REGION") if pod.metadata.labels else None,
                         "annotations": pod.metadata.annotations or {}
                     }
-                    candidate_pods.append(pod_info)
-            
-            logger.info(f"[DISCOVERY] Found {len(candidate_pods)} candidate pods for migration")
+
+                    if base_pod_name not in best_per_base or counter > best_per_base[base_pod_name][0]:
+                        best_per_base[base_pod_name] = (counter, pod_info)
+
+            candidate_pods = [info for _, info in best_per_base.values()]
+
+            logger.info(f"[DISCOVERY] Found {len(candidate_pods)} candidate pods for migration "
+                       f"(from {sum(1 for p in pods.items if p.status.phase == 'Running')} total running)")
+            for pod_info in candidate_pods:
+                logger.info(f"[DISCOVERY]   Latest in chain: {pod_info['name']} on {pod_info['node']}")
             return candidate_pods
             
         except Exception as e:
@@ -497,18 +529,31 @@ class KubeFlexController:
             return None
     
     def find_target_node_for_region(self, target_region: str, source_node: str) -> Optional[str]:
-        """Find a node in the target region (excluding source node)."""
+        """Find a node in the target region.
+
+        If the source node is already in the target region, returns None
+        (no migration needed). Otherwise returns a node in the target region.
+        """
         try:
             api = client.CoreV1Api()
             nodes = api.list_node()
-            
+
+            # First check if source node is already in target region
+            for node in nodes.items:
+                if node.metadata.name == source_node:
+                    source_region = node.metadata.labels.get("REGION") if node.metadata.labels else None
+                    if source_region == target_region:
+                        logger.info(f"[NODE_SELECTION] Source node {source_node} is already in region {target_region}, no migration needed")
+                        return None
+
+            # Find a different node in the target region
             for node in nodes.items:
                 if node.metadata.name != source_node:
                     region = node.metadata.labels.get("REGION") if node.metadata.labels else None
                     if region == target_region:
                         logger.info(f"[NODE_SELECTION] Found target node: {node.metadata.name} in region {target_region}")
                         return node.metadata.name
-            
+
             logger.warning(f"[NODE_SELECTION] No node found in region {target_region}")
             return None
             
@@ -696,9 +741,37 @@ class KubeFlexController:
         # Real time = when simulation started (real time) + simulation time elapsed
         return self.simulation_start_real_time + sim_time_elapsed
     
-    def reschedule_next_migration(self, namespace: str = "test-namespace"):
-        """Reschedule the next migration job to occur right before the next region breakpoint."""
+    def reschedule_next_migration(self, namespace: str = "test-namespace", delay_seconds: int = 0):
+        """Reschedule the next migration job.
+
+        If delay_seconds > 0, schedule the next check after that many seconds
+        (used by Policy 4 adaptive scheduling). Otherwise, schedule right before
+        the next region breakpoint.
+        """
         try:
+            if delay_seconds > 0:
+                # Adaptive scheduling: schedule next check after delay_seconds
+                next_real_time = time.time() + delay_seconds
+                next_datetime = datetime.fromtimestamp(next_real_time, tz=pytz.UTC)
+                logger.info(f"[RESCHEDULE] Adaptive: next check in {delay_seconds}s at {next_datetime.strftime('%Y-%m-%d %H:%M:%S')} UTC")
+
+                if self.scheduler:
+                    try:
+                        self.scheduler.remove_job('hourly_migration_check')
+                    except Exception:
+                        pass
+
+                    self.scheduler.add_job(
+                        self.hourly_migration_check,
+                        trigger=DateTrigger(run_date=next_datetime),
+                        id='hourly_migration_check',
+                        name='Hourly migration check',
+                        replace_existing=True,
+                        args=[namespace]
+                    )
+                    logger.info(f"[RESCHEDULE] Successfully rescheduled with adaptive delay")
+                return
+
             # Find next breakpoint (in simulation time)
             next_breakpoint_sim = self.find_next_region_breakpoint(duration_hours=24)
             if not next_breakpoint_sim:
@@ -816,19 +889,279 @@ class KubeFlexController:
             logger.error(f"[POLICY_3] Traceback: {traceback.format_exc()}")
             return None
     
+    def get_forecast_aware_migration_decision(self, pod_info: Dict) -> Tuple[bool, Optional[str], int]:
+        """Policy 4: Forecast-aware adaptive migration with migration cost threshold.
+
+        Returns:
+            (should_migrate, target_region, next_check_seconds)
+        """
+        try:
+            pod_name = pod_info["name"]
+            pod_node = pod_info["node"]
+
+            # Determine current region from pod's node
+            api = client.CoreV1Api()
+            current_region = None
+            try:
+                node_obj = api.read_node(name=pod_node)
+                current_region = node_obj.metadata.labels.get("REGION") if node_obj.metadata.labels else None
+            except Exception as e:
+                logger.warning(f"[POLICY_4] Could not get region for node {pod_node}: {e}")
+
+            if not current_region:
+                logger.warning(f"[POLICY_4] No region found for pod {pod_name} on node {pod_node}")
+                return False, None, 3600
+
+            logger.info(f"[POLICY_4] Evaluating pod {pod_name} in region {current_region}, forecast_window={self.forecast_window}h")
+
+            # Fetch extended forecast for all regions over the forecast window
+            current_datetime = datetime.fromtimestamp(self.current_simulation_time, tz=pytz.UTC)
+            end_datetime = current_datetime + timedelta(hours=self.forecast_window)
+            start_str = current_datetime.strftime("%Y-%m-%d %H:%M:%S")
+            end_str = end_datetime.strftime("%Y-%m-%d %H:%M:%S")
+
+            extended_data = fetch_extended_region_data(self.db_conn, start_str, end_str)
+            if not extended_data:
+                logger.warning(f"[POLICY_4] No extended forecast data available, falling back to metadata service")
+                # Fallback: use metadata service like Policy 3
+                forecast_data = self.get_forecast_data_from_metadata(duration_hours=self.forecast_window)
+                if not forecast_data:
+                    return False, None, 3600
+
+                region_forecasts = forecast_data.get('region_forecasts', {})
+                region_scores = {}
+                all_intensities = []
+                for region, rdata in region_forecasts.items():
+                    points = rdata.get('forecast_data', [])
+                    score = sum(float(p[2]) for p in points if len(p) >= 3)
+                    region_scores[region] = score
+                    all_intensities.extend([float(p[2]) for p in points if len(p) >= 3])
+            else:
+                # Group data by region and compute scores
+                region_scores = {}
+                all_intensities = []
+                for row in extended_data:
+                    # row: [timestamp, region, intensity, wind, solar, pct_renewable]
+                    region = row[1]
+                    intensity = row[2]
+                    if region not in region_scores:
+                        region_scores[region] = 0.0
+                    region_scores[region] += intensity
+                    all_intensities.append(intensity)
+
+            if not region_scores:
+                logger.warning(f"[POLICY_4] No region scores computed")
+                return False, None, 3600
+
+            # Log region scores
+            for region, score in sorted(region_scores.items()):
+                logger.info(f"[POLICY_4] Region {region}: cumulative intensity score = {score:.2f}")
+
+            # Find best region
+            best_region = min(region_scores, key=region_scores.get)
+            best_score = region_scores[best_region]
+            current_score = region_scores.get(current_region, float('inf'))
+
+            # Compute migration benefit
+            benefit = current_score - best_score
+            logger.info(f"[POLICY_4] Current region {current_region} score={current_score:.2f}, "
+                       f"best region {best_region} score={best_score:.2f}, benefit={benefit:.2f}")
+
+            # Compute migration cost (carbon overhead of CRIU dump/restore)
+            criu_dump_dur = self.last_criu_dump_duration if self.last_criu_dump_duration else 2.0
+            pre_criu_dur = self.last_pre_criu_duration if self.last_pre_criu_duration else 5.0
+            migration_seconds = pre_criu_dur + criu_dump_dur
+
+            # Get current and target intensities for this hour
+            current_intensity = current_score / max(self.forecast_window, 1)
+            target_intensity = best_score / max(self.forecast_window, 1)
+            migration_carbon = (migration_seconds / 3600.0) * max(current_intensity, target_intensity)
+
+            logger.info(f"[POLICY_4] Migration cost: {migration_carbon:.4f} gCO2 "
+                       f"(migration_seconds={migration_seconds:.1f}s, "
+                       f"cost_multiplier={self.cost_multiplier})")
+
+            # Decision: migrate only if benefit exceeds cost * multiplier
+            threshold = migration_carbon * self.cost_multiplier
+            should_migrate = benefit > threshold
+
+            logger.info(f"[POLICY_4] Decision: benefit={benefit:.2f} vs threshold={threshold:.4f} -> "
+                       f"{'MIGRATE' if should_migrate else 'STAY'}")
+
+            # Adaptive scheduling: compute volatility
+            import statistics
+            if len(all_intensities) >= 2:
+                volatility = statistics.stdev(all_intensities)
+            else:
+                volatility = 0.0
+
+            if volatility > 50:
+                next_check_seconds = 1800  # 30 minutes
+                logger.info(f"[POLICY_4] High volatility (σ={volatility:.1f} > 50): recheck in 30 min")
+            else:
+                next_check_seconds = 7200  # 2 hours
+                logger.info(f"[POLICY_4] Low volatility (σ={volatility:.1f} ≤ 50): recheck in 2 hours")
+
+            target = best_region if should_migrate else None
+            return should_migrate, target, next_check_seconds
+
+        except Exception as e:
+            logger.error(f"[POLICY_4] Error in forecast-aware decision for pod {pod_info.get('name', 'unknown')}: {e}")
+            import traceback
+            logger.error(f"[POLICY_4] Traceback: {traceback.format_exc()}")
+            return False, None, 3600
+
+    def get_best_region_now(self, pod_info: Dict) -> Tuple[bool, Optional[str]]:
+        """Policy 5: Always migrate to the region with lowest carbon intensity for the NEXT hour.
+
+        Uses perfect information (lookahead): queries the intensity for the upcoming
+        hour so the pod is already in the best region when that hour begins.
+
+        Returns:
+            (should_migrate, target_region)
+        """
+        try:
+            pod_name = pod_info["name"]
+            pod_node = pod_info["node"]
+
+            # Determine current region
+            api = client.CoreV1Api()
+            current_region = None
+            try:
+                node_obj = api.read_node(name=pod_node)
+                current_region = node_obj.metadata.labels.get("REGION") if node_obj.metadata.labels else None
+            except Exception as e:
+                logger.warning(f"[POLICY_5] Could not get region for node {pod_node}: {e}")
+
+            if not current_region:
+                logger.warning(f"[POLICY_5] No region found for pod {pod_name} on node {pod_node}")
+                return False, None
+
+            # Fetch intensity for all regions for the NEXT hour (perfect lookahead)
+            next_hour_datetime = datetime.fromtimestamp(self.current_simulation_time, tz=pytz.UTC) + timedelta(hours=1)
+            end_datetime = next_hour_datetime + timedelta(hours=1)
+            start_str = next_hour_datetime.strftime("%Y-%m-%d %H:%M:%S")
+            end_str = end_datetime.strftime("%Y-%m-%d %H:%M:%S")
+            logger.info(f"[POLICY_5] Lookahead: querying intensity for next hour {start_str} - {end_str}")
+
+            extended_data = fetch_extended_region_data(self.db_conn, start_str, end_str)
+
+            if extended_data:
+                region_intensity = {}
+                for row in extended_data:
+                    region = row[1]
+                    intensity = row[2]
+                    # Take the first (closest) value per region
+                    if region not in region_intensity:
+                        region_intensity[region] = intensity
+
+                # If current region is missing from all-regions query, fetch it explicitly
+                if current_region not in region_intensity:
+                    logger.info(f"[POLICY_5] Current region {current_region} missing from all-regions query, fetching directly")
+                    current_data = fetch_extended_region_data(self.db_conn, start_str, end_str, region=current_region)
+                    if current_data:
+                        region_intensity[current_region] = current_data[0][2]
+            else:
+                # Fallback to metadata service — request 2 hours and use the second point (next hour)
+                logger.info(f"[POLICY_5] No DB data, falling back to metadata service")
+                forecast_data = self.get_forecast_data_from_metadata(duration_hours=2)
+                if not forecast_data:
+                    return False, None
+
+                region_intensity = {}
+                for region, rdata in forecast_data.get('region_forecasts', {}).items():
+                    points = rdata.get('forecast_data', [])
+                    # Use second point (next hour) if available, otherwise first
+                    if len(points) >= 2 and len(points[1]) >= 3:
+                        region_intensity[region] = float(points[1][2])
+                    elif points and len(points[0]) >= 3:
+                        region_intensity[region] = float(points[0][2])
+
+            if not region_intensity:
+                logger.warning(f"[POLICY_5] No region intensity data available")
+                return False, None
+
+            # If current region has no data, we can't make a comparison — stay put
+            if current_region not in region_intensity:
+                logger.warning(f"[POLICY_5] No intensity data for current region {current_region}, staying put")
+                return False, None
+
+            # Log all region intensities for the next hour
+            for region, intensity in sorted(region_intensity.items()):
+                marker = " <-- current" if region == current_region else ""
+                logger.info(f"[POLICY_5] Region {region}: next-hour intensity = {intensity:.2f}{marker}")
+
+            # Find the best region for the next hour
+            best_region = min(region_intensity, key=region_intensity.get)
+            current_region_next_intensity = region_intensity[current_region]
+            best_intensity = region_intensity[best_region]
+
+            if best_region != current_region and best_intensity < current_region_next_intensity:
+                logger.info(f"[POLICY_5] MIGRATE (lookahead): {current_region} ({current_region_next_intensity:.2f}) -> "
+                           f"{best_region} ({best_intensity:.2f}) for next hour")
+                return True, best_region
+            else:
+                logger.info(f"[POLICY_5] STAY: {current_region} ({current_region_next_intensity:.2f}) is already best for next hour")
+                return False, None
+
+        except Exception as e:
+            logger.error(f"[POLICY_5] Error for pod {pod_info.get('name', 'unknown')}: {e}")
+            import traceback
+            logger.error(f"[POLICY_5] Traceback: {traceback.format_exc()}")
+            return False, None
+
+    def cleanup_stale_pods(self, namespace: str = "test-namespace"):
+        """Delete old pods from migration chains, keeping only the latest per chain."""
+        try:
+            api = client.CoreV1Api()
+            pods = api.list_namespaced_pod(namespace=namespace)
+
+            # Group all pods by base name
+            chains = {}  # base_name -> [(counter, pod_name, phase)]
+            for pod in pods.items:
+                name = pod.metadata.name
+                base = self._extract_base_pod_name(name)
+                counter = self._get_pod_counter(name, base)
+                phase = pod.status.phase or "Unknown"
+                if base not in chains:
+                    chains[base] = []
+                chains[base].append((counter, name, phase))
+
+            for base, members in chains.items():
+                if len(members) <= 1:
+                    continue
+
+                # Sort by counter descending — highest counter is the latest
+                members.sort(key=lambda x: x[0], reverse=True)
+                latest = members[0]
+
+                for counter, name, phase in members[1:]:
+                    # Delete all older pods in the chain
+                    try:
+                        api.delete_namespaced_pod(name=name, namespace=namespace)
+                        logger.info(f"[CLEANUP] Deleted stale pod {name} (phase={phase}, chain={base})")
+                    except ApiException as e:
+                        if e.status != 404:
+                            logger.warning(f"[CLEANUP] Failed to delete {name}: {e.reason}")
+
+        except Exception as e:
+            logger.warning(f"[CLEANUP] Error during stale pod cleanup: {e}")
+
     def hourly_migration_check(self, namespace: str = "test-namespace"):
         """Check every hour if pods need to be migrated based on scheduling policy."""
         try:
             logger.info("=" * 80)
             logger.info(f"[HOURLY_CHECK] Starting hourly migration check (Policy {self.scheduling_policy})")
-            
-            # Update current simulation time (advance by 1 hour)
-            # This represents the passage of time in the simulation
-            self.current_simulation_time += 3600  # Add 1 hour
-            
+
+            # Clean up stale pods from previous migrations
+            self.cleanup_stale_pods(namespace)
+
+            # Update current simulation time
+            self.current_simulation_time += 3600 * self.sim_hours_per_check
+
             current_datetime = datetime.fromtimestamp(self.current_simulation_time, tz=pytz.UTC)
             logger.info(f"[HOURLY_CHECK] Current simulation time: {current_datetime.strftime('%Y-%m-%d %H:%M:%S')} UTC")
-            
+
             # Discover all pods in the namespace
             pods = self.discover_pods_for_migration(namespace)
             if not pods:
@@ -839,6 +1172,7 @@ class KubeFlexController:
             migrations_attempted = 0
             migrations_successful = 0
             should_reschedule = False
+            policy4_next_check_seconds = 0  # Track adaptive delay from Policy 4
             
             for pod_info in pods:
                 pod_name = pod_info["name"]
@@ -857,6 +1191,27 @@ class KubeFlexController:
                     target_region = self.get_optimal_region_for_pod_forecast(pod_info)
                     if not target_region:
                         logger.warning(f"[HOURLY_CHECK] Could not determine optimal region for pod {pod_name}, skipping")
+                        continue
+                elif self.scheduling_policy == 4:
+                    # Policy 4: Forecast-aware adaptive migration with cost threshold
+                    should_migrate, target_region, next_check_seconds = self.get_forecast_aware_migration_decision(pod_info)
+                    policy4_next_check_seconds = next_check_seconds
+                    if not should_migrate:
+                        logger.info(f"[HOURLY_CHECK] Policy 4: No migration needed for pod {pod_name}")
+                        # Reschedule with adaptive delay
+                        self.reschedule_next_migration(namespace, delay_seconds=next_check_seconds)
+                        continue
+                    if not target_region:
+                        logger.warning(f"[HOURLY_CHECK] Policy 4: Migration recommended but no target region for pod {pod_name}")
+                        continue
+                elif self.scheduling_policy == 5:
+                    # Policy 5: Always move to best region, no heuristic
+                    should_migrate, target_region = self.get_best_region_now(pod_info)
+                    if not should_migrate:
+                        logger.info(f"[HOURLY_CHECK] Policy 5: Pod {pod_name} already in best region")
+                        continue
+                    if not target_region:
+                        logger.warning(f"[HOURLY_CHECK] Policy 5: No target region for pod {pod_name}")
                         continue
                 else:
                     logger.warning(f"[HOURLY_CHECK] Policy {self.scheduling_policy} does not support hourly checks")
@@ -882,13 +1237,18 @@ class KubeFlexController:
                 
                 # Pod needs to be migrated to target region
                 logger.info(f"[HOURLY_CHECK] Pod {pod_name} on node {pod_node} needs migration to region {target_region}")
-                
-                # Find a target node in the target region
+
+                # Find a target node in the target region (excludes source node)
                 target_node = self.find_target_node_for_region(target_region, pod_node)
                 if not target_node:
                     logger.warning(f"[HOURLY_CHECK] Could not find target node for pod {pod_name}")
                     continue
-                
+
+                # Safety: never migrate to the same node
+                if target_node == pod_node:
+                    logger.info(f"[HOURLY_CHECK] Pod {pod_name} already on target node {target_node}, skipping")
+                    continue
+
                 # Perform migration
                 logger.info(f"[HOURLY_CHECK] Migrating {pod_name} from {pod_node} to {target_node} (region: {target_region})")
                 migrations_attempted += 1
@@ -897,14 +1257,25 @@ class KubeFlexController:
                     namespace=namespace,
                     pod=pod_name,
                     target_node=target_node,
-                    delete_original=False,
+                    delete_original=True,
                     debug=True
                 )
-                
+
                 if migration_result.get("success"):
                     migrations_successful += 1
                     logger.info(f"[HOURLY_CHECK] ✓ Successfully migrated {pod_name} to {target_node}")
-                    
+
+                    # Ensure the old pod is deleted (migration service may not have done it)
+                    try:
+                        api = client.CoreV1Api()
+                        api.delete_namespaced_pod(name=pod_name, namespace=namespace)
+                        logger.info(f"[HOURLY_CHECK] Deleted original pod {pod_name}")
+                    except ApiException as e:
+                        if e.status == 404:
+                            logger.info(f"[HOURLY_CHECK] Original pod {pod_name} already deleted")
+                        else:
+                            logger.warning(f"[HOURLY_CHECK] Failed to delete original pod {pod_name}: {e}")
+
                     # Parse and log migration timings
                     timing_data = self.parse_migration_timings(migration_result)
                     if timing_data:
@@ -918,8 +1289,15 @@ class KubeFlexController:
             
             # Reschedule next migration after all pods are processed (if any migration was successful)
             if should_reschedule and migrations_successful > 0:
-                logger.info("[HOURLY_CHECK] Rescheduling next migration based on timing analysis...")
-                self.reschedule_next_migration(namespace)
+                if self.scheduling_policy == 5:
+                    # Policy 5: Keep the regular interval, no special rescheduling
+                    logger.info(f"[HOURLY_CHECK] Policy 5: Continuing with regular {self.check_interval_seconds}s check interval")
+                elif self.scheduling_policy == 4 and policy4_next_check_seconds > 0:
+                    logger.info(f"[HOURLY_CHECK] Policy 4: Rescheduling with adaptive delay of {policy4_next_check_seconds}s...")
+                    self.reschedule_next_migration(namespace, delay_seconds=policy4_next_check_seconds)
+                else:
+                    logger.info("[HOURLY_CHECK] Rescheduling next migration based on timing analysis...")
+                    self.reschedule_next_migration(namespace)
             
             logger.info(f"[HOURLY_CHECK] Migration check completed: {migrations_attempted} attempted, {migrations_successful} successful")
             logger.info("=" * 80)
@@ -993,6 +1371,22 @@ class KubeFlexController:
                             target_node = self.find_target_node_for_region(min_region, source_node)
                         else:
                             target_node = self.find_optimal_target_node(source_node, namespace)
+                elif self.scheduling_policy == 4:
+                    # Policy 4: Forecast-aware adaptive migration
+                    should_migrate, target_region, _ = self.get_forecast_aware_migration_decision(pod_info)
+                    if should_migrate and target_region:
+                        target_node = self.find_target_node_for_region(target_region, source_node)
+                    else:
+                        logger.info(f"[MIGRATION_TEST] Policy 4: No migration needed for {pod_name}")
+                        continue
+                elif self.scheduling_policy == 5:
+                    # Policy 5: Always best region
+                    should_migrate, target_region = self.get_best_region_now(pod_info)
+                    if should_migrate and target_region:
+                        target_node = self.find_target_node_for_region(target_region, source_node)
+                    else:
+                        logger.info(f"[MIGRATION_TEST] Policy 5: Already in best region for {pod_name}")
+                        continue
                 else:
                     # Fallback to old method
                     target_node = self.find_optimal_target_node(source_node, namespace)
@@ -1021,10 +1415,10 @@ class KubeFlexController:
                     namespace=namespace,
                     pod=pod_name,
                     target_node=target_node,
-                    delete_original=False,
+                    delete_original=True,
                     debug=True
                 )
-                
+
                 if migration_result.get("success"):
                     test_results["migrations_successful"] += 1
                     logger.info(f"[MIGRATION_TEST] ✓ Migration of {pod_name} completed successfully")
@@ -1097,6 +1491,11 @@ Scheduling Policies:
   2 - Hourly Migration: Automatically migrate all pods to minimum region every hour
   3 - Forecast-Based: For each pod, compare forecasts for all regions over EXPECTED_DURATION
       and migrate to the region with lowest total carbon intensity
+  4 - Forecast-Aware Adaptive: Sliding-window forecast with migration cost threshold.
+      Only migrates when carbon benefit exceeds migration cost. Adaptive recheck intervals
+      based on volatility. Configure via FORECAST_WINDOW and MIGRATION_COST_MULTIPLIER env vars
+  5 - Always-Best-Region: Migrate to the lowest carbon intensity region every check.
+      No heuristic — if any region is better right now, migrate immediately
         """
     )
     parser.add_argument('--namespace', default='test-namespace',
@@ -1107,8 +1506,8 @@ Scheduling Policies:
                        help='Duration to stream logs after migration (seconds, default: 120)')
     parser.add_argument('--skip-migration', action='store_true',
                        help='Skip automatic migration on startup (default: False, migration runs automatically)')
-    parser.add_argument('--scheduling-policy', type=int, choices=[1, 2, 3], default=None,
-                       help='Scheduling policy: 1=initial placement only, 2=hourly migration to minimum, 3=forecast-based optimal (default: from SCHEDULING_POLICY env var or 3)')
+    parser.add_argument('--scheduling-policy', type=int, choices=[1, 2, 3, 4, 5], default=None,
+                       help='Scheduling policy: 1=initial placement only, 2=hourly migration to minimum, 3=forecast-based optimal, 4=forecast-aware adaptive, 5=always-best-region (default: from SCHEDULING_POLICY env var or 3)')
     
     args = parser.parse_args()
     
@@ -1133,7 +1532,7 @@ Scheduling Policies:
         if scheduling_policy_str:
             try:
                 scheduling_policy = int(scheduling_policy_str)
-                if scheduling_policy not in [1, 2, 3]:
+                if scheduling_policy not in [1, 2, 3, 4, 5]:
                     raise ValueError(f"Invalid scheduling policy: {scheduling_policy}")
                 logger.info(f"Using scheduling policy from SCHEDULING_POLICY environment variable: {scheduling_policy}")
             except (ValueError, TypeError):

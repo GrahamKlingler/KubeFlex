@@ -1,3 +1,5 @@
 /google-cloud-sdk
 /.vscode
 /pyvenv.cfg
+*/artifacts/*
+*/nbody-artifacts/*

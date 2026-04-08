@@ -73,14 +73,14 @@ def list_resources(namespace: str):
 #   curl http://localhost:8008/plot_test-pod.html -o plot.html
 
 class CarbonDataHandler(BaseHTTPRequestHandler):
-    def handle_combined_min_forecast(self, duration, storage_path):
+    def handle_combined_min_forecast(self, duration, storage_path, start_time_override=None):
         """Handle combined min-forecast query: returns min forecast + forecasts for all regions in min forecast"""
         try:
             interval = int(duration)
-            
+
             # Connect to database
             db_conn = db.connect_to_db(db.db_config)
-            
+
             # Ensure database functions exist
             try:
                 with db_conn.cursor() as cur:
@@ -148,18 +148,29 @@ class CarbonDataHandler(BaseHTTPRequestHandler):
             except Exception as func_error:
                 logger.warning(f"Error creating/updating database functions: {func_error}")
             
-            # Get scheduler time from environment variable
-            scheduler_time = os.getenv('SCHEDULER_TIME')
-            if scheduler_time:
+            # Use start_time_override from request body if provided, otherwise fall back to env var
+            if start_time_override is not None:
                 try:
-                    scheduler_time = float(scheduler_time)
-                    logger.info(f"Using scheduler time from ConfigMap: {scheduler_time}")
+                    scheduler_time = float(start_time_override)
+                    logger.info(f"Using start_time override from request: {scheduler_time}")
                 except (ValueError, TypeError):
-                    logger.warning(f"Invalid SCHEDULER_TIME environment variable: {scheduler_time}, using default")
+                    logger.warning(f"Invalid start_time_override: {start_time_override}, falling back to env var")
                     scheduler_time = None
             else:
-                logger.warning("SCHEDULER_TIME not set, using current time minus 3 years as fallback")
                 scheduler_time = None
+
+            if scheduler_time is None:
+                scheduler_time = os.getenv('SCHEDULER_TIME')
+                if scheduler_time:
+                    try:
+                        scheduler_time = float(scheduler_time)
+                        logger.info(f"Using scheduler time from ConfigMap: {scheduler_time}")
+                    except (ValueError, TypeError):
+                        logger.warning(f"Invalid SCHEDULER_TIME environment variable: {scheduler_time}, using default")
+                        scheduler_time = None
+                else:
+                    logger.warning("SCHEDULER_TIME not set, using current time minus 3 years as fallback")
+                    scheduler_time = None
             
             # Check if table exists before querying
             with db_conn.cursor() as cur:
@@ -267,15 +278,15 @@ class CarbonDataHandler(BaseHTTPRequestHandler):
             storage_path = os.getenv('STORAGE_PATH', '/storage')
             os.makedirs(storage_path, exist_ok=True)
 
-            # Only accept duration parameter - this is the only endpoint
             duration = data.get('duration')
-            
+            start_time = data.get('start_time')  # optional: unix timestamp to override SCHEDULER_TIME
+
             if duration is None:
                 raise ValueError("Invalid request: must provide 'duration' parameter (e.g., {\"duration\": 24})")
-            
+
             # Combined min-forecast query: returns min forecast + forecasts for all regions in min forecast
-            logger.info(f"Processing forecast request for duration: {duration} hours")
-            self.handle_combined_min_forecast(duration, storage_path)
+            logger.info(f"Processing forecast request for duration: {duration} hours, start_time: {start_time}")
+            self.handle_combined_min_forecast(duration, storage_path, start_time_override=start_time)
             return
             
         except Exception as e:

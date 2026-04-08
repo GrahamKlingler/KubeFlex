@@ -1,0 +1,79 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: sysbench-pod
+  namespace: test-namespace
+  labels:
+    name: sysbench-pod
+  annotations:
+    REGION: "NE"
+    EXPECTED_DURATION: "72"
+spec:
+  restartPolicy: Never
+  # nodeSelector:
+  #   kubernetes.io/hostname: kind-worker2 # added recently for last troubleshoot
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+            - key: "REGION"
+              operator: In
+              values: ["NE"]
+  containers:
+  - name: test-container
+    image: grahamklingler26/sysbench-testpod:latest
+    imagePullPolicy: Always
+    command: ["/usr/bin/tini", "--"]
+    args: ["/bin/bash", "-c", "echo 'Test pod started' && /tmp/tests.sh --iters=__ITERS__ --events=__EVENTS__ --timeout=0 --verbosity=5 --debug --test-type=__TEST_TYPE__ --threads=__THREADS__"] #&& sysbench --verbosity 5 --debug  >> /script-data/container.log"]
+    # image: cpp-test:local
+    # imagePullPolicy: IfNotPresent
+    securityContext:
+      privileged: true
+      capabilities:
+        add:
+        - SYS_PTRACE
+        - SYS_RESOURCE  
+        - NET_ADMIN
+        - SYS_ADMIN
+        - SYS_TIME
+        - CHECKPOINT_RESTORE
+        - SYS_CHROOT
+        - SETPCAP
+        - SETGID
+        - SETUID
+      seccompProfile:
+        type: Unconfined
+      allowPrivilegeEscalation: true
+    resources:
+      requests:
+        memory: "5Mi"
+        cpu: "500m"
+      limits:
+        memory: "100Mi"
+        cpu: "1000m"
+    ports:
+    - name: http
+      containerPort: 8080
+      protocol: TCP
+    - name: ssh
+      containerPort: 22
+      protocol: TCP
+    env:
+    - name: TEST_MODE
+      value: "simple"
+    - name: LOG_FILE
+      value: "/tmp/container.log"
+    volumeMounts:
+    - name: checkpoint-volume
+      mountPath: /tmp/checkpoints
+    - name: script-data
+      mountPath: /script-data
+  volumes:
+  - name: checkpoint-volume
+    hostPath:
+      path: /tmp/checkpoints
+      type: Directory
+  - name: script-data
+    emptyDir: {}

@@ -1,0 +1,47 @@
+# Revised Dockerfile with CRIU 4.1.1 support
+
+# Build stage for CRIU 4.1.1
+FROM ubuntu:22.04
+
+USER root
+
+RUN apt-get update && apt-get install -y \
+    git build-essential pkg-config \
+    libprotobuf-dev libprotobuf-c-dev protobuf-c-compiler protobuf-compiler \
+    python3-protobuf libnl-3-dev libcap-dev uuid-dev libaio-dev \
+    libnet-dev libgnutls28-dev iproute2 libnftables-dev nftables \
+    tini \
+    && git clone https://github.com/checkpoint-restore/criu.git /tmp/criu \
+    && cd /tmp/criu && git checkout v4.1.1 \
+    && make -j$(nproc)
+
+# Install minimal runtime dependencies and move CRIU binary
+RUN apt-get update && apt-get install -y \
+    iproute2 nftables libnl-3-200 libcap2 libnet1 libgnutls30 \
+    && cp /tmp/criu/criu/criu /usr/local/sbin/criu \
+      && chmod 755 /usr/local/sbin/criu \
+      && setcap cap_sys_admin+eip /usr/local/sbin/criu \
+      && setcap cap_checkpoint_restore+eip /usr/local/sbin/criu \
+    && rm -rf /var/lib/apt/lists/* /tmp/criu
+
+COPY simple_counter.cpp /tmp/simple_counter.cpp
+
+# RUN chmod +x /tmp/counter
+RUN g++ /tmp/simple_counter.cpp -O2 -o /tmp/counter && \
+    chmod +x /tmp/counter
+
+# Verify CRIU installation and capabilities
+RUN ls -la /usr/local/sbin/criu && \
+    getcap /usr/local/sbin/criu && \
+    echo "CRIU binary ready with capabilities" && \
+    echo "Expected capabilities: cap_sys_admin+eip cap_checkpoint_restore+eip"
+
+RUN mkdir -p /tmp/checkpoints && \
+    mkdir -p /cgroup-yard && \
+    mkdir -p /script-data && \
+    chmod 777 /script-data
+
+VOLUME ["/tmp/checkpoints"]
+VOLUME ["/script-data"]
+
+ENTRYPOINT ["/usr/bin/tini", "--"]

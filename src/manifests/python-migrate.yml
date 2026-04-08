@@ -11,7 +11,7 @@ spec:
   serviceAccountName: controller-account
   containers:
   - name: python-migrate
-    image: salamander1223/python-migrate:latest
+    image: grahamklingler26/python-migrate:latest
     imagePullPolicy: IfNotPresent
     command: ["/start.sh"]
     ports:

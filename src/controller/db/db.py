@@ -70,8 +70,70 @@ BEGIN
         AND source = source_region
         ORDER BY datetime::TIMESTAMP DESC
     LOOP
-        results_array := array_append(results_array, 
+        results_array := array_append(results_array,
             r.source || ' | ' || r.datetime || ' | ' || r.carbon_intensity_direct_avg
+        );
+    END LOOP;
+
+    RETURN results_array;
+END;
+$$ LANGUAGE plpgsql;
+"""
+
+extended_region_query = """
+CREATE OR REPLACE FUNCTION get_extended_records_by_source(
+    start_date TIMESTAMP,
+    end_date TIMESTAMP,
+    source_region TEXT
+)
+RETURNS TEXT[] AS $$
+DECLARE
+    r RECORD;
+    results_array TEXT[] := ARRAY[]::TEXT[];
+BEGIN
+    FOR r IN
+        SELECT source, datetime, carbon_intensity_direct_avg,
+               COALESCE(power_production_solar_avg, 0) as solar,
+               COALESCE(power_production_wind_avg, 0) as wind,
+               COALESCE(power_origin_percent_renewable_avg, 0) as pct_renewable
+        FROM public.table
+        WHERE datetime::TIMESTAMP BETWEEN start_date AND end_date
+        AND source = source_region
+        ORDER BY datetime::TIMESTAMP ASC
+    LOOP
+        results_array := array_append(results_array,
+            r.source || ' | ' || r.datetime || ' | ' || r.carbon_intensity_direct_avg
+            || ' | ' || r.wind || ' | ' || r.solar || ' | ' || r.pct_renewable
+        );
+    END LOOP;
+
+    RETURN results_array;
+END;
+$$ LANGUAGE plpgsql;
+"""
+
+extended_all_regions_query = """
+CREATE OR REPLACE FUNCTION get_extended_records_all_regions(
+    start_date TIMESTAMP,
+    end_date TIMESTAMP
+)
+RETURNS TEXT[] AS $$
+DECLARE
+    r RECORD;
+    results_array TEXT[] := ARRAY[]::TEXT[];
+BEGIN
+    FOR r IN
+        SELECT source, datetime, carbon_intensity_direct_avg,
+               COALESCE(power_production_solar_avg, 0) as solar,
+               COALESCE(power_production_wind_avg, 0) as wind,
+               COALESCE(power_origin_percent_renewable_avg, 0) as pct_renewable
+        FROM public.table
+        WHERE datetime::TIMESTAMP BETWEEN start_date AND end_date
+        ORDER BY datetime::TIMESTAMP ASC, source ASC
+    LOOP
+        results_array := array_append(results_array,
+            r.source || ' | ' || r.datetime || ' | ' || r.carbon_intensity_direct_avg
+            || ' | ' || r.wind || ' | ' || r.solar || ' | ' || r.pct_renewable
         );
     END LOOP;
 
@@ -223,4 +285,43 @@ def collect_region_forecast(db_conn, region, interval=24, scheduler_time=None):
         logger.info(f"Error fetching results: {e}")
     
     return db_region
+
+
+def fetch_extended_region_data(conn, start_date, end_date, region=None):
+    """Fetch extended carbon data including wind, solar, and renewable percentage.
+
+    Returns list of [timestamp, region, intensity, wind, solar, pct_renewable].
+    If region is None, fetches data for all regions.
+    """
+    try:
+        with conn.cursor() as cur:
+            if region:
+                cur.execute(extended_region_query)
+                cur.execute("SELECT get_extended_records_by_source(%s, %s, %s);",
+                            (start_date, end_date, region))
+            else:
+                cur.execute(extended_all_regions_query)
+                cur.execute("SELECT get_extended_records_all_regions(%s, %s);",
+                            (start_date, end_date))
+
+            result = cur.fetchone()[0]
+
+            final = []
+            if result:
+                for record in result:
+                    parts = record.split(" | ")
+                    if len(parts) >= 6:
+                        final.append([
+                            parts[1],           # timestamp
+                            parts[0],           # region
+                            float(parts[2]),    # carbon_intensity_direct_avg
+                            float(parts[3]),    # wind
+                            float(parts[4]),    # solar
+                            float(parts[5]),    # pct_renewable
+                        ])
+            return sorted(final)
+
+    except Exception as e:
+        logger.info(f"Error fetching extended region data: {e}")
+        return []
 

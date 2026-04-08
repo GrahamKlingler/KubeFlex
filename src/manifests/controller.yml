@@ -42,8 +42,9 @@ spec:
                 - kind-worker2
       containers:
       - name: python-controller
-        image: salamander1223/python-controller:latest
-        imagePullPolicy: Always
+        # image: salamander1223/python-controller:latest
+        image: python-controller:v4
+        imagePullPolicy: IfNotPresent
         securityContext:
           privileged: true
         resources:
@@ -79,6 +80,10 @@ spec:
           value: "io.kubernetes.pod.namespace=test-namespace"
         - name: CARBON_SERVER_URL
           value: "http://metadata-service:8008"
+        - name: CHECK_INTERVAL_SECONDS
+          value: "30"
+        - name: SIM_HOURS_PER_CHECK
+          value: "1"
         - name: SCHEDULER_TIME
           valueFrom:
             configMapKeyRef:
