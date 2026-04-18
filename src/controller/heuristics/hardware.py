@@ -29,7 +29,7 @@ HW_TABLE: Dict[str, HardwareSpec] = {
         available_cores=8192,
         tdp_watts=225.0,
         physical_cores=64,
-        clock_speed_ghz=0.0,  # TODO(D-04): collect real clock speed — will be updated by Plan 01-03
+        clock_speed_ghz=2.47,
     ),
     "NE": HardwareSpec(
         name="AMD EPYC 24 Core",
@@ -37,7 +37,7 @@ HW_TABLE: Dict[str, HardwareSpec] = {
         available_cores=1152,
         tdp_watts=200.0,
         physical_cores=24,
-        clock_speed_ghz=0.0,  # TODO(D-04): collect real clock speed — will be updated by Plan 01-03
+        clock_speed_ghz=4.15,
     ),
     "TEN": HardwareSpec(
         name="Intel(R) Xeon(R) Silver 4215R CPU @ 3.20GHz",
@@ -45,7 +45,7 @@ HW_TABLE: Dict[str, HardwareSpec] = {
         available_cores=128,
         tdp_watts=130.0,
         physical_cores=8,
-        clock_speed_ghz=3.20,
+        clock_speed_ghz=4.00,
     ),
 }
 

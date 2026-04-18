@@ -16,7 +16,7 @@ def test_hw_table_has_three_regions():
 def test_get_hardware_ten():
     hw = get_hardware("TEN")
     assert hw.power_per_core == 16.25
-    assert hw.clock_speed_ghz == 3.20
+    assert hw.clock_speed_ghz == 4.00
     assert hw.tdp_watts == 130.0
     assert hw.physical_cores == 8
     assert hw.available_cores == 128
@@ -28,12 +28,19 @@ def test_get_hardware_cent():
     assert hw.available_cores == 8192
     assert hw.tdp_watts == 225.0
     assert hw.physical_cores == 64
+    assert hw.clock_speed_ghz == 2.47
 
 
 def test_get_hardware_ne():
     hw = get_hardware("NE")
     assert hw.power_per_core == 8.3
     assert hw.available_cores == 1152
+    assert hw.clock_speed_ghz == 4.15
+
+
+def test_all_regions_have_clock_speed():
+    for region in HW_TABLE:
+        assert get_hardware(region).clock_speed_ghz > 0, f"{region} has zero clock speed"
 
 
 def test_get_hardware_unknown_raises():
@@ -61,6 +68,7 @@ if __name__ == "__main__":
         test_get_hardware_ne,
         test_get_hardware_unknown_raises,
         test_hardware_spec_frozen,
+        test_all_regions_have_clock_speed,
     ]
     for test in tests:
         try:
