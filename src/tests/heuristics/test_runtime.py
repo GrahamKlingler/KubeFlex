@@ -109,10 +109,10 @@ def test_with_real_hw_table():
     result = estimate_remaining_hours(600, 0.0, HW_TABLE["TEN"], HW_TABLE["TEN"])
     assert result == 10.0, f"Expected 10.0, got {result}"
 
-    # CENT -> NE: both clock_speed_ghz=0.0, falls back to power_per_core
-    # scaling = 3.5 / 8.3 = 0.42168..., result = 10.0 * 0.42168... = 4.2168...
+    # CENT -> NE: both have real clock speeds, uses clock speed ratio
+    # scaling = 2.47 / 4.15 = 0.5952..., result = 10.0 * 0.5952... = 5.952...
     result = estimate_remaining_hours(600, 0.0, HW_TABLE["CENT"], HW_TABLE["NE"])
-    expected = 10.0 * (3.5 / 8.3)
+    expected = 10.0 * (HW_TABLE["CENT"].clock_speed_ghz / HW_TABLE["NE"].clock_speed_ghz)
     assert abs(result - expected) < 0.01, f"Expected ~{expected:.4f}, got {result}"
 
 
