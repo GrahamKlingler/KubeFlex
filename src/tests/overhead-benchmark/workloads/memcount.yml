@@ -1,0 +1,68 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: memcount-pod
+  namespace: test-namespace
+  labels:
+    name: memcount-pod
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    kubernetes.io/hostname: kind-worker
+  containers:
+  - name: test-container
+    image: salamander1223/testpod:latest
+    imagePullPolicy: IfNotPresent
+    command: ["/usr/bin/tini", "--"]
+    args:
+    - /bin/bash
+    - -c
+    - |
+      python3 -c "
+      import time, sys
+      SIZE_MB = 256
+      buf = bytearray(SIZE_MB * 1024 * 1024)
+      counter = 0
+      while True:
+          buf[counter % len(buf)] = counter % 256
+          counter += 1
+          if counter % 1_000_000 == 0:
+              print(f'[memcount] counter={counter}', flush=True)
+          time.sleep(0.0001)
+      "
+    securityContext:
+      privileged: true
+      capabilities:
+        add:
+        - SYS_PTRACE
+        - SYS_RESOURCE
+        - NET_ADMIN
+        - SYS_ADMIN
+        - SYS_TIME
+        - CHECKPOINT_RESTORE
+        - SYS_CHROOT
+        - SETPCAP
+        - SETGID
+        - SETUID
+      seccompProfile:
+        type: Unconfined
+      allowPrivilegeEscalation: true
+    resources:
+      requests:
+        memory: "384Mi"
+        cpu: "100m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+    volumeMounts:
+    - name: checkpoint-volume
+      mountPath: /tmp/checkpoints
+    - name: script-data
+      mountPath: /script-data
+  volumes:
+  - name: checkpoint-volume
+    hostPath:
+      path: /tmp/checkpoints
+      type: Directory
+  - name: script-data
+    emptyDir: {}
