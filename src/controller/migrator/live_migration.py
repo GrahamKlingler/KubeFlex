@@ -1442,15 +1442,35 @@ class CriuMigrationTracker:
             # Step 6: Perform CRIU dump on source container
             self._update_step("performing_criu_dump", "checkpointing")
             logger.info("[MIGRATION] Performing CRIU dump on source container...")
-            checkpoint_dir = self.perform_criu_dump(self.source_node, self.source_pod,self.source_container_id)
+            _t0 = time.perf_counter()
+            checkpoint_dir = self.perform_criu_dump(self.source_node, self.source_pod, self.source_container_id)
+            _checkpoint_ms = (time.perf_counter() - _t0) * 1000
             if not checkpoint_dir:
                 raise Exception("Failed to create CRIU checkpoint")
-            
+            logger.info(json.dumps({
+                "event": "checkpoint_complete",
+                "duration_ms": round(_checkpoint_ms, 2),
+                "source_node": self.source_node,
+                "target_node": self.target_node,
+                "source_pod": self.source_pod,
+                "target_pod": self.target_pod_name,
+            }))
+
             # Step 7: Transfer checkpoint to target node
             self._update_step("transferring_checkpoint", "data_transfer")
             logger.info("[MIGRATION] Transferring checkpoint to target node...")
+            _t0 = time.perf_counter()
             if not self.transfer_checkpoint_to_target(checkpoint_dir):
                 raise Exception("Failed to transfer checkpoint to target")
+            _transfer_ms = (time.perf_counter() - _t0) * 1000
+            logger.info(json.dumps({
+                "event": "transfer_complete",
+                "duration_ms": round(_transfer_ms, 2),
+                "source_node": self.source_node,
+                "target_node": self.target_node,
+                "source_pod": self.source_pod,
+                "target_pod": self.target_pod_name,
+            }))
             
             # Step 8: Copy /script-data contents to target container
             self._update_step("copying_script_data", "data_transfer")
@@ -1461,8 +1481,18 @@ class CriuMigrationTracker:
             # Step 9: Execute CRIU restore in target pod
             self._update_step("executing_criu_restore", "restoration")
             logger.info("[MIGRATION] Executing CRIU restore in target pod...")
+            _t0 = time.perf_counter()
             if not self.execute_criu_restore_in_target(self.target_pod_name):
                 raise Exception("Failed to execute CRIU restore in target pod")
+            _restore_ms = (time.perf_counter() - _t0) * 1000
+            logger.info(json.dumps({
+                "event": "restore_complete",
+                "duration_ms": round(_restore_ms, 2),
+                "source_node": self.source_node,
+                "target_node": self.target_node,
+                "source_pod": self.source_pod,
+                "target_pod": self.target_pod_name,
+            }))
             
             # Step 10: Final verification
             self._update_step("final_verification", "completion")
