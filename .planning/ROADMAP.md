@@ -47,9 +47,9 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 02-01-PLAN.md — Instrument live_migration.py with timing and create workload YAML templates
-- [ ] 02-02-PLAN.md — Create benchmark harness for 54-migration matrix with CSV/JSON output
-- [ ] 02-03-PLAN.md — Create visualization script for overhead component breakdown (EVAL-07)
+- [x] 02-01-PLAN.md — Instrument live_migration.py with timing and create workload YAML templates
+- [x] 02-02-PLAN.md — Create benchmark harness for 54-migration matrix with CSV/JSON output
+- [x] 02-03-PLAN.md — Create visualization script for overhead component breakdown (EVAL-07)
 
 ### Phase 3: HeuristicPolicy in Simulation
 **Goal**: Policy 6 is fully implemented as a standalone module and runs correctly in expected-simulation mode, producing decisions visible in CSV output
