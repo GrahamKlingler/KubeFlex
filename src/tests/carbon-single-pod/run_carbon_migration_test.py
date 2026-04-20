@@ -32,6 +32,8 @@ from pathlib import Path
 # Add heuristics package to import path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "controller"))
 from heuristics.hardware import HW_TABLE, get_hardware
+from heuristics.policies import Policy1, Policy2, Policy3, Policy4, Policy5, lookup_intensity, get_min_region_at
+from heuristics.policy_heuristic import HeuristicPolicy
 
 
 # ── Configuration defaults ──────────────────────────────────────────
@@ -301,131 +303,41 @@ def build_intensity_lookup(forecast_data):
     return lookup
 
 
-def lookup_intensity(intensity_lookup, region, sim_timestamp):
-    """Look up intensity for a region at a given timestamp, with fuzzy matching."""
-    val = intensity_lookup.get((region, sim_timestamp))
-    if val is not None:
-        return val
-    # Fuzzy: find closest within 2 hours
-    best_val, best_diff = None, float("inf")
-    for (r, ts), v in intensity_lookup.items():
-        if r == region:
-            d = abs(ts - sim_timestamp)
-            if d < best_diff:
-                best_diff = d
-                best_val = v
-    return best_val if best_diff <= 7200 else None
-
-
 def get_all_regions(forecast_data):
     """Get list of all regions from forecast data."""
     return list(forecast_data.get("region_forecasts", {}).keys())
 
 
-
-def get_min_region_at(intensity_lookup, regions, sim_timestamp, hw=None):
-    """Find the region with minimum carbon at a given timestamp (for Policy 2/5).
-    When hw is provided, compares power_per_core * intensity instead of raw intensity."""
-    best_region, best_score = None, float("inf")
-    for region in regions:
-        val = lookup_intensity(intensity_lookup, region, sim_timestamp)
-        if val is None:
-            continue
-        score = val * hw[region].power_per_core if hw else val
-        if score < best_score:
-            best_score = score
-            best_region = region
-    return best_region, best_score
+def simulate_policy_decision(policy_obj, intensity_lookup, regions, current_region,
+                             sim_timestamp, expected_duration_hours=1, **kwargs):
+    """Thin dispatcher: call policy.decide() and return (should_migrate, target_region)."""
+    elapsed_hours = kwargs.pop("elapsed_hours", 0.0)
+    return policy_obj.decide(
+        intensity_lookup, regions, current_region,
+        sim_timestamp, expected_duration_hours,
+        elapsed_hours=elapsed_hours,
+        **kwargs,
+    )
 
 
-def simulate_policy_decision(policy, intensity_lookup, regions, current_region,
-                             sim_timestamp, expected_duration_hours, forecast_window=24,
-                             cost_multiplier=3.0, migration_seconds=7.0, use_hw=False):
-    """Simulate a policy's migration decision for one timestep.
+_POLICY_CACHE = {}
 
-    Returns (should_migrate: bool, target_region: str or None).
-    """
-    def calculate_carbon(carbon_intensity, hw_usage, core_usage=1, hours=1):
-        return carbon_intensity*hw_usage*hours*core_usage
 
-    hw_vals = HW_TABLE
-
-    if policy == 1:
-        # No migration after initial placement
-        return False, None
-
-    elif policy == 2:
-        # Migrate to the region with minimum intensity this hour
-        min_region, _ = get_min_region_at(intensity_lookup, regions, sim_timestamp,
-                                          hw_vals if use_hw else None)
-        if min_region and min_region != current_region:
-            return True, min_region
-        return False, None
-
-    elif policy == 3:
-        # Forecast-based: sum intensity over remaining expected_duration, pick lowest total
-        region_totals = {}
-        for region in regions:
-            total = 0.0
-            for h in range(expected_duration_hours):
-                ts = sim_timestamp + h * 3600
-                val = lookup_intensity(intensity_lookup, region, ts)
-                if val is not None:
-                    total += val
-            region_totals[region] = total
-        if not region_totals:
-            return False, None
-        optimal = min(region_totals, key=region_totals.get)
-        if optimal != current_region:
-            return True, optimal
-        return False, None
-
-    elif policy == 4:
-        # Forecast-aware adaptive with migration cost threshold
-        region_scores = {}
-        all_carbon = []
-        for region in regions:
-            score = 0.0
-            for h in range(forecast_window):
-                ts = sim_timestamp + h * 3600
-                val = lookup_intensity(intensity_lookup, region, ts)
-                if val is not None:
-                    hour_carbon = calculate_carbon(val, hw_vals[region].power_per_core) if use_hw else val
-                    score += hour_carbon
-                    all_carbon.append(hour_carbon)
-            region_scores[region] = score
-        if not region_scores:
-            return False, None
-
-        best_region = min(region_scores, key=region_scores.get)
-        best_score = region_scores[best_region]
-        current_score = region_scores.get(current_region, float("inf"))
-        benefit = current_score - best_score
-
-        # Migration cost
-        current_intensity = current_score / max(forecast_window, 1)
-        target_intensity = best_score / max(forecast_window, 1)
-        migration_carbon = (migration_seconds / 3600.0) * max(current_intensity, target_intensity)
-        threshold = migration_carbon * cost_multiplier
-
-        if benefit > threshold and best_region != current_region:
-            return True, best_region
-        return False, None
-
-    elif policy == 5:
-        # Always-best: migrate to best region for the NEXT hour
-        next_ts = sim_timestamp + 3600
-        hw = hw_vals if use_hw else None
-        min_region, min_score = get_min_region_at(intensity_lookup, regions, next_ts, hw)
-        current_next = lookup_intensity(intensity_lookup, current_region, next_ts)
-        if current_next is None:
-            return False, None
-        current_score = current_next * hw_vals[current_region].power_per_core if use_hw else current_next
-        if min_region and min_region != current_region and min_score < current_score:
-            return True, min_region
-        return False, None
-
-    return False, None
+def get_policy(args):
+    """Factory: instantiate the appropriate policy class from CLI args (cached)."""
+    key = args.policy
+    if key not in _POLICY_CACHE:
+        if args.policy == 6:
+            _POLICY_CACHE[key] = HeuristicPolicy(
+                app_size_mb=args.app_size_mb,
+                expected_total_minutes=args.expected_completion,
+                deadline_multiplier=args.deadline_multiplier,
+                include_network_power=args.include_network_power,
+            )
+        else:
+            cls = {1: Policy1, 2: Policy2, 3: Policy3, 4: Policy4, 5: Policy5}[args.policy]
+            _POLICY_CACHE[key] = cls()
+    return _POLICY_CACHE[key]
 
 
 def run_expected_simulation(args):
@@ -443,6 +355,10 @@ def run_expected_simulation(args):
     print("  Expected Simulation (no cluster required)")
     print("=" * 60)
     print(f"  Policy:              {args.policy}")
+    if args.policy == 6:
+        print(f"  App size (MB):       {args.app_size_mb}")
+        print(f"  Deadline multiplier: {args.deadline_multiplier}")
+        print(f"  Network power:       {'on' if args.include_network_power else 'off'}")
     print(f"  Using Hardware:      {args.use_hw}")
     print(f"  Scheduler start:     {args.scheduler_time}")
     print(f"  Expected completion: {args.expected_completion} min ({total_sim_hours} hours)")
@@ -506,6 +422,8 @@ def run_expected_simulation(args):
     print("--- Simulating hour by hour ---")
     print()
 
+    policy_obj = get_policy(args)
+
     for hour in range(total_sim_hours):
         sim_ts = current_sim_time + hour * 3600
         sim_dt = datetime.fromtimestamp(sim_ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
@@ -551,8 +469,9 @@ def run_expected_simulation(args):
             # Check if policy wants to migrate
             remaining_hours = max(1, total_sim_hours - hour)
             should_migrate, target_region = simulate_policy_decision(
-                args.policy, intensity_lookup, regions, current_region, sim_ts,
+                policy_obj, intensity_lookup, regions, current_region, sim_ts,
                 expected_duration_hours=remaining_hours,
+                elapsed_hours=float(hour),
                 forecast_window=24,
                 cost_multiplier=3.0,
                 migration_seconds=migration_seconds_real,
@@ -581,11 +500,29 @@ def run_expected_simulation(args):
                     "intensity_before": f"{old_intensity:.1f}" if old_intensity is not None else "N/A",
                     "intensity_after": f"{new_intensity:.1f}" if new_intensity is not None else "N/A",
                     "migration_duration_ms": int(migration_seconds_real * 1000),
+                    "event_type": "migrate",
+                    "reason": "",
                 })
 
                 migrating_cooldown = migration_hours - 1  # current hour counts as 1
                 current_region = target_region
                 status = f"  >>> MIGRATE to {target_region}"
+            elif args.policy == 6 and hasattr(policy_obj, 'last_skip_reason') and policy_obj.last_skip_reason == "deadline_gate":
+                migration_events.append({
+                    "event_num": migration_count,
+                    "timestamp": sim_dt.replace(" ", "T") + "Z",
+                    "sim_time": sim_ts,
+                    "pod_name": f"carbon-pod-{migration_count}" if migration_count > 0 else "carbon-pod",
+                    "source_node": f"node-{current_region}",
+                    "source_region": current_region,
+                    "target_node": "",
+                    "target_region": "",
+                    "intensity_before": f"{intensity:.1f}" if intensity is not None else "N/A",
+                    "intensity_after": "",
+                    "migration_duration_ms": 0,
+                    "event_type": "skipped",
+                    "reason": "deadline_gate",
+                })
 
         int_str = f"{intensity:.1f}" if intensity is not None else "N/A"
         unit = "gCO2" if args.use_hw else "gCO2/kWh"
@@ -618,13 +555,15 @@ def run_expected_simulation(args):
         w = csv.writer(f)
         w.writerow(["event_num", "timestamp", "sim_time", "pod_name",
                      "source_node", "source_region", "target_node", "target_region",
-                     "intensity_before", "intensity_after", "migration_duration_ms"])
+                     "intensity_before", "intensity_after", "migration_duration_ms",
+                     "event_type", "reason"])
         for evt in migration_events:
             w.writerow([evt["event_num"], evt["timestamp"], evt["sim_time"],
                         evt["pod_name"], evt["source_node"], evt["source_region"],
                         evt["target_node"], evt["target_region"],
                         evt["intensity_before"], evt["intensity_after"],
-                        evt["migration_duration_ms"]])
+                        evt["migration_duration_ms"],
+                        evt.get("event_type", "migrate"), evt.get("reason", "")])
 
     # results.csv
     results_csv = out_dir / "results.csv"
@@ -689,7 +628,7 @@ def main():
     parser.add_argument("--bodies", type=int, default=10000)
     parser.add_argument("--iters", type=int, default=5000)
     parser.add_argument("--checkpoint", type=int, default=None, help="Checkpoint interval (default: same as iters)")
-    parser.add_argument("--policy", type=int, choices=[1, 2, 3, 4, 5], default=4)
+    parser.add_argument("--policy", type=int, choices=[1, 2, 3, 4, 5, 6], default=4)
     parser.add_argument("--scheduler-time", type=int, default=1609459200, help="Unix timestamp for scheduler start")
     parser.add_argument("--expected-duration", type=int, default=360, help="Expected duration in minutes")
     parser.add_argument("--source-node", default="kind-worker")
@@ -713,6 +652,21 @@ def main():
                         help="Path to existing forecast_cache.json (skip metadata fetch)")
     parser.add_argument("--use-hw", action="store_true",
                         help="Toggle use of hardware data in migration decisions")
+
+    # Policy-6-only arguments (D-14):
+    parser.add_argument(
+        "--app-size-mb", type=float, default=64.0,
+        help="Estimated checkpoint image size in MB (Policy 6 only). Default 64 MB."
+    )
+    parser.add_argument(
+        "--deadline-multiplier", type=float, default=1.5,
+        help="Deadline as multiplier of --expected-completion (Policy 6 only). Default 1.5"
+    )
+    parser.add_argument(
+        "--no-network-power", dest="include_network_power", action="store_false",
+        help="Disable network power in migration carbon cost (Policy 6 ablation)"
+    )
+    parser.set_defaults(include_network_power=True)
 
     args = parser.parse_args()
 
@@ -775,7 +729,8 @@ def main():
     mig_writer = csv.writer(mig_f)
     mig_writer.writerow(["event_num", "timestamp", "sim_time", "pod_name",
                          "source_node", "source_region", "target_node", "target_region",
-                         "intensity_before", "intensity_after", "migration_duration_ms"])
+                         "intensity_before", "intensity_after", "migration_duration_ms",
+                         "event_type", "reason"])
 
     carbon_f = open(carbon_log_path, "w", newline="")
     carbon_writer = csv.writer(carbon_f)
@@ -925,7 +880,8 @@ def main():
                                      current_sim_time, active_pod,
                                      last_known_node, last_known_region,
                                      new_node, new_region,
-                                     old_str, new_str, mig_duration_ms])
+                                     old_str, new_str, mig_duration_ms,
+                                     "migrate", ""])
                 mig_f.flush()
 
                 last_known_pod = active_pod
