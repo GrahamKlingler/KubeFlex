@@ -42,7 +42,7 @@ def test_total_ms_equals_sum_of_phases(csv_path):
     with open(csv_path) as f:
         reader = csv.DictReader(f)
         for i, row in enumerate(reader):
-            if row["success"] != "true":
+            if row["success"] not in ("true", "success"):
                 continue
             # Skip rows with empty timing fields (partial failures)
             if not row["checkpoint_ms"] or not row["transfer_ms"] or not row["restore_ms"]:
@@ -101,7 +101,7 @@ def _write_sample_csv(path):
             "transfer_ms": "1234.56",
             "restore_ms": "789.01",
             "total_ms": "6844.94",
-            "success": "true",
+            "success": "success",
             "timestamp_utc": "2024-01-01T12:00:05+00:00",
         },
         {
@@ -115,7 +115,7 @@ def _write_sample_csv(path):
             "transfer_ms": "900.00",
             "restore_ms": "600.00",
             "total_ms": "4600.00",
-            "success": "true",
+            "success": "success",
             "timestamp_utc": "2024-01-01T12:01:00+00:00",
         },
         {

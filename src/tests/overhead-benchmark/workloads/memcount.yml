@@ -20,7 +20,7 @@ spec:
     - |
       python3 -c "
       import time, sys
-      SIZE_MB = 256
+      SIZE_MB = 64
       buf = bytearray(SIZE_MB * 1024 * 1024)
       counter = 0
       while True:
@@ -49,10 +49,10 @@ spec:
       allowPrivilegeEscalation: true
     resources:
       requests:
-        memory: "384Mi"
+        memory: "128Mi"
         cpu: "100m"
       limits:
-        memory: "512Mi"
+        memory: "256Mi"
         cpu: "500m"
     volumeMounts:
     - name: checkpoint-volume

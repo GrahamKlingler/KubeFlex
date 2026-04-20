@@ -108,12 +108,13 @@ def kubectl(*args, capture=True, timeout=60):
         return 1, "", "kubectl timed out"
 
 
-def get_migrate_pod_name(namespace):
-    """Dynamically look up the migration service pod name (robust to pod restarts)."""
+def get_migrate_pod_name():
+    """Dynamically look up the migration service pod name (robust to pod restarts).
+    The migration service always runs in the 'monitor' namespace."""
     rc, stdout, stderr = kubectl(
         "get", "pod",
-        "-n", namespace,
-        "-l", "app=python-migrate",
+        "-n", "monitor",
+        "-l", "name=python-migrate-service",
         "-o", "jsonpath={.items[0].metadata.name}",
         timeout=30,
     )
@@ -230,19 +231,20 @@ def deploy_workload(workload_key, source_region):
     return pod_name
 
 
-def extract_timing_from_logs(pod_name, namespace, since_time):
+def extract_timing_from_logs(pod_name, namespace, since_seconds=60):
     """
     Parse checkpoint/transfer/restore durations from migration service pod logs.
 
-    Uses --since-time with the ISO timestamp captured just before the migration
-    to avoid log pollution from previous runs (RESEARCH.md Pitfall 1).
+    Uses --since with a relative duration to avoid clock skew issues between
+    the local machine and KIND cluster nodes. Defaults to 60s lookback which
+    covers any single migration.
 
     Returns dict mapping event name to duration_ms. Warns if > 3 events found.
     """
     rc, stdout, stderr = kubectl(
         "logs", pod_name,
         "-n", namespace,
-        f"--since-time={since_time}",
+        f"--since={since_seconds}s",
         timeout=30,
     )
     if rc != 0:
@@ -293,19 +295,19 @@ def perform_single_migration(migration_service_url, pod_name, source_node, targe
         )
         resp.raise_for_status()
         resp_json = resp.json()
-        success = resp_json.get("success", False)
+        success = resp_json.get("status", "failed")
         return success, resp_json
     except requests.exceptions.Timeout:
         logger.error("[MIGRATION] Migration request timed out (300s)")
-        return False, {"error": "timeout"}
+        return "failed", {"error": "timeout"}
     except requests.exceptions.ConnectionError as e:
         logger.error(f"[MIGRATION] Connection error to migration service: {e}")
-        return False, {"error": str(e)}
+        return "failed", {"error": str(e)}
     except Exception as e:
         import traceback
         logger.error(f"[MIGRATION] Unexpected error: {e}")
         logger.error(f"[MIGRATION] Traceback: {traceback.format_exc()}")
-        return False, {"error": str(e)}
+        return "failed", {"error": str(e)}
 
 
 def write_csv_row(csv_path, row_dict):
@@ -411,7 +413,7 @@ def run_benchmark(args):
     logger.info("=" * 80)
 
     # Look up migration service pod name dynamically
-    migrate_pod = get_migrate_pod_name(args.namespace)
+    migrate_pod = get_migrate_pod_name()
     if not migrate_pod:
         logger.error("[BENCHMARK] Could not find migration service pod. "
                      "Ensure the migration service is deployed and "
@@ -458,10 +460,7 @@ def run_benchmark(args):
                     logger.info("[BENCHMARK] Waiting 5s for workload to initialize...")
                     time.sleep(5)
 
-                    # Step 5: Capture timestamp for log filtering (RESEARCH.md Pitfall 1)
-                    since_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-                    # Step 6: POST /live-migrate
+                    # Step 5: POST /live-migrate
                     source_node = REGION_TO_NODE[src_region]
                     target_node = REGION_TO_NODE[tgt_region]
                     logger.info(f"[MIGRATION] Posting /live-migrate: "
@@ -474,13 +473,13 @@ def run_benchmark(args):
                         tgt_region,
                         args.namespace,
                     )
-                    logger.info(f"[MIGRATION] Result: success={success}")
+                    logger.info(f"[MIGRATION] Result: status={success}")
 
                     # Step 7: Brief pause for log flush, then extract timing
                     timings = {}
-                    if success:
+                    if success == "success":
                         time.sleep(2)
-                        timings = extract_timing_from_logs(migrate_pod, args.namespace, since_time)
+                        timings = extract_timing_from_logs(migrate_pod, "monitor")
                         if len(timings) < 3:
                             logger.warning(f"[TIMING] Only {len(timings)}/3 timing events found in logs")
 

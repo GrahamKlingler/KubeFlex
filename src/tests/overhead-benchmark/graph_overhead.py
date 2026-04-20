@@ -46,7 +46,7 @@ def load_overhead_csv(csv_path):
     with open(csv_path) as f:
         reader = csv.DictReader(f)
         for r in reader:
-            if r.get("success", "").lower() != "true":
+            if r.get("success", "").lower() not in ("true", "success"):
                 continue
             rows.append({
                 "run_id":        r["run_id"],
@@ -313,7 +313,7 @@ def _make_sample_rows(run_dir):
                 "transfer_ms":   f"{transfer_ms:.2f}",
                 "restore_ms":    f"{restore_ms:.2f}",
                 "total_ms":      f"{total_ms:.2f}",
-                "success":       "true",
+                "success":       "success",
                 "timestamp_utc": "2026-01-01T00:00:00Z",
             })
             migration_num += 1
