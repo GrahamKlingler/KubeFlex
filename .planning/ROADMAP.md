@@ -61,7 +61,12 @@ Plans:
   3. Running `run_carbon_migration_test.py --expected --policy 6` completes without error and produces `carbon_log.csv` and `migration_events.csv`
   4. Periodic re-evaluation fires correctly across simulated hours (observable in migration_events output)
   5. Deadline gate demonstrably prevents migration when `time_left + mig_time > deadline` (verifiable by inspecting a simulation run near deadline)
-**Plans**: TBD
+**Plans:** 3 plans
+
+Plans:
+- [ ] 03-01-PLAN.md — Create overhead.py (calibrated estimation functions) and base.py (BasePolicy ABC)
+- [ ] 03-02-PLAN.md — Create Policy1-5 classes, HeuristicPolicy (Policy 6), and unit tests
+- [ ] 03-03-PLAN.md — Refactor simulation harness with policy dispatcher, CLI args, and extended CSV schema
 
 ### Phase 4: Evaluation Harness & Simulation Results
 **Goal**: A rigorous multi-policy evaluation framework exists and produces complete simulation results covering all policies, ablation variants, and sensitivity analyses on development-period data
@@ -95,6 +100,6 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 |-------|----------------|--------|-----------|
 | 1. Hardware Foundation & Data Split | 0/3 | Planning complete | - |
 | 2. Empirical Overhead Collection | 0/3 | Planning complete | - |
-| 3. HeuristicPolicy in Simulation | 0/? | Not started | - |
+| 3. HeuristicPolicy in Simulation | 0/3 | Planning complete | - |
 | 4. Evaluation Harness & Simulation Results | 0/? | Not started | - |
 | 5. Controller Integration & Cluster Validation | 0/? | Not started | - |
