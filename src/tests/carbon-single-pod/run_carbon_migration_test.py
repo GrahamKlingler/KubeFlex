@@ -333,6 +333,7 @@ def get_policy(args):
                 expected_total_minutes=args.expected_completion,
                 deadline_multiplier=args.deadline_multiplier,
                 include_network_power=args.include_network_power,
+                lookahead_hours=args.lookahead_hours,
             )
         else:
             cls = {1: Policy1, 2: Policy2, 3: Policy3, 4: Policy4, 5: Policy5}[args.policy]
@@ -665,6 +666,10 @@ def main():
     parser.add_argument(
         "--no-network-power", dest="include_network_power", action="store_false",
         help="Disable network power in migration carbon cost (Policy 6 ablation)"
+    )
+    parser.add_argument(
+        "--lookahead-hours", type=int, default=48,
+        help="Max forecast hours to sum in stay/migrate carbon loops (Policy 6 only). Default 48."
     )
     parser.set_defaults(include_network_power=True)
 
