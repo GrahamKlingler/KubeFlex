@@ -53,6 +53,7 @@ class HeuristicPolicy(BasePolicy):
         deadline_multiplier: float = 1.5,
         include_network_power: bool = True,
         network_power_watts: float = NETWORK_POWER_WATTS,
+        lookahead_hours: int = 48,
     ) -> None:
         """Initialize HeuristicPolicy.
 
@@ -72,12 +73,16 @@ class HeuristicPolicy(BasePolicy):
             network_power_watts: Network switch/NIC power in watts for the
                 transfer carbon calculation (D-09). Defaults to NETWORK_POWER_WATTS
                 (15.0 W).
+            lookahead_hours: Maximum hours to sum in stay/migrate carbon loops.
+                Caps O(n) inner loop length to prevent quadratic blowup on long
+                jobs. Default 48.
         """
         self.app_size_mb = app_size_mb
         self.expected_total_minutes = expected_total_minutes
         self.deadline_multiplier = deadline_multiplier
         self.include_network_power = include_network_power
         self.network_power_watts = network_power_watts
+        self.lookahead_hours = lookahead_hours
         self.last_skip_reason: Optional[str] = None
 
     def decide(
@@ -115,7 +120,7 @@ class HeuristicPolicy(BasePolicy):
 
         # Step 2: hardware lookup
         src_hw = get_hardware(current_region)
-        hw = {r: get_hardware(r) for r in regions}
+        hw = {r: get_hardware(r) for r in set(regions) | {current_region}}
 
         # Step 3: compute per-destination overhead (hours)
         ckpt_oh_s = ckpt_overhead(self.app_size_mb, src_hw)
@@ -140,8 +145,9 @@ class HeuristicPolicy(BasePolicy):
         deadline_remaining_h = max(0.0, deadline_hours - elapsed_hours)
 
         # Step 6: stay_carbon -- weighted by hardware power_per_core (HEUR-05)
+        # capped to self.lookahead_hours to prevent O(n) blowup on long jobs
         stay_carbon = 0.0
-        for h in range(time_left_int):
+        for h in range(min(time_left_int, self.lookahead_hours)):
             ts = sim_timestamp + h * 3600
             val = lookup_intensity(intensity_lookup, current_region, ts)
             if val is not None:
@@ -184,9 +190,10 @@ class HeuristicPolicy(BasePolicy):
                 )
 
             # Destination running carbon over remaining time (offset by migration duration)
+            # capped to self.lookahead_hours (same cap as stay_carbon for consistency)
             dest_run_carbon = 0.0
             offset_s = int(mig_time_h * 3600)
-            for h in range(time_left_int):
+            for h in range(min(time_left_int, self.lookahead_hours)):
                 ts = sim_timestamp + offset_s + h * 3600
                 val = lookup_intensity(intensity_lookup, dest, ts)
                 if val is not None:
