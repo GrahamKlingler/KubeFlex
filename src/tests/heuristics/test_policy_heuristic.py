@@ -238,16 +238,20 @@ def test_overhead_cost_off_zeros_migration_carbon():
     """overhead_cost=off -> migration_carbon = 0 (HEUR-10, D-09).
 
     With migration treated as free, any destination cheaper than the current region should
-    cause a migration. Fixture: NE=200, TEN=199, CENT=199 (close margins). With overhead_cost=True
-    the migration overhead may outweigh the tiny per-hour savings; with overhead_cost=False it
-    cannot, so the two outcomes differ.
+    cause a migration. Fixture: NE=200, TEN=198, CENT=199 (close margins) with hw_weighting
+    disabled so the raw 1-unit margin drives the decision, and a large app_size_mb=16000 so
+    the migration overhead is non-trivial. With overhead_cost=True the migration overhead
+    outweighs the tiny per-hour savings; with overhead_cost=False it does not, so the two
+    outcomes differ.
     """
-    intensity = make_uniform_intensity(ne_val=200.0, ten_val=199.0, cent_val=199.0)
+    intensity = make_uniform_intensity(ne_val=200.0, ten_val=198.0, cent_val=199.0)
     p_with_overhead = HeuristicPolicy(
-        app_size_mb=64.0, expected_total_minutes=2880, overhead_cost=True
+        app_size_mb=16000.0, expected_total_minutes=2880,
+        overhead_cost=True, hw_weighting=False,
     )
     p_without_overhead = HeuristicPolicy(
-        app_size_mb=64.0, expected_total_minutes=2880, overhead_cost=False
+        app_size_mb=16000.0, expected_total_minutes=2880,
+        overhead_cost=False, hw_weighting=False,
     )
     result_with = p_with_overhead.decide(
         intensity, REGIONS, "CENT", BASE_TS, remaining_hours=48, elapsed_hours=0.0
