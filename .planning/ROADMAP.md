@@ -64,9 +64,9 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 03-01-PLAN.md — Create overhead.py (calibrated estimation functions) and base.py (BasePolicy ABC)
-- [ ] 03-02-PLAN.md — Create Policy1-5 classes, HeuristicPolicy (Policy 6), and unit tests
-- [ ] 03-03-PLAN.md — Refactor simulation harness with policy dispatcher, CLI args, and extended CSV schema
+- [x] 03-01-PLAN.md — Create overhead.py (calibrated estimation functions) and base.py (BasePolicy ABC)
+- [x] 03-02-PLAN.md — Create Policy1-5 classes, HeuristicPolicy (Policy 6), and unit tests
+- [x] 03-03-PLAN.md — Refactor simulation harness with policy dispatcher, CLI args, and extended CSV schema
 
 ### Phase 4: Evaluation Harness & Simulation Results
 **Goal**: A rigorous multi-policy evaluation framework exists and produces complete simulation results covering all policies, ablation variants, and sensitivity analyses on development-period data
@@ -79,7 +79,14 @@ Plans:
   4. Forecast horizon sensitivity analysis covers H from 1h to 48h and shows how savings vary with horizon
   5. Noisy-forecast evaluation at multiple sigma levels is included in results
   6. All simulation results use only train (2020) and validation (2021) data — 2022 test data remains untouched
-**Plans**: TBD
+**Plans:** 5 plans
+
+Plans:
+- [ ] 04-00-PLAN.md — Wave 0 test scaffolding: pre-refactor baseline snapshot + RED tests for ablation toggles + RED tests for evaluate_policies
+- [ ] 04-01-PLAN.md — HEUR-10 ablation toggles in policy_heuristic.py + 3 new --no-X CLI flags
+- [ ] 04-02-PLAN.md — Refactor run_expected_simulation() into pure simulate_one_run(intensity_lookup, cfg) -> dict in _simulation_core.py
+- [ ] 04-03-PLAN.md — evaluate_policies.py orchestrator with multiprocessing.Pool + tqdm + unified CSV writer (D-19)
+- [ ] 04-04-PLAN.md — evaluation_plots.py: comparison boxplot + 8-cell ablation heatmap + horizon line plot (INFR-05)
 
 ### Phase 5: Controller Integration & Cluster Validation
 **Goal**: Policy 6 runs in the live KubeFlex controller on the KIND cluster and cluster results validate or challenge simulation findings
@@ -101,5 +108,5 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | 1. Hardware Foundation & Data Split | 0/3 | Planning complete | - |
 | 2. Empirical Overhead Collection | 0/3 | Planning complete | - |
 | 3. HeuristicPolicy in Simulation | 0/3 | Planning complete | - |
-| 4. Evaluation Harness & Simulation Results | 0/? | Not started | - |
+| 4. Evaluation Harness & Simulation Results | 0/5 | Planning complete | - |
 | 5. Controller Integration & Cluster Validation | 0/? | Not started | - |
