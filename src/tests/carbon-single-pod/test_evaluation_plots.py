@@ -38,19 +38,25 @@ def test_constants_match_research_md():
 
 
 def test_no_impl_imports():
-    """Test 7: File has no imports from evaluate_policies, _simulation_core, etc."""
+    """Test 7: File has no imports from evaluate_policies, _simulation_core, etc.
+
+    Only checks actual import statements (lines starting with 'import' or 'from'
+    after stripping whitespace) to avoid false positives from docstring mentions.
+    """
     src = Path(__file__).parent / "evaluation_plots.py"
     if not src.exists():
         raise AssertionError("evaluation_plots.py does not exist yet")
     with open(src) as f:
         lines = f.readlines()
     for line in lines:
-        if line.strip().startswith("#"):
+        stripped = line.strip()
+        # Only check lines that are actual Python import statements
+        if not (stripped.startswith("import ") or stripped.startswith("from ")):
             continue
         for forbidden in ("evaluate_policies", "_simulation_core", "heuristics", "controller"):
-            if f"from {forbidden}" in line or f"import {forbidden}" in line:
+            if f"from {forbidden}" in stripped or f"import {forbidden}" in stripped:
                 raise AssertionError(
-                    f"Forbidden import from '{forbidden}' found in: {line.strip()}")
+                    f"Forbidden import from '{forbidden}' found: {stripped}")
 
 
 def test_dpi_bbox_in_source():
