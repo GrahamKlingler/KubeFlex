@@ -54,6 +54,9 @@ class HeuristicPolicy(BasePolicy):
         include_network_power: bool = True,
         network_power_watts: float = NETWORK_POWER_WATTS,
         lookahead_hours: int = 48,
+        hw_weighting: bool = True,
+        overhead_cost: bool = True,
+        deadline_gate: bool = True,
     ) -> None:
         """Initialize HeuristicPolicy.
 
@@ -76,6 +79,18 @@ class HeuristicPolicy(BasePolicy):
             lookahead_hours: Maximum hours to sum in stay/migrate carbon loops.
                 Caps O(n) inner loop length to prevent quadratic blowup on long
                 jobs. Default 48.
+            hw_weighting: If True, weight stay/migrate carbon sums by
+                hw[r].power_per_core (HEUR-05 default behavior). If False,
+                sums use raw forecast intensity per HEUR-10 / D-09 ablation
+                semantics. Default True.
+            overhead_cost: If True, account for checkpoint + transfer +
+                restore carbon in migration_carbon (HEUR-02/03/04 default
+                behavior). If False, migration_carbon = 0 per HEUR-10 / D-09
+                ablation. Default True.
+            deadline_gate: If True, block migration when time_left + mig_time
+                exceeds deadline_remaining (HEUR-08 default behavior). If
+                False, skip the deadline check entirely per HEUR-10 / D-09
+                ablation. Default True.
         """
         self.app_size_mb = app_size_mb
         self.expected_total_minutes = expected_total_minutes
@@ -83,6 +98,9 @@ class HeuristicPolicy(BasePolicy):
         self.include_network_power = include_network_power
         self.network_power_watts = network_power_watts
         self.lookahead_hours = lookahead_hours
+        self.hw_weighting = hw_weighting
+        self.overhead_cost = overhead_cost
+        self.deadline_gate = deadline_gate
         self.last_skip_reason: Optional[str] = None
 
     def decide(
@@ -145,13 +163,16 @@ class HeuristicPolicy(BasePolicy):
         deadline_remaining_h = max(0.0, deadline_hours - elapsed_hours)
 
         # Step 6: stay_carbon -- weighted by hardware power_per_core (HEUR-05)
-        # capped to self.lookahead_hours to prevent O(n) blowup on long jobs
+        # capped to self.lookahead_hours to prevent O(n) blowup on long jobs.
+        # hw_weighting toggle (HEUR-10, D-09): when False, drop the
+        # power_per_core multiplier and sum raw forecast intensity.
         stay_carbon = 0.0
         for h in range(min(time_left_int, self.lookahead_hours)):
             ts = sim_timestamp + h * 3600
             val = lookup_intensity(intensity_lookup, current_region, ts)
             if val is not None:
-                stay_carbon += hw[current_region].power_per_core * val
+                weight = hw[current_region].power_per_core if self.hw_weighting else 1.0
+                stay_carbon += weight * val
 
         # Step 7: initialize best as stay
         decision_region = current_region
@@ -167,8 +188,9 @@ class HeuristicPolicy(BasePolicy):
 
             mig_time_h = overhead_h[dest]
 
-            # Deadline gate (HEUR-08, D-17)
-            if time_left_h + mig_time_h > deadline_remaining_h:
+            # Deadline gate (HEUR-08, D-17). deadline_gate toggle (HEUR-10,
+            # D-09): when False, skip the deadline check entirely.
+            if self.deadline_gate and time_left_h + mig_time_h > deadline_remaining_h:
                 self.last_skip_reason = "deadline_gate"
                 continue
 
@@ -177,27 +199,35 @@ class HeuristicPolicy(BasePolicy):
             send_oh_h = send_overhead(src_hw, hw[dest], self.app_size_mb) / 3600.0
             rest_oh_h = restore_overhead(self.app_size_mb, hw[dest]) / 3600.0
 
-            migration_carbon = (
-                ckpt_oh_h * src_hw.power_per_core * src_intensity_now
-                + rest_oh_h * hw[dest].power_per_core * dst_intensity_now
-            )
-            if self.include_network_power:
-                migration_carbon += (
-                    send_oh_h
-                    * self.network_power_watts
-                    * (src_intensity_now + dst_intensity_now)
-                    / 2.0
+            # overhead_cost toggle (HEUR-10, D-09): when False, zero out the
+            # migration carbon entirely; network_power becomes irrelevant.
+            if self.overhead_cost:
+                migration_carbon = (
+                    ckpt_oh_h * src_hw.power_per_core * src_intensity_now
+                    + rest_oh_h * hw[dest].power_per_core * dst_intensity_now
                 )
+                if self.include_network_power:
+                    migration_carbon += (
+                        send_oh_h
+                        * self.network_power_watts
+                        * (src_intensity_now + dst_intensity_now)
+                        / 2.0
+                    )
+            else:
+                migration_carbon = 0.0
+                # network_power becomes irrelevant when overhead_cost is off (D-09)
 
             # Destination running carbon over remaining time (offset by migration duration)
-            # capped to self.lookahead_hours (same cap as stay_carbon for consistency)
+            # capped to self.lookahead_hours (same cap as stay_carbon for consistency).
+            # hw_weighting toggle (HEUR-10, D-09): mirror the stay-loop semantics.
             dest_run_carbon = 0.0
             offset_s = int(mig_time_h * 3600)
             for h in range(min(time_left_int, self.lookahead_hours)):
                 ts = sim_timestamp + offset_s + h * 3600
                 val = lookup_intensity(intensity_lookup, dest, ts)
                 if val is not None:
-                    dest_run_carbon += hw[dest].power_per_core * val
+                    dest_weight = hw[dest].power_per_core if self.hw_weighting else 1.0
+                    dest_run_carbon += dest_weight * val
 
             total_carbon = migration_carbon + dest_run_carbon
 
