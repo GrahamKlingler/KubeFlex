@@ -334,6 +334,9 @@ def get_policy(args):
                 deadline_multiplier=args.deadline_multiplier,
                 include_network_power=args.include_network_power,
                 lookahead_hours=args.lookahead_hours,
+                hw_weighting=args.hw_weighting,
+                overhead_cost=args.overhead_cost,
+                deadline_gate=args.deadline_gate,
             )
         else:
             cls = {1: Policy1, 2: Policy2, 3: Policy3, 4: Policy4, 5: Policy5}[args.policy]
@@ -360,6 +363,9 @@ def run_expected_simulation(args):
         print(f"  App size (MB):       {args.app_size_mb}")
         print(f"  Deadline multiplier: {args.deadline_multiplier}")
         print(f"  Network power:       {'on' if args.include_network_power else 'off'}")
+        print(f"  HW weighting:        {'on' if args.hw_weighting else 'off'}")
+        print(f"  Overhead cost:       {'on' if args.overhead_cost else 'off'}")
+        print(f"  Deadline gate:       {'on' if args.deadline_gate else 'off'}")
     print(f"  Using Hardware:      {args.use_hw}")
     print(f"  Scheduler start:     {args.scheduler_time}")
     print(f"  Expected completion: {args.expected_completion} min ({total_sim_hours} hours)")
@@ -668,10 +674,27 @@ def main():
         help="Disable network power in migration carbon cost (Policy 6 ablation)"
     )
     parser.add_argument(
+        "--no-hw-weighting", dest="hw_weighting", action="store_false",
+        help="Disable hardware power_per_core weighting in stay/migrate carbon sums (HEUR-10, D-09)"
+    )
+    parser.add_argument(
+        "--no-overhead-cost", dest="overhead_cost", action="store_false",
+        help="Zero out migration overhead carbon (HEUR-10, D-09)"
+    )
+    parser.add_argument(
+        "--no-deadline-gate", dest="deadline_gate", action="store_false",
+        help="Skip deadline-remaining check; consider migration regardless of deadline (HEUR-10, D-09)"
+    )
+    parser.add_argument(
         "--lookahead-hours", type=int, default=48,
         help="Max forecast hours to sum in stay/migrate carbon loops (Policy 6 only). Default 48."
     )
-    parser.set_defaults(include_network_power=True)
+    parser.set_defaults(
+        include_network_power=True,
+        hw_weighting=True,
+        overhead_cost=True,
+        deadline_gate=True,
+    )
 
     args = parser.parse_args()
 
