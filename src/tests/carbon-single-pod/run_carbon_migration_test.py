@@ -35,6 +35,10 @@ from heuristics.hardware import HW_TABLE, get_hardware
 from heuristics.policies import Policy1, Policy2, Policy3, Policy4, Policy5, lookup_intensity, get_min_region_at
 from heuristics.policy_heuristic import HeuristicPolicy
 
+# Phase 4 refactor: pure simulation core lives in a sibling module (D-16, INFR-04)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _simulation_core import RunConfig, simulate_one_run, _ablation_id  # noqa: E402
+
 
 # ── Configuration defaults ──────────────────────────────────────────
 
@@ -410,6 +414,26 @@ def run_expected_simulation(args):
         print(f"  Using first region: {regions[0]}")
         args.source_region = regions[0]
 
+    # Phase 4: build a RunConfig from args so the pure simulation core can be called
+    # alongside the CLI loop for parity verification (D-16, INFR-04).
+    # Built AFTER region validation so cfg.source_region matches the (possibly corrected) region.
+    cfg = RunConfig(
+        start_ts=int(args.scheduler_time),
+        source_region=args.source_region,
+        policy_id=args.policy,
+        app_size_mb=getattr(args, "app_size_mb", 64.0),
+        expected_completion_min=int(args.expected_completion),
+        expected_migration_min=int(args.expected_migration),
+        deadline_multiplier=getattr(args, "deadline_multiplier", 1.5),
+        lookahead_hours=getattr(args, "lookahead_hours", 48),
+        hw_weighting=getattr(args, "hw_weighting", True),
+        overhead_cost=getattr(args, "overhead_cost", True),
+        deadline_gate=getattr(args, "deadline_gate", True),
+        include_network_power=getattr(args, "include_network_power", True),
+        use_hw=getattr(args, "use_hw", True),
+        sweep_kind="main",
+    )
+
     # ── Simulate migration decisions hour by hour ─────────────────
     current_region = args.source_region
     initial_region = args.source_region
@@ -537,6 +561,19 @@ def run_expected_simulation(args):
               f"intensity={int_str:>7s} {unit}  cumulative={total_carbon:.1f}{status}")
 
     print()
+
+    # Phase 4: parity check — pure function MUST match the wrapper's loop totals.
+    # Running simulate_one_run() here verifies the extracted core produces identical
+    # results before writing any files. If this fires, the snapshot diff will also fail.
+    _result = simulate_one_run(intensity_lookup, cfg)
+    assert _result["migration_count"] == migration_count, (
+        "_simulation_core parity break: pure migration_count={} "
+        "vs CLI loop migration_count={}".format(_result["migration_count"], migration_count)
+    )
+    assert abs(_result["total_carbon_gco2"] - round(total_carbon, 1)) < 0.5, (
+        "_simulation_core parity break: pure total={} "
+        "vs CLI loop total={:.1f}".format(_result["total_carbon_gco2"], total_carbon)
+    )
 
     # ── Compute derived metrics ───────────────────────────────────
     total_runtime_ms = total_sim_hours * 3600 * 1000

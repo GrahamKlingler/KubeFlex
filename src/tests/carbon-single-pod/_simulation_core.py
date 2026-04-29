@@ -154,7 +154,12 @@ def simulate_one_run(intensity_lookup, cfg):
     migration_hours = max(1, int(math.ceil(cfg.expected_migration_min / 60.0)))
     migration_seconds_real = cfg.expected_migration_min * 60.0
 
-    regions = list(HW_TABLE.keys())  # ["CENT", "NE", "TEN"] in HW_TABLE dict order
+    # Derive available regions from the intensity_lookup keys so the pure function
+    # sees the exact same region set as the CLI wrapper (which calls
+    # get_all_regions(forecast_data)). Using HW_TABLE.keys() would add regions
+    # absent from the forecast, causing the heuristic to treat them as 0-carbon
+    # destinations and producing different migration decisions.
+    regions = sorted(set(r for r, _ts in intensity_lookup.keys()))
 
     # State
     current_region = cfg.source_region
