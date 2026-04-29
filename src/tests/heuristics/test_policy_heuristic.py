@@ -180,6 +180,146 @@ def test_re_evaluation_across_hours():
         )
 
 
+# ── HEUR-10 / HEUR-11 ablation toggle tests (RED until Plan 01 ships) ──
+
+def test_all_toggles_on_matches_baseline_phase3_behavior():
+    """All 3 ablation toggles default to True -> bit-for-bit identical to current Policy 6 (HEUR-10, D-08).
+
+    Verifies the safety invariant from D-08: introducing the hw_weighting/overhead_cost/deadline_gate
+    toggles must NOT change behavior when all three default to True. Plan 01 will go GREEN
+    by adding the kwargs with default=True and gating the affected lines in decide().
+    """
+    intensity = make_uniform_intensity(ne_val=400.0, ten_val=200.0, cent_val=300.0)
+    p_default = HeuristicPolicy(app_size_mb=64.0, expected_total_minutes=2880)
+    p_explicit = HeuristicPolicy(
+        app_size_mb=64.0,
+        expected_total_minutes=2880,
+        hw_weighting=True,
+        overhead_cost=True,
+        deadline_gate=True,
+    )
+    for h in range(48):
+        ts = BASE_TS + h * 3600
+        old = p_default.decide(intensity, REGIONS, "NE", ts, remaining_hours=48 - h, elapsed_hours=float(h))
+        new = p_explicit.decide(intensity, REGIONS, "NE", ts, remaining_hours=48 - h, elapsed_hours=float(h))
+        assert old == new, f"Hour {h}: default ({old}) != explicit-True ({new})"
+
+
+def test_hw_weighting_off_drops_power_per_core():
+    """hw_weighting=off -> stay/migrate carbon loops sum raw forecast intensity (HEUR-10, D-09).
+
+    Hardware-weighted vs raw rankings differ for fixture (NE=400, TEN=200, CENT=300) with HW
+    power_per_core (NE=8.3, TEN=16.25, CENT=3.5):
+      - hw-weighted scores: NE=3320, TEN=3250, CENT=1050  -> CENT cheapest
+      - raw scores:         NE=400,  TEN=200,  CENT=300   -> TEN cheapest
+    Starting in NE: hw_weighting=True -> migrate to CENT; hw_weighting=False -> migrate to TEN.
+    Asserts the chosen target_region differs between the two policies.
+    """
+    intensity = make_uniform_intensity(ne_val=400.0, ten_val=200.0, cent_val=300.0)
+    p_with_hw = HeuristicPolicy(
+        app_size_mb=64.0, expected_total_minutes=2880, hw_weighting=True
+    )
+    p_without_hw = HeuristicPolicy(
+        app_size_mb=64.0, expected_total_minutes=2880, hw_weighting=False
+    )
+    should_with, target_with = p_with_hw.decide(
+        intensity, REGIONS, "NE", BASE_TS, remaining_hours=48, elapsed_hours=0.0
+    )
+    should_without, target_without = p_without_hw.decide(
+        intensity, REGIONS, "NE", BASE_TS, remaining_hours=48, elapsed_hours=0.0
+    )
+    assert (should_with, target_with) != (should_without, target_without), (
+        f"hw_weighting toggle should change the migration decision for this fixture; "
+        f"with_hw=({should_with},{target_with}) without_hw=({should_without},{target_without})"
+    )
+
+
+def test_overhead_cost_off_zeros_migration_carbon():
+    """overhead_cost=off -> migration_carbon = 0 (HEUR-10, D-09).
+
+    With migration treated as free, any destination cheaper than the current region should
+    cause a migration. Fixture: NE=200, TEN=199, CENT=199 (close margins). With overhead_cost=True
+    the migration overhead may outweigh the tiny per-hour savings; with overhead_cost=False it
+    cannot, so the two outcomes differ.
+    """
+    intensity = make_uniform_intensity(ne_val=200.0, ten_val=199.0, cent_val=199.0)
+    p_with_overhead = HeuristicPolicy(
+        app_size_mb=64.0, expected_total_minutes=2880, overhead_cost=True
+    )
+    p_without_overhead = HeuristicPolicy(
+        app_size_mb=64.0, expected_total_minutes=2880, overhead_cost=False
+    )
+    result_with = p_with_overhead.decide(
+        intensity, REGIONS, "CENT", BASE_TS, remaining_hours=48, elapsed_hours=0.0
+    )
+    result_without = p_without_overhead.decide(
+        intensity, REGIONS, "CENT", BASE_TS, remaining_hours=48, elapsed_hours=0.0
+    )
+    assert result_with != result_without, (
+        f"overhead_cost toggle should change behavior on close-margin fixture; "
+        f"with_overhead={result_with} without_overhead={result_without}"
+    )
+
+
+def test_deadline_gate_off_skips_check():
+    """deadline_gate=off -> last_skip_reason is never set to 'deadline_gate' (HEUR-10, D-09).
+
+    Mirrors test_deadline_gate_blocks_near_completion fixture (expected_total_minutes=60,
+    deadline_multiplier=1.0, elapsed_hours=0.99) but disables the deadline gate. The decide()
+    call may still return (False, None) for other reasons, but it must NOT have set
+    last_skip_reason to 'deadline_gate'.
+    """
+    intensity = make_uniform_intensity(ne_val=400.0, ten_val=100.0, cent_val=50.0, hours=5)
+    p = HeuristicPolicy(
+        app_size_mb=64.0,
+        expected_total_minutes=60,
+        deadline_multiplier=1.0,
+        deadline_gate=False,
+    )
+    p.decide(intensity, REGIONS, "NE", BASE_TS, remaining_hours=1, elapsed_hours=0.99)
+    assert p.last_skip_reason != "deadline_gate", (
+        f"deadline_gate=False must skip the deadline check; "
+        f"last_skip_reason={p.last_skip_reason!r}"
+    )
+
+
+def test_lookahead_hours_changes_decision_horizon():
+    """lookahead_hours bound changes the cheap-destination decision (HEUR-11).
+
+    Construct a 200h intensity profile where:
+      - hours 0..3: NE cheap (100), TEN/CENT expensive (400)
+      - hours 4..199: NE/TEN expensive (400), CENT cheap (100)
+    Two policies with lookahead_hours=2 (only sees the early cheap-NE window) vs
+    lookahead_hours=48 (sees the long cheap-CENT window). Starting in TEN, the two
+    policies should reach different (should, target) outcomes.
+    """
+    intensity = {}
+    for h in range(200):
+        if h < 4:
+            values = {"NE": 100.0, "TEN": 400.0, "CENT": 400.0}
+        else:
+            values = {"NE": 400.0, "TEN": 400.0, "CENT": 100.0}
+        for r in REGIONS:
+            intensity[(r, BASE_TS + h * 3600)] = values[r]
+
+    p_short = HeuristicPolicy(
+        app_size_mb=64.0, expected_total_minutes=2880, lookahead_hours=2
+    )
+    p_long = HeuristicPolicy(
+        app_size_mb=64.0, expected_total_minutes=2880, lookahead_hours=48
+    )
+    short_result = p_short.decide(
+        intensity, REGIONS, "TEN", BASE_TS, remaining_hours=48, elapsed_hours=0.0
+    )
+    long_result = p_long.decide(
+        intensity, REGIONS, "TEN", BASE_TS, remaining_hours=48, elapsed_hours=0.0
+    )
+    assert short_result != long_result, (
+        f"lookahead_hours bound should change the migration decision; "
+        f"short(2h)={short_result} long(48h)={long_result}"
+    )
+
+
 # ── Runner ────────────────────────────────────────────────────────
 
 def main():
@@ -192,6 +332,11 @@ def main():
         test_deadline_gate_allows_early_migration,
         test_network_power_toggle,
         test_re_evaluation_across_hours,
+        test_all_toggles_on_matches_baseline_phase3_behavior,
+        test_hw_weighting_off_drops_power_per_core,
+        test_overhead_cost_off_zeros_migration_carbon,
+        test_deadline_gate_off_skips_check,
+        test_lookahead_hours_changes_decision_horizon,
     ]
     passed = 0
     failed = 0
