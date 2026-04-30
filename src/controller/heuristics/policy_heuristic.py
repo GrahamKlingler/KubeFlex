@@ -30,7 +30,6 @@ from heuristics.overhead import (
     ckpt_overhead,
     send_overhead,
     restore_overhead,
-    total_migration_time_h,
     NETWORK_POWER_WATTS,
 )
 from heuristics.runtime import estimate_remaining_hours
