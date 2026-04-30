@@ -302,9 +302,14 @@ def _init_worker(intensity_lookup: Dict[Tuple[str, int], float]) -> None:
 
 def simulate_one_run(cfg: RunConfig) -> Dict[str, Any]:
     """Worker entry point. Reads _LOOKUP set by _init_worker."""
-    assert _LOOKUP is not None, (
-        "Worker not initialized -- check Pool(initializer=_init_worker, initargs=...)"
-    )
+    # Use a real RuntimeError rather than `assert` so that running under
+    # `python -O` (which strips asserts) still produces an actionable error
+    # instead of an opaque AttributeError from lookup_intensity (WR-01).
+    if _LOOKUP is None:
+        raise RuntimeError(
+            "Worker not initialized -- Pool must be started with "
+            "initializer=_init_worker, initargs=(intensity_lookup,)."
+        )
     return _core_simulate_one_run(_LOOKUP, cfg)
 
 
