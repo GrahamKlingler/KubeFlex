@@ -240,6 +240,24 @@ def generate_sweep(args) -> Iterator[RunConfig]:
         if smoke:
             h_timestamps = h_timestamps[:1]
             regions = regions[:1]
+            # Smoke mode globally squashes expected_completion_min to 120 (2 h) for
+            # speed, but the horizon plot compares Policy 6 across lookahead_hours
+            # in {1..48}: with total_sim_hours=2, every cell collapses to
+            # min(time_left_int=2, lookahead_hours)==2 and the chart conveys nothing
+            # (CR-04). Force expected_completion_min long enough that lookahead_hours
+            # actually bounds the destination loop, and warn the user that the smoke
+            # override has been overridden for this sub-sweep.
+            horizon_completion_min = max(base_completion_min, max(HORIZON_VALUES) * 60)
+            common_h = dict(common, expected_completion_min=horizon_completion_min)
+            print(
+                "[SWEEP] WARNING: smoke mode horizon sub-sweep uses "
+                "expected_completion_min={} (overriding smoke default {}) so "
+                "lookahead_hours actually differentiates cells.".format(
+                    horizon_completion_min, smoke_completion_min,
+                )
+            )
+        else:
+            common_h = common
         # Policy 6 with all 7 horizons
         for ts in h_timestamps:
             for r in regions:
@@ -253,7 +271,7 @@ def generate_sweep(args) -> Iterator[RunConfig]:
                         overhead_cost=True,
                         deadline_gate=True,
                         sweep_kind="horizon",
-                        **common,
+                        **common_h,
                     )
                     check_split_access(cfg.start_ts)
                     yield cfg
@@ -268,7 +286,7 @@ def generate_sweep(args) -> Iterator[RunConfig]:
                             policy_id=p,
                             lookahead_hours=int(getattr(args, "lookahead_hours", 48)),
                             sweep_kind="horizon",
-                            **common,
+                            **common_h,
                         )
                         check_split_access(cfg.start_ts)
                         yield cfg
