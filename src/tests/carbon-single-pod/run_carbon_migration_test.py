@@ -324,28 +324,27 @@ def simulate_policy_decision(policy_obj, intensity_lookup, regions, current_regi
     )
 
 
-_POLICY_CACHE = {}
-
-
 def get_policy(args):
-    """Factory: instantiate the appropriate policy class from CLI args (cached)."""
-    key = args.policy
-    if key not in _POLICY_CACHE:
-        if args.policy == 6:
-            _POLICY_CACHE[key] = HeuristicPolicy(
-                app_size_mb=args.app_size_mb,
-                expected_total_minutes=args.expected_completion,
-                deadline_multiplier=args.deadline_multiplier,
-                include_network_power=args.include_network_power,
-                lookahead_hours=args.lookahead_hours,
-                hw_weighting=args.hw_weighting,
-                overhead_cost=args.overhead_cost,
-                deadline_gate=args.deadline_gate,
-            )
-        else:
-            cls = {1: Policy1, 2: Policy2, 3: Policy3, 4: Policy4, 5: Policy5}[args.policy]
-            _POLICY_CACHE[key] = cls()
-    return _POLICY_CACHE[key]
+    """Factory: instantiate the appropriate policy class from CLI args.
+
+    No caching: keying by args.policy alone made a second call with different
+    --app-size-mb / --deadline-multiplier silently reuse the first instance,
+    and the CLI is single-shot today so the cache only saves microseconds.
+    Mirrors _simulation_core._get_policy_for_config (RESEARCH.md Pitfall 1, WR-07).
+    """
+    if args.policy == 6:
+        return HeuristicPolicy(
+            app_size_mb=args.app_size_mb,
+            expected_total_minutes=args.expected_completion,
+            deadline_multiplier=args.deadline_multiplier,
+            include_network_power=args.include_network_power,
+            lookahead_hours=args.lookahead_hours,
+            hw_weighting=args.hw_weighting,
+            overhead_cost=args.overhead_cost,
+            deadline_gate=args.deadline_gate,
+        )
+    cls = {1: Policy1, 2: Policy2, 3: Policy3, 4: Policy4, 5: Policy5}[args.policy]
+    return cls()
 
 
 def run_expected_simulation(args):
