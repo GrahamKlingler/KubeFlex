@@ -19,11 +19,20 @@ from heuristics.hardware import HW_TABLE, get_hardware
 # Shared helper functions (originally in run_carbon_migration_test.py)
 # ---------------------------------------------------------------------------
 
-def lookup_intensity(intensity_lookup, region, sim_timestamp):
-    """Look up intensity for a region at a given timestamp, with fuzzy matching."""
+def lookup_intensity(intensity_lookup, region, sim_timestamp, strict=False):
+    """Look up intensity for a region at a given timestamp, with fuzzy matching.
+
+    With ``strict=False`` (default), falls back to the nearest timestamp within
+    a 2 h (7200 s) tolerance to tolerate minor forecast/data clock skew. With
+    ``strict=True``, returns ``None`` when no exact (region, sim_timestamp)
+    entry exists -- callers that need data-quality signal (gap detection) can
+    opt into this mode (WR-09).
+    """
     val = intensity_lookup.get((region, sim_timestamp))
     if val is not None:
         return val
+    if strict:
+        return None
     best_val, best_diff = None, float("inf")
     for (r, ts), v in intensity_lookup.items():
         if r == region:
