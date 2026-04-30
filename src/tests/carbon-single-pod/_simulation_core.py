@@ -246,7 +246,18 @@ def simulate_one_run(intensity_lookup, cfg):
     # End-of-year wrap detection (D-22, RESEARCH.md Pitfall 4).
     # If the final lookup timestamp falls in the val period but start was train,
     # set the side-channel flag (no print; orchestrator aggregates in metadata.json).
-    final_lookup_ts = cfg.start_ts + (total_sim_hours + cfg.lookahead_hours) * 3600
+    # Compute the actual furthest lookup based on policy_id so non-Policy-6 runs
+    # don't get spuriously flagged as "wrapped into val" because of the unused
+    # cfg.lookahead_hours default (WR-05).
+    if cfg.policy_id == 6:
+        extra_hours = cfg.lookahead_hours
+    elif cfg.policy_id in (3, 4):
+        extra_hours = 24  # forecast_window for forecast-based policies
+    elif cfg.policy_id == 5:
+        extra_hours = 1   # next-hour only
+    else:
+        extra_hours = 0   # Policy 1 doesn't look ahead; Policy 2 only looks at current hour
+    final_lookup_ts = cfg.start_ts + (total_sim_hours + extra_hours) * 3600
     try:
         final_split = check_split_access(final_lookup_ts)
         wrapped_into_val = (final_split == "val") and (split_at_start == "train")
