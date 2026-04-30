@@ -315,6 +315,21 @@ def simulate_one_run(cfg: RunConfig) -> Dict[str, Any]:
 
 # ── Output writers ───────────────────────────────────────────────────
 
+def _to_int_or_zero(v) -> int:
+    """Coerce row values that may be int / str / float / "" / None to int.
+
+    `str.isdigit()` rejects empty string, negative ints, and float-shaped strings
+    like "48.0" — using it directly in _sort_key (WR-10) made the deterministic
+    sort fragile to any future change that emits lookahead_hours as a float.
+    """
+    if v is None or v == "":
+        return 0
+    try:
+        return int(float(v))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _sort_key(row: Dict[str, Any]) -> Tuple:
     return (
         row.get("sweep_kind", ""),
@@ -322,8 +337,9 @@ def _sort_key(row: Dict[str, Any]) -> Tuple:
         row.get("source_region", ""),
         int(row.get("start_ts", 0)),
         row.get("ablation_id", "") or "",
-        # lookahead_hours can be int or "" (Plan 02 returns "" for non-Policy-6)
-        int(row.get("lookahead_hours", 0)) if str(row.get("lookahead_hours", "")).isdigit() else 0,
+        # lookahead_hours can be int or "" (Plan 02 returns "" for non-Policy-6).
+        # Use the defensive coerce so future float-shaped values still sort.
+        _to_int_or_zero(row.get("lookahead_hours")),
     )
 
 
