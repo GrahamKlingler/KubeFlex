@@ -227,8 +227,13 @@ def simulate_one_run(intensity_lookup, cfg):
                 migrating_cooldown = migration_hours - 1
                 current_region = target_region
 
-    # Derived metrics
-    total_runtime_ms = total_sim_hours * 3600 * 1000  # noqa: F841 (parity with CLI wrapper)
+    # Derived metrics. The CLI wrapper computes total_runtime_ms,
+    # migration_overhead_ms, migration_fraction, migration_carbon_est, and
+    # job_time_carbon for its own carbon_log.csv emission. None of these are
+    # part of the D-19 unified schema returned here, so we do not compute them
+    # in the pure core (WR-02). If the schema is ever extended to include them,
+    # add the derivations back here and surface them in the return dict so the
+    # two paths really do share the same fields.
     if baseline_carbon > 0:
         savings = baseline_carbon - total_carbon
         savings_pct = (savings / baseline_carbon) * 100.0
