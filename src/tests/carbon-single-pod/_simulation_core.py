@@ -41,6 +41,7 @@ from heuristics.policies import (  # noqa: E402
     Policy5,
     lookup_intensity,
 )
+from heuristics.overhead import NETWORK_POWER_WATTS  # noqa: E402
 from heuristics.policy_heuristic import HeuristicPolicy  # noqa: E402
 
 
@@ -64,6 +65,7 @@ class RunConfig:
     overhead_cost: bool = True              # HEUR-10 toggle
     deadline_gate: bool = True              # HEUR-10 toggle
     include_network_power: bool = True      # sub-toggle of overhead_cost
+    network_power_watts: float = NETWORK_POWER_WATTS  # ablation knob, forwarded to HeuristicPolicy
     use_hw: bool = True                     # P1..P5 hardware scaling
     sweep_kind: str = "main"                # 'main' | 'ablation' | 'horizon'
 
@@ -87,6 +89,7 @@ def _get_policy_for_config(cfg: RunConfig) -> BasePolicy:
             expected_total_minutes=cfg.expected_completion_min,
             deadline_multiplier=cfg.deadline_multiplier,
             include_network_power=cfg.include_network_power,
+            network_power_watts=cfg.network_power_watts,
             lookahead_hours=cfg.lookahead_hours,
             hw_weighting=cfg.hw_weighting,
             overhead_cost=cfg.overhead_cost,
