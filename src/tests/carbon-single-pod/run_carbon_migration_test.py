@@ -402,7 +402,12 @@ def run_expected_simulation(args):
         cleanup()
         sys.exit(1)
 
-    regions = get_all_regions(forecast_data)
+    # Sort regions deterministically so the CLI loop and the pure simulation core
+    # (which uses sorted(set(...)) over intensity_lookup keys) iterate destinations
+    # in identical order. Policies that pick the first-min on ties (Policy 4 via
+    # min(...key=...), Policy 6 via strict-less-than) would otherwise diverge by
+    # iteration order and trip the parity assertion at line 568 (CR-01, WR-06).
+    regions = sorted(get_all_regions(forecast_data))
     intensity_lookup = build_intensity_lookup(forecast_data)
     print(f"  Regions available: {', '.join(regions)}")
     print()
