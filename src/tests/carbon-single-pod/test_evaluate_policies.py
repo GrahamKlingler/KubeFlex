@@ -198,14 +198,48 @@ def test_2022_timestamp_hard_block():
     assert raised, f"Expected RuntimeError for 2022 timestamp {BASE_TS_2022}"
 
 
+def _write_fake_intensity_csv(path, rows):
+    """Write a minimal sample-data-style CSV with (datetime, timestamp, carbon_intensity_direct_avg)."""
+    import csv as _csv
+    with open(path, "w", newline="") as f:
+        w = _csv.writer(f)
+        w.writerow(["datetime", "timestamp", "carbon_intensity_direct_avg"])
+        for row in rows:
+            w.writerow(row)
+
+
 def test_intensity_lookup_filters_2022():
-    """build_intensity_lookup_from_csvs(include_years=(2020,2021)) must skip all 2022 entries."""
+    """build_intensity_lookup_from_csvs(include_years=(2020,2021)) must skip all 2022 entries.
+
+    Builds a synthetic 3-region fixture in a tmp dir so the test does not depend
+    on the real src/sample_data CSVs being present (WR-11). This both makes the
+    test runnable from a sparse checkout and asserts that the 999.0 sentinel
+    written for 2022 never makes it into the loaded lookup.
+    """
+    import tempfile
     from evaluate_policies import build_intensity_lookup_from_csvs  # noqa: WPS433
-    lookup = build_intensity_lookup_from_csvs(SAMPLE_DATA_DIR, include_years=(2020, 2021))
-    max_ts = max(ts for (_, ts) in lookup.keys())
-    assert max_ts < BASE_TS_2022, (
-        f"Lookup contains 2022 data: max_ts={max_ts} >= {BASE_TS_2022}"
-    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        fake_dir = Path(tmp) / "sample_data"
+        fake_dir.mkdir()
+        # Sentinel 999.0 marks 2022 rows that MUST be filtered. 200.0 is the
+        # canonical 2020 value; 250.0 is the canonical 2021 value.
+        for region in ("CENT", "NE", "TEN"):
+            _write_fake_intensity_csv(fake_dir / f"{region}.csv", [
+                ("2020-01-01 00:00:00", 1577836800.0, 200.0),
+                ("2021-06-15 12:00:00", 1623758400.0, 250.0),
+                ("2022-06-01 00:00:00", 1654041600.0, 999.0),  # must be filtered out
+            ])
+        lookup = build_intensity_lookup_from_csvs(fake_dir, include_years=(2020, 2021))
+        # Lookup must contain 2020+2021 entries but NOT 2022.
+        assert lookup, "Expected non-empty lookup from fixture"
+        max_ts = max(ts for (_, ts) in lookup.keys())
+        assert max_ts < BASE_TS_2022, (
+            f"Lookup contains 2022 data: max_ts={max_ts} >= {BASE_TS_2022}"
+        )
+        assert not any(v == 999.0 for v in lookup.values()), (
+            "2022 sentinel value 999.0 leaked into lookup despite include_years=(2020, 2021)"
+        )
 
 
 # ── Runner ────────────────────────────────────────────────────────
