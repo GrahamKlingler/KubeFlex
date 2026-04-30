@@ -161,6 +161,17 @@ def simulate_one_run(intensity_lookup, cfg):
     # destinations and producing different migration decisions.
     regions = sorted(set(r for r, _ts in intensity_lookup.keys()))
 
+    # Validate cfg.source_region is in the lookup; otherwise the simulation would
+    # silently produce zero-carbon nonsense (every lookup_intensity returns None
+    # via fuzzy fallback, total_carbon stays at 0, savings_pct=0). That is
+    # indistinguishable from a legitimate Policy-1 baseline result and would
+    # corrupt the unified results.csv (CR-03).
+    if cfg.source_region not in regions:
+        raise ValueError(
+            "[SIM] source_region={!r} not present in intensity_lookup; "
+            "available regions: {}".format(cfg.source_region, regions)
+        )
+
     # State
     current_region = cfg.source_region
     initial_region = cfg.source_region
