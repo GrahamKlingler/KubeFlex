@@ -78,21 +78,25 @@ def plot_savings_comparison(results_csv, out_path):
                 continue
             by_policy[int(row["policy"])].append(float(row["savings_pct"]))
 
-    if not any(by_policy[p] for p in range(1, 7)):
+    # Guard each bucket individually — matplotlib >= 3.8 raises ValueError on a
+    # fully empty box, which previously crashed the headline plot whenever a
+    # subset run contained main rows for only some policies (CR-02).
+    present = [p for p in range(1, 7) if by_policy[p]]
+    if not present:
         print("[PLOT] No main rows found — skipping comparison.png", file=sys.stderr)
         return
 
-    n_main = sum(len(by_policy[p]) for p in range(1, 7))
+    n_main = sum(len(by_policy[p]) for p in present)
 
     fig, ax = plt.subplots(figsize=(10, 6))
     box = ax.boxplot(
-        [by_policy[p] for p in range(1, 7)],
-        labels=[f"P{p}" for p in range(1, 7)],
+        [by_policy[p] for p in present],
+        labels=[f"P{p}" for p in present],
         patch_artist=True,
         showmeans=True, meanline=True,
         medianprops=dict(color="black", linewidth=1.5),
     )
-    for patch, p in zip(box["boxes"], range(1, 7)):
+    for patch, p in zip(box["boxes"], present):
         patch.set_facecolor(POLICY_COLORS[p])
         patch.set_alpha(0.7)
 
