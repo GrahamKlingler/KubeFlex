@@ -6,18 +6,17 @@ Covers:
   - _ablation_id format per D-11 (HW{1|0}_OH{1|0}_DL{1|0})
   - simulate_one_run returns D-19 schema dict
   - Policy 1 baseline: zero migrations, zero savings
-  - Ablation enumeration: exactly 8 cells per (timestamp, region) for sweep_kind=ablation
-  - Horizon enumeration: exactly 7 lookahead_hours values per (timestamp, region) for sweep_kind=horizon
+  - Ablation enumeration: exactly 8 cells per (timestamp, grid) for sweep_kind=ablation
+  - Horizon enumeration: exactly 7 lookahead_hours values per (timestamp, grid) for sweep_kind=horizon
   - Data discipline: 2022 timestamps hard-blocked (D-23, RESEARCH.md Pitfall 5)
   - intensity_lookup filters 2022 rows at CSV-load time (D-23 belt+suspenders)
 
 Mirrors src/tests/heuristics/test_policy_heuristic.py runner pattern (project convention,
 no pytest).
 
-Plan 03 has not yet shipped src/tests/carbon-single-pod/evaluate_policies.py, so every
-test below imports from it inside the test body — that way ModuleNotFoundError surfaces
-as a per-test ERROR (caught by the runner) rather than a top-level import failure that
-prevents the runner from executing.
+Quick task 260502-i16: fixtures updated from region keys (NE/TEN/CENT) to grid keys
+(ISNE/TVA/SWPP) to match the new grid-keyed expected-simulation path. The grids chosen
+have HW_TABLE entries, so simulate_one_run() can hardware-cost them without KeyError.
 """
 
 import sys
@@ -38,17 +37,25 @@ from heuristics.data_splits import check_split_access  # noqa: E402
 
 BASE_TS_2020 = 1577836800  # 2020-01-01 00:00 UTC (train period)
 BASE_TS_2022 = 1640995200  # 2022-01-01 00:00 UTC (test period — hard-blocked)
-SAMPLE_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "sample_data"
+
+# 260502-i16: grids picked from data/hardware/hw_avg.csv (must have HW_TABLE entries
+# so simulate_one_run() can compute hardware-weighted carbon without KeyError).
+FIXTURE_GRIDS = ("ISNE", "TVA", "SWPP")
+DEFAULT_SOURCE_GRID = "ISNE"
 
 
 def make_small_lookup(hours: int = 60):
-    """Build a tiny intensity lookup for smoke testing (3 regions, `hours` hourly entries)."""
+    """Build a tiny intensity lookup for smoke testing (3 grids, `hours` hourly entries).
+
+    Uses grid identifiers (ISNE/TVA/SWPP) per quick task 260502-i16. The values are
+    designed so the time-of-day pattern produces non-trivial migration decisions.
+    """
     lookup = {}
     for h in range(hours):
         ts = BASE_TS_2020 + h * 3600
-        lookup[("NE", ts)] = 200.0 + (h % 24) * 5.0
-        lookup[("TEN", ts)] = 300.0 - (h % 24) * 4.0
-        lookup[("CENT", ts)] = 250.0 + (h % 12) * 3.0
+        lookup[("ISNE", ts)] = 200.0 + (h % 24) * 5.0
+        lookup[("TVA", ts)] = 300.0 - (h % 24) * 4.0
+        lookup[("SWPP", ts)] = 250.0 + (h % 12) * 3.0
     return lookup
 
 
@@ -60,7 +67,7 @@ def make_default_run_config(**overrides):
     from evaluate_policies import RunConfig  # noqa: WPS433
     base = dict(
         start_ts=BASE_TS_2020,
-        source_region="NE",
+        source_grid=DEFAULT_SOURCE_GRID,
         policy_id=6,
     )
     base.update(overrides)
@@ -102,7 +109,7 @@ def test_simulate_one_run_returns_d19_schema():
     """simulate_one_run must return a dict with every D-19 schema key."""
     from evaluate_policies import simulate_one_run, _init_worker  # noqa: WPS433
     expected_keys = {
-        "policy", "source_region", "start_ts", "start_datetime",
+        "policy", "source_grid", "start_ts", "start_datetime",
         "hw_weighting", "overhead_cost", "deadline_gate", "ablation_id", "lookahead_hours",
         "app_size_mb", "expected_completion_min", "deadline_multiplier",
         "total_carbon_gco2", "baseline_carbon_gco2", "savings_pct",
@@ -131,14 +138,15 @@ def test_policy1_baseline_zero_savings():
 
 
 def test_ablation_cell_enumeration_eight_cells():
-    """generate_sweep(sweep_kind='ablation', single ts × single region) yields exactly 8 distinct cells (D-10, D-11)."""
+    """generate_sweep(sweep_kind='ablation', single ts × single grid) yields exactly 8 distinct cells (D-10, D-11)."""
     import argparse
     from evaluate_policies import generate_sweep, _ablation_id  # noqa: WPS433
     args = argparse.Namespace(
         sweep_kind="ablation",
         smoke=True,
         scheduler_time=BASE_TS_2020,
-        source_regions=["NE"],
+        source_grids=[DEFAULT_SOURCE_GRID],
+        source_regions=None,  # deprecated alias not used here
         timestamps=[BASE_TS_2020],
         app_size_mb=64.0,
         expected_completion_min=2880,
@@ -149,7 +157,7 @@ def test_ablation_cell_enumeration_eight_cells():
     )
     configs = list(generate_sweep(args))
     assert len(configs) == 8, (
-        f"Expected 8 ablation cells for 1 ts × 1 region, got {len(configs)}"
+        f"Expected 8 ablation cells for 1 ts × 1 grid, got {len(configs)}"
     )
     ablation_ids = {_ablation_id(c) for c in configs}
     expected = {
@@ -162,14 +170,15 @@ def test_ablation_cell_enumeration_eight_cells():
 
 
 def test_horizon_sweep_seven_values():
-    """generate_sweep(sweep_kind='horizon', single ts × single region) yields exactly 7 lookahead_hours values (D-13)."""
+    """generate_sweep(sweep_kind='horizon', single ts × single grid) yields exactly 7 lookahead_hours values (D-13)."""
     import argparse
     from evaluate_policies import generate_sweep  # noqa: WPS433
     args = argparse.Namespace(
         sweep_kind="horizon",
         smoke=True,
         scheduler_time=BASE_TS_2020,
-        source_regions=["NE"],
+        source_grids=[DEFAULT_SOURCE_GRID],
+        source_regions=None,  # deprecated alias not used here
         timestamps=[BASE_TS_2020],
         app_size_mb=64.0,
         expected_completion_min=2880,
@@ -180,7 +189,7 @@ def test_horizon_sweep_seven_values():
     )
     configs = list(generate_sweep(args))
     assert len(configs) == 7, (
-        f"Expected 7 horizon configs for 1 ts × 1 region, got {len(configs)}"
+        f"Expected 7 horizon configs for 1 ts × 1 grid, got {len(configs)}"
     )
     horizons = {c.lookahead_hours for c in configs}
     assert horizons == {1, 2, 4, 8, 12, 24, 48}, (
@@ -199,7 +208,7 @@ def test_2022_timestamp_hard_block():
 
 
 def _write_fake_intensity_csv(path, rows):
-    """Write a minimal sample-data-style CSV with (datetime, timestamp, carbon_intensity_direct_avg)."""
+    """Write a minimal regions-tree-style CSV with (datetime, timestamp, carbon_intensity_direct_avg)."""
     import csv as _csv
     with open(path, "w", newline="") as f:
         w = _csv.writer(f)
@@ -209,30 +218,46 @@ def _write_fake_intensity_csv(path, rows):
 
 
 def test_intensity_lookup_filters_2022():
-    """build_intensity_lookup_from_csvs(include_years=(2020,2021)) must skip all 2022 entries.
+    """build_intensity_lookup_from_regions_tree(include_years=(2020,2021)) must skip all 2022 entries.
 
-    Builds a synthetic 3-region fixture in a tmp dir so the test does not depend
-    on the real src/sample_data CSVs being present (WR-11). This both makes the
-    test runnable from a sparse checkout and asserts that the 999.0 sentinel
-    written for 2022 never makes it into the loaded lookup.
+    Builds a synthetic regions-tree fixture in a tmp dir so the test does not depend
+    on the real data/regions/ CSVs being present (WR-11). The fixture mirrors the
+    on-disk layout: tmp/regions/{REGION}/US-{REGION}-{GRID}.csv. The 999.0 sentinel
+    written for 2022 must never appear in the loaded lookup.
     """
     import tempfile
-    from evaluate_policies import build_intensity_lookup_from_csvs  # noqa: WPS433
+    from evaluate_policies import build_intensity_lookup_from_regions_tree  # noqa: WPS433
 
+    # 260502-i16: grid stems are derived as the trailing dash-separated segment
+    # of the file stem, so US-NE-ISNE.csv -> grid "ISNE". The (region, grid) pairs
+    # below are real KubeFlex grids with HW_TABLE entries.
+    region_grid_pairs = [
+        ("NE", "ISNE"),
+        ("TEN", "TVA"),
+        ("CENT", "SWPP"),
+    ]
     with tempfile.TemporaryDirectory() as tmp:
-        fake_dir = Path(tmp) / "sample_data"
-        fake_dir.mkdir()
-        # Sentinel 999.0 marks 2022 rows that MUST be filtered. 200.0 is the
-        # canonical 2020 value; 250.0 is the canonical 2021 value.
-        for region in ("CENT", "NE", "TEN"):
-            _write_fake_intensity_csv(fake_dir / f"{region}.csv", [
+        regions_root = Path(tmp) / "regions"
+        for region, grid in region_grid_pairs:
+            region_dir = regions_root / region
+            region_dir.mkdir(parents=True)
+            # Sentinel 999.0 marks 2022 rows that MUST be filtered. 200.0 is the
+            # canonical 2020 value; 250.0 is the canonical 2021 value.
+            _write_fake_intensity_csv(region_dir / f"US-{region}-{grid}.csv", [
                 ("2020-01-01 00:00:00", 1577836800.0, 200.0),
                 ("2021-06-15 12:00:00", 1623758400.0, 250.0),
                 ("2022-06-01 00:00:00", 1654041600.0, 999.0),  # must be filtered out
             ])
-        lookup = build_intensity_lookup_from_csvs(fake_dir, include_years=(2020, 2021))
+        lookup = build_intensity_lookup_from_regions_tree(
+            regions_root, include_years=(2020, 2021),
+        )
         # Lookup must contain 2020+2021 entries but NOT 2022.
         assert lookup, "Expected non-empty lookup from fixture"
+        # Keys must be (grid, ts) tuples with grid identifiers, not regions.
+        loaded_grids = {g for (g, _ts) in lookup.keys()}
+        assert loaded_grids == {"ISNE", "TVA", "SWPP"}, (
+            f"Expected grid keys {{ISNE, TVA, SWPP}}, got {loaded_grids}"
+        )
         max_ts = max(ts for (_, ts) in lookup.keys())
         assert max_ts < BASE_TS_2022, (
             f"Lookup contains 2022 data: max_ts={max_ts} >= {BASE_TS_2022}"

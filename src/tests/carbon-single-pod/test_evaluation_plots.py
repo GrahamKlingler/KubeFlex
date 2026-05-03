@@ -71,10 +71,14 @@ def test_dpi_bbox_in_source():
 
 
 def _make_results_csv(tmp_dir, rows):
-    """Write a minimal results.csv for smoke testing."""
+    """Write a minimal results.csv for smoke testing.
+
+    Quick task 260502-i16: schema column source_region -> source_grid to match
+    evaluate_policies.SCHEMA after the grid-keyed migration.
+    """
     path = Path(tmp_dir) / "results.csv"
     fields = [
-        "policy", "source_region", "start_ts", "start_datetime",
+        "policy", "source_grid", "start_ts", "start_datetime",
         "hw_weighting", "overhead_cost", "deadline_gate",
         "ablation_id", "lookahead_hours",
         "app_size_mb", "expected_completion_min", "deadline_multiplier",
@@ -91,7 +95,7 @@ def _make_results_csv(tmp_dir, rows):
 
 def _base_row(**kwargs):
     row = {
-        "policy": "6", "source_region": "NE", "start_ts": "1577836800",
+        "policy": "6", "source_grid": "ISNE", "start_ts": "1577836800",
         "start_datetime": "2020-01-01T00:00:00+00:00",
         "hw_weighting": "False", "overhead_cost": "False", "deadline_gate": "False",
         "ablation_id": "HW0_OH0_DL0", "lookahead_hours": "24",
