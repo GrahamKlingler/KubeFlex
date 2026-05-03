@@ -32,7 +32,7 @@ from pathlib import Path
 # Add heuristics package to import path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "controller"))
 from heuristics.hardware import HW_TABLE, get_hardware
-from heuristics.policies import Policy1, Policy2, Policy3, Policy4, Policy5, lookup_intensity, get_min_region_at
+from heuristics.policies import Policy1, Policy2, Policy3, Policy4, Policy5, lookup_intensity, get_min_grid_at
 from heuristics.policy_heuristic import HeuristicPolicy
 
 # Phase 4 refactor: pure simulation core lives in a sibling module (D-16, INFR-04)
@@ -348,7 +348,13 @@ def get_policy(args):
 
 
 def run_expected_simulation(args):
-    """Run a fast expected simulation using forecast data only (no Kubernetes needed)."""
+    """Run a fast expected simulation using forecast data only (no Kubernetes needed).
+
+    Quick task 260502-i16: pivoted off the metadata-service forecast JSON onto
+    the on-disk grid-keyed regions tree (data/regions/{REGION}/{GRID}.csv).
+    The cluster execution path in main() still uses the forecast JSON via
+    query_intensity().
+    """
     # Output directory
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_dir = Path(args.out_dir) if args.out_dir else OUT_DIR_BASE / f"{ts}_policy{args.policy}_expected"
@@ -356,7 +362,20 @@ def run_expected_simulation(args):
 
     total_sim_hours = int(math.ceil(args.expected_completion / 60.0))
     migration_hours = max(1, int(math.ceil(args.expected_migration / 60.0)))
-    forecast_hours = total_sim_hours + 72  # extra buffer for policy lookahead
+
+    # Resolve source grid (honor deprecated --source-region alias).
+    source_grid = getattr(args, "source_grid", None) or getattr(args, "source_region", None)
+    if source_grid is None:
+        print("ERROR: --source-grid is required for --expected mode")
+        cleanup()
+        sys.exit(2)
+
+    # Resolve regions tree path
+    regions_root = (
+        Path(args.regions_dir)
+        if getattr(args, "regions_dir", None)
+        else Path(__file__).resolve().parent.parent.parent.parent / "data" / "regions"
+    )
 
     print("=" * 60)
     print("  Expected Simulation (no cluster required)")
@@ -373,57 +392,51 @@ def run_expected_simulation(args):
     print(f"  Scheduler start:     {args.scheduler_time}")
     print(f"  Expected completion: {args.expected_completion} min ({total_sim_hours} hours)")
     print(f"  Migration time:      {args.expected_migration} min ({migration_hours} hours)")
-    print(f"  Source region:       {args.source_region}")
+    print(f"  Source grid:         {source_grid}")
+    print(f"  Regions tree:        {regions_root}")
     print(f"  Output:              {out_dir}")
     print()
 
-    # ── Fetch or load forecast data ──────────────────────────────
-    forecast_cache = out_dir / "forecast_cache.json"
-    forecast_data = None
-
-    # Try loading from a provided cache first
-    if args.forecast_cache and Path(args.forecast_cache).exists():
-        print(f"Loading forecast from cache: {args.forecast_cache}")
-        with open(args.forecast_cache) as f:
-            forecast_data = json.load(f)
-        # Copy to output dir
-        with open(forecast_cache, "w") as f:
-            json.dump(forecast_data, f)
-    else:
-        # Fetch from metadata service
-        print(f"Fetching forecast ({forecast_hours}h) from metadata service...")
-        start_port_forward()
-        forecast_data = fetch_forecast(forecast_hours, args.metadata_url, forecast_cache,
-                                       start_time=args.scheduler_time)
-
-    if not forecast_data:
-        print("ERROR: No forecast data available. Provide --forecast-cache or run with metadata service.")
+    # ── Build intensity lookup from data/regions tree (260502-i16) ──
+    # Restrict to grids that have HW_TABLE entries; the simulation core would
+    # otherwise KeyError on get_hardware() for destinations without hw specs.
+    from evaluate_policies import (  # local import: avoid cycle at module load
+        discover_grids,
+        build_intensity_lookup_from_regions_tree,
+    )
+    discovered = set(discover_grids(regions_root))
+    hw_grids = set(HW_TABLE.keys())
+    usable = tuple(sorted(discovered & hw_grids))
+    if not usable:
+        print(f"ERROR: no usable grids under {regions_root} that also have hw_avg.csv entries.")
         cleanup()
         sys.exit(1)
 
-    # Sort regions deterministically so the CLI loop and the pure simulation core
+    intensity_lookup = build_intensity_lookup_from_regions_tree(
+        regions_root, allowed_grids=usable,
+    )
+    # Sort grids deterministically so the CLI loop and the pure simulation core
     # (which uses sorted(set(...)) over intensity_lookup keys) iterate destinations
     # in identical order. Policies that pick the first-min on ties (Policy 4 via
     # min(...key=...), Policy 6 via strict-less-than) would otherwise diverge by
-    # iteration order and trip the parity assertion at line 568 (CR-01, WR-06).
-    regions = sorted(get_all_regions(forecast_data))
-    intensity_lookup = build_intensity_lookup(forecast_data)
-    print(f"  Regions available: {', '.join(regions)}")
+    # iteration order and trip the parity assertion below (CR-01, WR-06).
+    grids = sorted(set(g for g, _ts in intensity_lookup.keys()))
+    print(f"  Grids available:    {', '.join(grids)}")
     print()
 
-    # Validate source region
-    if args.source_region not in regions:
-        print(f"WARNING: Source region '{args.source_region}' not in forecast data. "
-              f"Available: {', '.join(regions)}")
-        print(f"  Using first region: {regions[0]}")
-        args.source_region = regions[0]
+    # Validate source grid
+    if source_grid not in grids:
+        print(f"WARNING: Source grid '{source_grid}' not in regions tree. "
+              f"Available: {', '.join(grids)}")
+        print(f"  Using first grid: {grids[0]}")
+        source_grid = grids[0]
 
     # Phase 4: build a RunConfig from args so the pure simulation core can be called
     # alongside the CLI loop for parity verification (D-16, INFR-04).
-    # Built AFTER region validation so cfg.source_region matches the (possibly corrected) region.
+    # Built AFTER grid validation so cfg.source_grid matches the (possibly corrected) grid.
     cfg = RunConfig(
         start_ts=int(args.scheduler_time),
-        source_region=args.source_region,
+        source_grid=source_grid,
         policy_id=args.policy,
         app_size_mb=getattr(args, "app_size_mb", 64.0),
         expected_completion_min=int(args.expected_completion),
@@ -439,8 +452,8 @@ def run_expected_simulation(args):
     )
 
     # ── Simulate migration decisions hour by hour ─────────────────
-    current_region = args.source_region
-    initial_region = args.source_region
+    current_grid = source_grid
+    initial_grid = source_grid
     current_sim_time = args.scheduler_time
     migration_seconds_real = args.expected_migration * 60.0
 
@@ -464,18 +477,18 @@ def run_expected_simulation(args):
         sim_dt = datetime.fromtimestamp(sim_ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
         sim_timestamps.append(sim_ts)
 
-        # Current region intensity
-        raw_intensity = lookup_intensity(intensity_lookup, current_region, sim_ts)
-        raw_baseline = lookup_intensity(intensity_lookup, initial_region, sim_ts)
+        # Current grid intensity
+        raw_intensity = lookup_intensity(intensity_lookup, current_grid, sim_ts)
+        raw_baseline = lookup_intensity(intensity_lookup, initial_grid, sim_ts)
 
         # Apply hardware scaling when --use-hw is set
         if args.use_hw and raw_intensity is not None:
-            intensity = raw_intensity * HW_TABLE[current_region].power_per_core
+            intensity = raw_intensity * HW_TABLE[current_grid].power_per_core
         else:
             intensity = raw_intensity
 
         if args.use_hw and raw_baseline is not None:
-            baseline_intensity = raw_baseline * HW_TABLE[initial_region].power_per_core
+            baseline_intensity = raw_baseline * HW_TABLE[initial_grid].power_per_core
         else:
             baseline_intensity = raw_baseline
 
@@ -489,7 +502,7 @@ def run_expected_simulation(args):
         carbon_rows.append({
             "sim_time": sim_ts,
             "sim_datetime": sim_dt,
-            "region": current_region,
+            "grid": current_grid,
             "intensity": f"{intensity:.1f}" if intensity is not None else "N/A",
             "cumulative": f"{total_carbon:.1f}",
             "migrations": migration_count,
@@ -503,9 +516,9 @@ def run_expected_simulation(args):
         else:
             # Check if policy wants to migrate
             remaining_hours = max(1, total_sim_hours - hour)
-            should_migrate, target_region = simulate_policy_decision(
-                policy_obj, intensity_lookup, regions, current_region, sim_ts,
-                expected_duration_hours=remaining_hours,
+            should_migrate, target_grid = policy_obj.decide(
+                intensity_lookup, grids, current_grid, sim_ts,
+                remaining_hours,
                 elapsed_hours=float(hour),
                 forecast_window=24,
                 cost_multiplier=3.0,
@@ -513,14 +526,14 @@ def run_expected_simulation(args):
                 use_hw=args.use_hw,
             )
 
-            if should_migrate and target_region:
+            if should_migrate and target_grid:
                 migration_count += 1
-                old_region = current_region
+                old_grid = current_grid
                 old_intensity = intensity  # already hw-adjusted if use_hw
 
-                raw_new = lookup_intensity(intensity_lookup, target_region, sim_ts)
+                raw_new = lookup_intensity(intensity_lookup, target_grid, sim_ts)
                 if args.use_hw and raw_new is not None:
-                    new_intensity = raw_new * HW_TABLE[target_region].power_per_core
+                    new_intensity = raw_new * HW_TABLE[target_grid].power_per_core
                 else:
                     new_intensity = raw_new
                 migration_events.append({
@@ -528,10 +541,10 @@ def run_expected_simulation(args):
                     "timestamp": sim_dt.replace(" ", "T") + "Z",
                     "sim_time": sim_ts,
                     "pod_name": f"carbon-pod-{migration_count}",
-                    "source_node": f"node-{old_region}",
-                    "source_region": old_region,
-                    "target_node": f"node-{target_region}",
-                    "target_region": target_region,
+                    "source_node": f"node-{old_grid}",
+                    "source_grid": old_grid,
+                    "target_node": f"node-{target_grid}",
+                    "target_grid": target_grid,
                     "intensity_before": f"{old_intensity:.1f}" if old_intensity is not None else "N/A",
                     "intensity_after": f"{new_intensity:.1f}" if new_intensity is not None else "N/A",
                     "migration_duration_ms": int(migration_seconds_real * 1000),
@@ -540,18 +553,18 @@ def run_expected_simulation(args):
                 })
 
                 migrating_cooldown = migration_hours - 1  # current hour counts as 1
-                current_region = target_region
-                status = f"  >>> MIGRATE to {target_region}"
+                current_grid = target_grid
+                status = f"  >>> MIGRATE to {target_grid}"
             elif args.policy == 6 and hasattr(policy_obj, 'last_skip_reason') and policy_obj.last_skip_reason == "deadline_gate":
                 migration_events.append({
                     "event_num": migration_count,
                     "timestamp": sim_dt.replace(" ", "T") + "Z",
                     "sim_time": sim_ts,
                     "pod_name": f"carbon-pod-{migration_count}" if migration_count > 0 else "carbon-pod",
-                    "source_node": f"node-{current_region}",
-                    "source_region": current_region,
+                    "source_node": f"node-{current_grid}",
+                    "source_grid": current_grid,
                     "target_node": "",
-                    "target_region": "",
+                    "target_grid": "",
                     "intensity_before": f"{intensity:.1f}" if intensity is not None else "N/A",
                     "intensity_after": "",
                     "migration_duration_ms": 0,
@@ -561,7 +574,7 @@ def run_expected_simulation(args):
 
         int_str = f"{intensity:.1f}" if intensity is not None else "N/A"
         unit = "gCO2" if args.use_hw else "gCO2/kWh"
-        print(f"  [Hour {hour + 1:3d}] sim={sim_dt}  region={current_region:6s}  "
+        print(f"  [Hour {hour + 1:3d}] sim={sim_dt}  grid={current_grid:6s}  "
               f"intensity={int_str:>7s} {unit}  cumulative={total_carbon:.1f}{status}")
 
     print()
@@ -587,28 +600,28 @@ def run_expected_simulation(args):
     job_time_carbon = total_carbon - migration_carbon_est
 
     # ── Write output files ────────────────────────────────────────
-    # carbon_log.csv
+    # carbon_log.csv (260502-i16: column renamed region -> grid)
     carbon_log_path = out_dir / "carbon_log.csv"
     with open(carbon_log_path, "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["sim_time", "sim_datetime", "region", "intensity_gco2kwh",
+        w.writerow(["sim_time", "sim_datetime", "grid", "intensity_gco2kwh",
                      "cumulative_carbon_gco2", "migrations_so_far", "active_pod"])
         for row in carbon_rows:
-            w.writerow([row["sim_time"], row["sim_datetime"], row["region"],
+            w.writerow([row["sim_time"], row["sim_datetime"], row["grid"],
                         row["intensity"], row["cumulative"], row["migrations"], row["pod"]])
 
-    # migration_events.csv
+    # migration_events.csv (260502-i16: source_region -> source_grid, target_region -> target_grid)
     migration_log_path = out_dir / "migration_events.csv"
     with open(migration_log_path, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["event_num", "timestamp", "sim_time", "pod_name",
-                     "source_node", "source_region", "target_node", "target_region",
+                     "source_node", "source_grid", "target_node", "target_grid",
                      "intensity_before", "intensity_after", "migration_duration_ms",
                      "event_type", "reason"])
         for evt in migration_events:
             w.writerow([evt["event_num"], evt["timestamp"], evt["sim_time"],
-                        evt["pod_name"], evt["source_node"], evt["source_region"],
-                        evt["target_node"], evt["target_region"],
+                        evt["pod_name"], evt["source_node"], evt["source_grid"],
+                        evt["target_node"], evt["target_grid"],
                         evt["intensity_before"], evt["intensity_after"],
                         evt["migration_duration_ms"],
                         evt.get("event_type", "migrate"), evt.get("reason", "")])
@@ -617,7 +630,7 @@ def run_expected_simulation(args):
     results_csv = out_dir / "results.csv"
     migration_events_str = ";".join(
         f"{e['event_num']},{e['timestamp']},{e['sim_time']},{e['pod_name']},"
-        f"{e['source_node']},{e['source_region']},{e['target_node']},{e['target_region']},"
+        f"{e['source_node']},{e['source_grid']},{e['target_node']},{e['target_grid']},"
         f"{e['intensity_before']},{e['intensity_after']}"
         for e in migration_events
     )
@@ -649,7 +662,7 @@ def run_expected_simulation(args):
         print(f"  Avg intensity:       {total_carbon / hours_tracked:.1f} gCO2/kWh")
     print(f"  --- Carbon ---")
     print(f"  Total carbon:        {total_carbon:.1f} gCO2")
-    print(f"  Baseline carbon:     {baseline_carbon:.1f} gCO2  (stay in {initial_region})")
+    print(f"  Baseline carbon:     {baseline_carbon:.1f} gCO2  (stay in {initial_grid})")
     print(f"  Job-time carbon:     {job_time_carbon:.1f} gCO2")
     print(f"  Migration carbon:    {migration_carbon_est:.1f} gCO2")
     if baseline_carbon > 0:
@@ -660,7 +673,6 @@ def run_expected_simulation(args):
     print(f"  Results CSV:         {results_csv}")
     print(f"  Carbon log:          {carbon_log_path}")
     print(f"  Migration log:       {migration_log_path}")
-    print(f"  Forecast cache:      {forecast_cache}")
     print(f"  Output directory:    {out_dir}")
     print()
     print("  Run graph_results.py on this directory to visualize.")
@@ -694,10 +706,18 @@ def main():
                         help="Expected workload completion time in minutes (for --expected mode)")
     parser.add_argument("--expected-migration", type=int, default=None,
                         help="Expected migration time in minutes (for --expected mode)")
-    parser.add_argument("--source-region", default="NE",
-                        help="Initial region for expected simulation (default: NE)")
+    parser.add_argument("--source-grid", default=None,
+                        help="Initial grid for expected simulation (e.g. ISNE, CISO, TVA). "
+                             "Default: ISNE. (260502-i16 rename)")
+    parser.add_argument("--source-region", default=None,
+                        help="DEPRECATED: legacy alias for --source-grid from before quick "
+                             "task 260502-i16. Honored for one release with a DeprecationWarning.")
+    parser.add_argument("--regions-dir", default=None,
+                        help="Path to data/regions/ for --expected mode "
+                             "(default: <repo>/data/regions). 260502-i16.")
     parser.add_argument("--forecast-cache", default=None,
-                        help="Path to existing forecast_cache.json (skip metadata fetch)")
+                        help="Path to existing forecast_cache.json (cluster mode only; "
+                             "ignored in --expected mode after 260502-i16)")
     parser.add_argument("--use-hw", action="store_true",
                         help="Toggle use of hardware data in migration decisions")
 
@@ -738,6 +758,23 @@ def main():
     )
 
     args = parser.parse_args()
+
+    # 260502-i16: honor deprecated --source-region alias for --expected mode.
+    # The cluster-execution path keeps its own region-keyed semantics, so this
+    # only fires in expected mode.
+    if args.expected:
+        if args.source_region is not None and args.source_grid is None:
+            import warnings as _warnings
+            _warnings.warn(
+                "--source-region is deprecated for --expected mode; use "
+                "--source-grid (grid identifiers like ISNE / TVA / SWPP). "
+                "Honored for one release.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            args.source_grid = args.source_region
+        if args.source_grid is None:
+            args.source_grid = "ISNE"  # default replaces legacy "NE" region default
 
     # ── Dispatch: expected simulation or real test ────────────────
     if args.expected:

@@ -105,50 +105,50 @@ class HeuristicPolicy(BasePolicy):
     def decide(
         self,
         intensity_lookup: Dict,
-        regions: List[str],
-        current_region: str,
+        grids: List[str],
+        current_grid: str,
         sim_timestamp: int,
         remaining_hours: int,
         elapsed_hours: float = 0.0,
         **kwargs,
     ) -> Tuple[bool, Optional[str]]:
-        """Evaluate whether to migrate and, if so, to which region.
+        """Evaluate whether to migrate and, if so, to which grid.
 
         Implements migrate_decision() from heuristic.txt. All time quantities
         use hours as the unit to match the simulation loop granularity.
         Seconds-domain quantities carry a _s suffix; hours-domain carry _h.
 
         Args:
-            intensity_lookup: Mapping from (region, unix_timestamp) -> carbon
+            intensity_lookup: Mapping from (grid, unix_timestamp) -> carbon
                 intensity (gCO2eq/kWh).
-            regions: Available destination region identifiers.
-            current_region: Region where the workload is currently running.
+            grids: Available destination grid identifiers.
+            current_grid: Grid where the workload is currently running.
             sim_timestamp: Current simulation time as Unix timestamp (int).
             remaining_hours: Nominal remaining hours (ignored; computed from
                 expected_total_minutes and elapsed_hours internally).
-            elapsed_hours: Hours already completed on current_region hardware.
+            elapsed_hours: Hours already completed on current_grid hardware.
             **kwargs: Ignored (provided for ABC compatibility).
 
         Returns:
-            (should_migrate, target_region) tuple.
+            (should_migrate, target_grid) tuple.
         """
         # Step 1: reset per-call state
         self.last_skip_reason = None
 
         # Step 2: hardware lookup
-        src_hw = get_hardware(current_region)
-        hw = {r: get_hardware(r) for r in set(regions) | {current_region}}
+        src_hw = get_hardware(current_grid)
+        hw = {g: get_hardware(g) for g in set(grids) | {current_grid}}
 
         # Step 3: compute per-destination overhead (hours)
         ckpt_oh_s = ckpt_overhead(self.app_size_mb, src_hw)
         overhead_h: Dict[str, float] = {}
-        for r in regions:
-            if r == current_region:
-                overhead_h[r] = 0.0
+        for g in grids:
+            if g == current_grid:
+                overhead_h[g] = 0.0
             else:
-                send_oh_s = send_overhead(src_hw, hw[r], self.app_size_mb)
-                rest_oh_s = restore_overhead(self.app_size_mb, hw[r])
-                overhead_h[r] = (ckpt_oh_s + send_oh_s + rest_oh_s) / 3600.0
+                send_oh_s = send_overhead(src_hw, hw[g], self.app_size_mb)
+                rest_oh_s = restore_overhead(self.app_size_mb, hw[g])
+                overhead_h[g] = (ckpt_oh_s + send_oh_s + rest_oh_s) / 3600.0
 
         # Step 4: hardware-adjusted remaining time (stay-case: src->src)
         time_left_h = estimate_remaining_hours(
@@ -168,21 +168,21 @@ class HeuristicPolicy(BasePolicy):
         stay_carbon = 0.0
         for h in range(min(time_left_int, self.lookahead_hours)):
             ts = sim_timestamp + h * 3600
-            val = lookup_intensity(intensity_lookup, current_region, ts)
+            val = lookup_intensity(intensity_lookup, current_grid, ts)
             if val is not None:
-                weight = hw[current_region].power_per_core if self.hw_weighting else 1.0
+                weight = hw[current_grid].power_per_core if self.hw_weighting else 1.0
                 stay_carbon += weight * val
 
         # Step 7: initialize best as stay
-        decision_region = current_region
+        decision_grid = current_grid
         best_carbon = stay_carbon
 
         # Step 8: evaluate each candidate destination (HEUR-06)
-        src_intensity_now = lookup_intensity(intensity_lookup, current_region, sim_timestamp) or 0.0
+        src_intensity_now = lookup_intensity(intensity_lookup, current_grid, sim_timestamp) or 0.0
         ckpt_oh_h = ckpt_oh_s / 3600.0
 
-        for dest in regions:
-            if dest == current_region:
+        for dest in grids:
+            if dest == current_grid:
                 continue
 
             mig_time_h = overhead_h[dest]
@@ -232,9 +232,9 @@ class HeuristicPolicy(BasePolicy):
 
             if total_carbon < best_carbon:
                 best_carbon = total_carbon
-                decision_region = dest
+                decision_grid = dest
 
         # Step 9: return migration decision
-        if decision_region != current_region:
-            return True, decision_region
+        if decision_grid != current_grid:
+            return True, decision_grid
         return False, None

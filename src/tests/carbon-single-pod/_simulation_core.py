@@ -15,6 +15,12 @@ Contracts:
   - _get_policy_for_config(cfg): cache-free policy factory (RESEARCH.md Pitfall 1)
   - _ablation_id(cfg): D-11 formatter
 
+Join-key naming: this module operates on grid-keyed intensity lookups
+(``(grid, ts) -> intensity``) and HW_TABLE (loaded from
+``data/hardware/hw_avg.csv``, keyed by grid identifier such as ``ISNE``).
+The cluster-execution path still uses region-keyed lookups; this divergence
+is intentional (see quick task 260502-i16).
+
 Data discipline (D-22, D-23, RESEARCH.md Pitfall 5):
   - check_split_access raises RuntimeError on any 2022 timestamp
   - end-of-year wrap into val (2021) sets wrapped_into_val=True (no print; orchestrator aggregates)
@@ -52,9 +58,13 @@ class RunConfig:
     """Immutable specification for a single expected-simulation run.
 
     See RESEARCH.md Pattern 2 and CONTEXT.md D-08, D-09, D-13, D-19 for field semantics.
+
+    ``source_grid`` identifies the initial power grid (e.g. ``ISNE``,
+    ``CISO``); the join key was renamed from ``source_region`` in quick task
+    260502-i16 when the simulation moved to grid-keyed forecasting data.
     """
     start_ts: int
-    source_region: str
+    source_grid: str
     policy_id: int                          # 1..6
     app_size_mb: float = 64.0
     expected_completion_min: int = 2880     # 48 h canonical
@@ -102,24 +112,22 @@ def _get_policy_for_config(cfg: RunConfig) -> BasePolicy:
 def _simulate_policy_decision(
     policy_obj,
     intensity_lookup,
-    regions,
-    current_region,
+    grids,
+    current_grid,
     sim_timestamp,
     expected_duration_hours=1,
     elapsed_hours=0.0,
     **kwargs
 ):
-    """Thin dispatcher: call policy.decide() and return (should_migrate, target_region).
+    """Thin dispatcher: call policy.decide() and return (should_migrate, target_grid).
 
-    Mirrors simulate_policy_decision() from run_carbon_migration_test.py:311.
-    Duplicated here to keep _simulation_core.py free of reverse dependencies on
-    the CLI wrapper. The CLI wrapper imports this function in Task 2 to avoid
-    drift between two implementations.
+    Quick task 260502-i16: parameters renamed regions -> grids, current_region ->
+    current_grid to match the new grid-keyed expected-simulation path.
     """
     return policy_obj.decide(
         intensity_lookup,
-        regions,
-        current_region,
+        grids,
+        current_grid,
         sim_timestamp,
         expected_duration_hours,
         elapsed_hours=elapsed_hours,
@@ -157,27 +165,28 @@ def simulate_one_run(intensity_lookup, cfg):
     migration_hours = max(1, int(math.ceil(cfg.expected_migration_min / 60.0)))
     migration_seconds_real = cfg.expected_migration_min * 60.0
 
-    # Derive available regions from the intensity_lookup keys so the pure function
-    # sees the exact same region set as the CLI wrapper (which calls
-    # get_all_regions(forecast_data)). Using HW_TABLE.keys() would add regions
-    # absent from the forecast, causing the heuristic to treat them as 0-carbon
-    # destinations and producing different migration decisions.
-    regions = sorted(set(r for r, _ts in intensity_lookup.keys()))
+    # Derive available grids from the intensity_lookup keys so the pure function
+    # sees the exact same grid set as the CLI wrapper (which builds the lookup
+    # from data/regions/{REGION}/{GRID}.csv). Using HW_TABLE.keys() would add
+    # grids absent from the forecast, causing the heuristic to treat them as
+    # 0-carbon destinations and producing different migration decisions.
+    # HW_TABLE is now grid-keyed (data/hardware/hw_avg.csv).
+    grids = sorted(set(g for g, _ts in intensity_lookup.keys()))
 
-    # Validate cfg.source_region is in the lookup; otherwise the simulation would
+    # Validate cfg.source_grid is in the lookup; otherwise the simulation would
     # silently produce zero-carbon nonsense (every lookup_intensity returns None
     # via fuzzy fallback, total_carbon stays at 0, savings_pct=0). That is
     # indistinguishable from a legitimate Policy-1 baseline result and would
     # corrupt the unified results.csv (CR-03).
-    if cfg.source_region not in regions:
+    if cfg.source_grid not in grids:
         raise ValueError(
-            "[SIM] source_region={!r} not present in intensity_lookup; "
-            "available regions: {}".format(cfg.source_region, regions)
+            "[SIM] source_grid={!r} not present in intensity_lookup; "
+            "available grids: {}".format(cfg.source_grid, grids)
         )
 
     # State
-    current_region = cfg.source_region
-    initial_region = cfg.source_region
+    current_grid = cfg.source_grid
+    initial_grid = cfg.source_grid
     migration_count = 0
     total_carbon = 0.0
     baseline_carbon = 0.0
@@ -189,16 +198,17 @@ def simulate_one_run(intensity_lookup, cfg):
     for hour in range(total_sim_hours):
         sim_ts = cfg.start_ts + hour * 3600
 
-        raw_intensity = lookup_intensity(intensity_lookup, current_region, sim_ts)
-        raw_baseline = lookup_intensity(intensity_lookup, initial_region, sim_ts)
+        raw_intensity = lookup_intensity(intensity_lookup, current_grid, sim_ts)
+        raw_baseline = lookup_intensity(intensity_lookup, initial_grid, sim_ts)
 
-        # Apply hardware scaling when use_hw is set
+        # Apply hardware scaling when use_hw is set.
+        # HW_TABLE is now grid-keyed (data/hardware/hw_avg.csv).
         if cfg.use_hw and raw_intensity is not None:
-            intensity = raw_intensity * HW_TABLE[current_region].power_per_core
+            intensity = raw_intensity * HW_TABLE[current_grid].power_per_core
         else:
             intensity = raw_intensity
         if cfg.use_hw and raw_baseline is not None:
-            baseline_intensity = raw_baseline * HW_TABLE[initial_region].power_per_core
+            baseline_intensity = raw_baseline * HW_TABLE[initial_grid].power_per_core
         else:
             baseline_intensity = raw_baseline
 
@@ -212,11 +222,11 @@ def simulate_one_run(intensity_lookup, cfg):
             migrating_cooldown -= 1
         else:
             remaining_hours = max(1, total_sim_hours - hour)
-            should_migrate, target_region = _simulate_policy_decision(
+            should_migrate, target_grid = _simulate_policy_decision(
                 policy_obj,
                 intensity_lookup,
-                regions,
-                current_region,
+                grids,
+                current_grid,
                 sim_ts,
                 expected_duration_hours=remaining_hours,
                 elapsed_hours=float(hour),
@@ -225,10 +235,10 @@ def simulate_one_run(intensity_lookup, cfg):
                 migration_seconds=migration_seconds_real,
                 use_hw=cfg.use_hw,
             )
-            if should_migrate and target_region:
+            if should_migrate and target_grid:
                 migration_count += 1
                 migrating_cooldown = migration_hours - 1
-                current_region = target_region
+                current_grid = target_grid
 
     # Derived metrics. The CLI wrapper computes total_runtime_ms,
     # migration_overhead_ms, migration_fraction, migration_carbon_est, and
@@ -269,7 +279,7 @@ def simulate_one_run(intensity_lookup, cfg):
 
     return {
         "policy": cfg.policy_id,
-        "source_region": cfg.source_region,
+        "source_grid": cfg.source_grid,
         "start_ts": cfg.start_ts,
         "start_datetime": datetime.fromtimestamp(cfg.start_ts, tz=timezone.utc).isoformat(),
         "hw_weighting": cfg.hw_weighting if cfg.policy_id == 6 else "",

@@ -5,7 +5,7 @@ Requirements addressed:
   - HEUR-10: 8-cell ablation sweep (Policy 6 toggle combinations)
   - HEUR-11: 7-horizon sweep (lookahead_hours in {1,2,4,8,12,24,48})
   - EVAL-01: multi-policy comparison
-  - EVAL-02: 10+ timestamp sweep (8,784 hourly starts of 2020 x 3 regions, far exceeding)
+  - EVAL-02: 10+ timestamp sweep (8,784 hourly starts of 2020 x 26 grids, far exceeding)
   - EVAL-03: visualization-ready unified CSV
   - INFR-04: in-process orchestration via multiprocessing.Pool
 
@@ -25,9 +25,14 @@ Outputs (data/evaluation/run_<ts>/):
   - horizon.csv      -- sweep_kind=='horizon' subset
   - metadata.json    -- sweep parameters, git SHA, run timing, wrap-into-val count
 
+Join-key naming: this orchestrator builds a grid-keyed intensity lookup by
+recursing ``data/regions/{REGION}/{GRID}.csv`` and joining against the
+grid-keyed HW_TABLE in ``data/hardware/hw_avg.csv`` (see quick task
+260502-i16). The cluster-execution path remains region-keyed.
+
 Data discipline:
-  - 2022 hard-block (D-23): build_intensity_lookup_from_csvs filters to (2020, 2021)
-    AND generate_sweep calls check_split_access for every cfg
+  - 2022 hard-block (D-23): build_intensity_lookup_from_regions_tree filters
+    to (2020, 2021) AND generate_sweep calls check_split_access for every cfg
   - End-of-year wrap (D-22): late-2020 starts may read 2021 forecast values for
     trailing hours; flagged via wrapped_into_val side-channel; aggregated count
     written to metadata.json (no per-run prints -- workers are silent)
@@ -43,6 +48,7 @@ import os  # noqa: F401 (available; kept per plan spec)
 import subprocess
 import sys
 import time
+import warnings
 from dataclasses import asdict  # noqa: F401 (re-exported for callers)
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -53,6 +59,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "controll
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from heuristics.data_splits import check_split_access  # noqa: E402
+from heuristics.hardware import HW_TABLE  # noqa: E402
 from _simulation_core import (  # noqa: E402
     RunConfig,
     _ablation_id,
@@ -68,7 +75,15 @@ except ImportError:
 
 # ── Constants ────────────────────────────────────────────────────────
 
-REGIONS: Tuple[str, ...] = ("CENT", "NE", "TEN")
+# Default regions tree: <repo>/data/regions/{REGION}/US-{REGION}-{GRID}.csv
+DEFAULT_REGIONS_TREE_DIR = (
+    Path(__file__).resolve().parent.parent.parent.parent / "data" / "regions"
+)
+
+# Populated lazily in main() once the regions tree is resolved (and once
+# HW_TABLE membership is known so we can drop grids without hardware specs).
+GRIDS: Tuple[str, ...] = ()
+
 HORIZON_VALUES: Tuple[int, ...] = (1, 2, 4, 8, 12, 24, 48)  # D-13
 ABLATION_CELLS: List[Tuple[bool, bool, bool]] = list(
     itertools.product([False, True], repeat=3)
@@ -76,9 +91,10 @@ ABLATION_CELLS: List[Tuple[bool, bool, bool]] = list(
 MAIN_POLICIES: Tuple[int, ...] = (1, 2, 3, 4, 5, 6)
 HORIZON_BASELINE_POLICIES: Tuple[int, ...] = (1, 2, 3, 4, 5)
 
-# D-19 unified CSV schema (verbatim from CONTEXT.md)
+# D-19 unified CSV schema (renamed source_region -> source_grid in 260502-i16
+# to match the grid-keyed expected-sim path).
 SCHEMA: List[str] = [
-    "policy", "source_region", "start_ts", "start_datetime",
+    "policy", "source_grid", "start_ts", "start_datetime",
     "hw_weighting", "overhead_cost", "deadline_gate", "ablation_id", "lookahead_hours",
     "app_size_mb", "expected_completion_min", "deadline_multiplier",
     "total_carbon_gco2", "baseline_carbon_gco2", "savings_pct",
@@ -94,23 +110,70 @@ _LOOKUP: Optional[Dict[Tuple[str, int], float]] = None
 
 # ── Intensity lookup builder ─────────────────────────────────────────
 
-def build_intensity_lookup_from_csvs(
-    sample_data_dir: Path,
+def _grid_from_stem(stem: str) -> str:
+    """Derive the canonical grid identifier from a CSV file stem.
+
+    The grid CSVs live at ``data/regions/{REGION}/{STEM}.csv`` where ``STEM``
+    is typically ``US-{REGION}-{GRID}`` (e.g. ``US-NE-ISNE``, ``US-CAL-CISO``).
+    The trailing dash-separated segment is the canonical grid key; this is the
+    same key used in ``data/hardware/hw_avg.csv``'s ``grid`` column.
+    """
+    return stem.rsplit("-", 1)[-1]
+
+
+def discover_grids(regions_root: Path) -> Tuple[str, ...]:
+    """Walk ``regions_root/*/*.csv`` and return the sorted set of grid stems."""
+    if not Path(regions_root).exists():
+        return ()
+    return tuple(
+        sorted({_grid_from_stem(p.stem) for p in Path(regions_root).glob("*/*.csv")})
+    )
+
+
+def build_intensity_lookup_from_regions_tree(
+    regions_root: Path,
     include_years: Tuple[int, ...] = (2020, 2021),
+    allowed_grids: Optional[Tuple[str, ...]] = None,
 ) -> Dict[Tuple[str, int], float]:
-    """Build {(region, unix_ts): intensity} from sample_data/{REGION}.csv.
+    """Build ``{(grid, unix_ts): intensity}`` by recursing ``regions_root``.
+
+    Walks ``regions_root/*/*.csv`` (one level deep: ``REGION/GRID-FILE.csv``)
+    and emits one entry per row keyed by the trailing grid identifier (e.g.
+    ``ISNE`` for ``US-NE-ISNE``). The parent directory name (the region) is
+    preserved as metadata in the filename but is NOT used as a join key.
 
     D-23 enforced: include_years defaults to (2020, 2021); 2022 is NEVER loaded.
-    Source schema (RESEARCH.md Code Examples lines 607-642):
+
+    Source schema (matches the original ``src/sample_data/{REGION}.csv``
+    files used by Phase 3):
         datetime, timestamp, carbon_intensity_direct_avg, ...
+
+    Args:
+        regions_root: Path to ``data/regions/``.
+        include_years: Years to load (others are silently skipped).
+        allowed_grids: If set, only include rows whose grid is in this set.
+            Useful for restricting to grids that have HW_TABLE entries so the
+            simulation does not see destinations it cannot hardware-cost.
+
+    Returns:
+        Dict mapping (grid, unix_ts) -> carbon intensity.
+
+    Raises:
+        FileNotFoundError: If no CSV files are found under ``regions_root``.
     """
+    regions_root = Path(regions_root)
+    csv_paths = sorted(regions_root.glob("*/*.csv"))
+    if not csv_paths:
+        raise FileNotFoundError(
+            f"[EVAL] no grid CSVs found under {regions_root} "
+            f"(expected layout: data/regions/REGION/US-REGION-GRID.csv)"
+        )
+    allowed = set(allowed_grids) if allowed_grids is not None else None
     lookup: Dict[Tuple[str, int], float] = {}
-    for region in REGIONS:
-        path = Path(sample_data_dir) / f"{region}.csv"
-        if not path.exists():
-            raise FileNotFoundError(
-                f"[EVAL] sample data CSV not found: {path}"
-            )
+    for path in csv_paths:
+        grid = _grid_from_stem(path.stem)
+        if allowed is not None and grid not in allowed:
+            continue
         with open(path) as f:
             for row in csv.DictReader(f):
                 v = row.get("carbon_intensity_direct_avg")
@@ -120,7 +183,7 @@ def build_intensity_lookup_from_csvs(
                 if year not in include_years:
                     continue
                 ts = int(float(row["timestamp"]))
-                lookup[(region, ts)] = float(v)
+                lookup[(grid, ts)] = float(v)
     return lookup
 
 
@@ -155,12 +218,23 @@ def _resolve_timestamps(args, default_fn) -> List[int]:
     return default_fn()
 
 
-def _resolve_regions(args) -> List[str]:
-    """If args.source_regions is set, use it. Else use REGIONS."""
+def _resolve_grids(args) -> List[str]:
+    """Resolve the list of source grids for the sweep.
+
+    Precedence:
+      1. ``args.source_grids`` (new primary CLI flag)
+      2. ``args.source_regions`` (deprecated alias kept for one release)
+      3. The module-level GRIDS tuple (populated in main() from the regions tree)
+    """
+    sg = getattr(args, "source_grids", None)
+    if sg:
+        return list(sg)
     sr = getattr(args, "source_regions", None)
     if sr:
+        # Deprecated alias path -- main() already prints the warning when
+        # this attribute was set via CLI; here we just honor the value.
         return list(sr)
-    return list(REGIONS)
+    return list(GRIDS)
 
 
 def generate_sweep(args) -> Iterator[RunConfig]:
@@ -187,18 +261,18 @@ def generate_sweep(args) -> Iterator[RunConfig]:
 
     if sweep_kind in ("main", "all"):
         timestamps = _resolve_timestamps(args, lambda: _main_sweep_timestamps(2020))
-        regions = _resolve_regions(args)
+        grids = _resolve_grids(args)
         if smoke:
-            # Deterministic small subset: ~30 timestamps x 1 region x 6 policies = ~180 cfgs
+            # Deterministic small subset: ~30 timestamps x 1 grid x 6 policies = ~180 cfgs
             timestamps = timestamps[::max(1, len(timestamps) // 30)][:30]
-            regions = regions[:1]
-        # Deterministic order: (timestamp, region, policy)
+            grids = grids[:1]
+        # Deterministic order: (timestamp, grid, policy)
         for ts in timestamps:
-            for r in regions:
+            for g in grids:
                 for p in MAIN_POLICIES:
                     cfg = RunConfig(
                         start_ts=ts,
-                        source_region=r,
+                        source_grid=g,
                         policy_id=p,
                         lookahead_hours=int(getattr(args, "lookahead_hours", 48)),
                         hw_weighting=True,
@@ -212,16 +286,16 @@ def generate_sweep(args) -> Iterator[RunConfig]:
 
     if sweep_kind in ("ablation", "all"):
         timestamps = _resolve_timestamps(args, lambda: _main_sweep_timestamps(2020))
-        regions = _resolve_regions(args)
+        grids = _resolve_grids(args)
         if smoke:
             timestamps = timestamps[:1]
-            regions = regions[:1]
+            grids = grids[:1]
         for ts in timestamps:
-            for r in regions:
+            for g in grids:
                 for (hw, oh, dl) in ABLATION_CELLS:
                     cfg = RunConfig(
                         start_ts=ts,
-                        source_region=r,
+                        source_grid=g,
                         policy_id=6,
                         lookahead_hours=int(getattr(args, "lookahead_hours", 48)),
                         hw_weighting=hw,
@@ -234,12 +308,12 @@ def generate_sweep(args) -> Iterator[RunConfig]:
                     yield cfg
 
     if sweep_kind in ("horizon", "all"):
-        # 12 monthly starts x 3 regions x 7 horizons (Policy 6) per D-14
+        # 12 monthly starts x N grids x 7 horizons (Policy 6) per D-14
         h_timestamps = _resolve_timestamps(args, _monthly_horizon_timestamps)
-        regions = _resolve_regions(args)
+        grids = _resolve_grids(args)
         if smoke:
             h_timestamps = h_timestamps[:1]
-            regions = regions[:1]
+            grids = grids[:1]
             # Smoke mode globally squashes expected_completion_min to 120 (2 h) for
             # speed, but the horizon plot compares Policy 6 across lookahead_hours
             # in {1..48}: with total_sim_hours=2, every cell collapses to
@@ -260,11 +334,11 @@ def generate_sweep(args) -> Iterator[RunConfig]:
             common_h = common
         # Policy 6 with all 7 horizons
         for ts in h_timestamps:
-            for r in regions:
+            for g in grids:
                 for h in HORIZON_VALUES:
                     cfg = RunConfig(
                         start_ts=ts,
-                        source_region=r,
+                        source_grid=g,
                         policy_id=6,
                         lookahead_hours=h,
                         hw_weighting=True,
@@ -275,14 +349,14 @@ def generate_sweep(args) -> Iterator[RunConfig]:
                     )
                     check_split_access(cfg.start_ts)
                     yield cfg
-        # Policies 1-5 baselines (single per (ts, region) -- lookahead irrelevant for them)
+        # Policies 1-5 baselines (single per (ts, grid) -- lookahead irrelevant for them)
         if not smoke:
             for ts in h_timestamps:
-                for r in regions:
+                for g in grids:
                     for p in HORIZON_BASELINE_POLICIES:
                         cfg = RunConfig(
                             start_ts=ts,
-                            source_region=r,
+                            source_grid=g,
                             policy_id=p,
                             lookahead_hours=int(getattr(args, "lookahead_hours", 48)),
                             sweep_kind="horizon",
@@ -334,7 +408,7 @@ def _sort_key(row: Dict[str, Any]) -> Tuple:
     return (
         row.get("sweep_kind", ""),
         int(row.get("policy", 0)),
-        row.get("source_region", ""),
+        row.get("source_grid", ""),
         int(row.get("start_ts", 0)),
         row.get("ablation_id", "") or "",
         # lookahead_hours can be int or "" (Plan 02 returns "" for non-Policy-6).
@@ -410,9 +484,19 @@ def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--no-network-power", dest="include_network_power",
                         action="store_false")
     parser.set_defaults(include_network_power=True)
+    parser.add_argument("--regions-dir", default=None,
+                        help="Path to data/regions/ (default: auto-detect from script location). "
+                             "Layout: data/regions/{REGION}/US-{REGION}-{GRID}.csv (260502-i16).")
     parser.add_argument("--sample-data-dir", default=None,
-                        help="Path to src/sample_data (default: auto-detect from script location)")
-    parser.add_argument("--source-regions", nargs="+", default=list(REGIONS))
+                        help="DEPRECATED: legacy alias for --regions-dir from before quick "
+                             "task 260502-i16. Honored for one release with a DeprecationWarning.")
+    parser.add_argument("--source-grids", nargs="+", default=None,
+                        help="Source grids to sweep (e.g. ISNE TVA SWPP). "
+                             "Default: all grids that appear under --regions-dir AND have "
+                             "an entry in data/hardware/hw_avg.csv (260502-i16).")
+    parser.add_argument("--source-regions", nargs="+", default=None,
+                        help="DEPRECATED: legacy alias for --source-grids from before quick "
+                             "task 260502-i16. Honored for one release with a DeprecationWarning.")
     parser.add_argument("--timestamps", type=int, nargs="+", default=None,
                         help="Override timestamp list (testing only)")
     return parser.parse_args(argv)
@@ -422,28 +506,74 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = _parse_args(argv)
     started_at = time.time()
 
+    # Honor deprecated CLI aliases: emit a one-time DeprecationWarning and copy
+    # the legacy value into the new attribute so downstream code only reads the
+    # new name. Quick task 260502-i16: --sample-data-dir -> --regions-dir,
+    # --source-regions -> --source-grids.
+    if args.sample_data_dir is not None and args.regions_dir is None:
+        warnings.warn(
+            "--sample-data-dir is deprecated; use --regions-dir "
+            "(data/regions/{REGION}/US-{REGION}-{GRID}.csv layout). "
+            "Honored for one release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        args.regions_dir = args.sample_data_dir
+    if args.source_regions is not None and args.source_grids is None:
+        warnings.warn(
+            "--source-regions is deprecated; use --source-grids "
+            "(grid identifiers like ISNE / TVA / SWPP). Honored for one release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        args.source_grids = args.source_regions
+
     # Resolve paths
-    sample_data_dir = (
-        Path(args.sample_data_dir)
-        if args.sample_data_dir
-        else Path(__file__).resolve().parent.parent.parent / "sample_data"
+    regions_root = (
+        Path(args.regions_dir)
+        if args.regions_dir
+        else DEFAULT_REGIONS_TREE_DIR
     )
     ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_dir = Path(args.out_dir) if args.out_dir else OUT_DIR_BASE / f"run_{ts_str}"
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Populate the module-level GRIDS tuple from the regions tree, restricted
+    # to grids that have a HW_TABLE entry. Without this filter the simulation
+    # would see destinations it cannot hardware-cost (KeyError in get_hardware).
+    discovered = set(discover_grids(regions_root))
+    hw_grids = set(HW_TABLE.keys())
+    usable = discovered & hw_grids
+    skipped = sorted(discovered - hw_grids)
+    global GRIDS
+    GRIDS = tuple(sorted(usable))
 
     print("=" * 60)
     print("[EVAL] Phase 4 multi-policy evaluation orchestrator")
     print("=" * 60)
     print(f"  Sweep kind:     {args.sweep_kind}")
     print(f"  Smoke mode:     {args.smoke}")
-    print(f"  Sample data:    {sample_data_dir}")
+    print(f"  Regions tree:   {regions_root}")
     print(f"  Output dir:     {out_dir}")
+    print(f"  Usable grids:   {len(GRIDS)} (intersection of regions-tree and HW_TABLE)")
+    if skipped:
+        print(f"  Skipped grids:  {len(skipped)} have no hw_avg.csv entry: {skipped}")
     print()
 
-    # Build the intensity lookup once in the parent (D-23 filter via include_years)
-    print("[EVAL] building intensity lookup from sample_data CSVs...")
-    intensity_lookup = build_intensity_lookup_from_csvs(sample_data_dir)
+    if not GRIDS:
+        print(
+            "[EVAL] ERROR: no usable grids found. Check that --regions-dir points "
+            "to data/regions/ and that data/hardware/hw_avg.csv contains entries."
+        )
+        return 2
+
+    # Build the intensity lookup once in the parent (D-23 filter via include_years).
+    # allowed_grids restricts the lookup to the GRIDS tuple so the worker pool
+    # never sees a destination grid without a hardware spec (260502-i16).
+    print("[EVAL] building intensity lookup from regions tree...")
+    intensity_lookup = build_intensity_lookup_from_regions_tree(
+        regions_root, allowed_grids=GRIDS,
+    )
     print(f"[EVAL] intensity_lookup size: {len(intensity_lookup)} entries (2020-2021 only)")
 
     # Enumerate the sweep
