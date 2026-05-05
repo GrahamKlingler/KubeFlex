@@ -219,8 +219,14 @@ class HeuristicPolicy(BasePolicy):
             # Destination running carbon over remaining time (offset by migration duration)
             # capped to self.lookahead_hours (same cap as stay_carbon for consistency).
             # hw_weighting toggle (HEUR-10, D-09): mirror the stay-loop semantics.
+            # offset_s is rounded to the nearest whole hour so every (grid, ts) passed
+            # to lookup_intensity hits the dict's exact-key fast path. The carbon
+            # forecast is hourly anyway, so a sub-hour offset has no effect on which
+            # sample we'd want -- and keeping the offset hour-aligned avoids the
+            # O(N) fuzzy-fallback scan in policies.lookup_intensity (quick task
+            # 260505-fvu, ~107000x speedup on the Policy 6 hot path).
             dest_run_carbon = 0.0
-            offset_s = int(mig_time_h * 3600)
+            offset_s = int(round(mig_time_h)) * 3600
             for h in range(min(time_left_int, self.lookahead_hours)):
                 ts = sim_timestamp + offset_s + h * 3600
                 val = lookup_intensity(intensity_lookup, dest, ts)
