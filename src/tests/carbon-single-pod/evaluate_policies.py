@@ -259,6 +259,28 @@ def generate_sweep(args) -> Iterator[RunConfig]:
         use_hw=True,
     )
 
+    # Smoke mode globally squashes expected_completion_min to 120 (2 h) for speed,
+    # but a 2-hour sim collapses policies 2-6 to identical results because policy 6's
+    # overhead amortization, deadline gate, lookahead horizon, and hw weighting have
+    # no room to differentiate from naive policies. Lift the floor for the main and
+    # ablation sub-sweeps to the same value the horizon override already uses
+    # (max(HORIZON_VALUES) * 60 == 2880 minutes / 48 hours), and warn the user.
+    main_ablation_completion_min = max(base_completion_min, max(HORIZON_VALUES) * 60)
+    if smoke:
+        common_main_ablation = dict(
+            common, expected_completion_min=main_ablation_completion_min,
+        )
+        print(
+            "[SWEEP] WARNING: smoke mode main/ablation sub-sweeps use "
+            "expected_completion_min={} (overriding smoke default {}) so "
+            "policies 2-6 do not collapse to identical results over a "
+            "2-hour sim horizon.".format(
+                main_ablation_completion_min, smoke_completion_min,
+            )
+        )
+    else:
+        common_main_ablation = common
+
     if sweep_kind in ("main", "all"):
         timestamps = _resolve_timestamps(args, lambda: _main_sweep_timestamps(2020))
         grids = _resolve_grids(args)
@@ -279,7 +301,7 @@ def generate_sweep(args) -> Iterator[RunConfig]:
                         overhead_cost=True,
                         deadline_gate=True,
                         sweep_kind="main",
-                        **common,
+                        **common_main_ablation,
                     )
                     check_split_access(cfg.start_ts)  # D-23 -- raises on 2022
                     yield cfg
@@ -302,7 +324,7 @@ def generate_sweep(args) -> Iterator[RunConfig]:
                         overhead_cost=oh,
                         deadline_gate=dl,
                         sweep_kind="ablation",
-                        **common,
+                        **common_main_ablation,
                     )
                     check_split_access(cfg.start_ts)
                     yield cfg
