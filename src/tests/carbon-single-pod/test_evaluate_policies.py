@@ -197,6 +197,67 @@ def test_horizon_sweep_seven_values():
     )
 
 
+def test_main_sweep_smoke_overrides_completion_min():
+    """generate_sweep(sweep_kind='main', smoke=True) must lift expected_completion_min
+    to >= max(HORIZON_VALUES)*60 so policies 2-6 do not collapse over a 2-hour sim."""
+    import argparse
+    from evaluate_policies import generate_sweep, HORIZON_VALUES  # noqa: WPS433
+    args = argparse.Namespace(
+        sweep_kind="main",
+        smoke=True,
+        scheduler_time=BASE_TS_2020,
+        source_grids=[DEFAULT_SOURCE_GRID],
+        source_regions=None,
+        timestamps=[BASE_TS_2020],
+        app_size_mb=64.0,
+        expected_completion_min=2880,
+        expected_migration_min=5,
+        deadline_multiplier=1.5,
+        lookahead_hours=48,
+        include_network_power=True,
+    )
+    configs = list(generate_sweep(args))
+    assert configs, "Expected non-empty main smoke sweep"
+    floor = max(HORIZON_VALUES) * 60  # 2880 minutes
+    offending = [c.expected_completion_min for c in configs if c.expected_completion_min < floor]
+    assert not offending, (
+        f"main smoke cfgs must have expected_completion_min >= {floor}, "
+        f"got offending values {sorted(set(offending))}"
+    )
+
+
+def test_ablation_sweep_smoke_overrides_completion_min():
+    """generate_sweep(sweep_kind='ablation', smoke=True) must lift
+    expected_completion_min to >= max(HORIZON_VALUES)*60 so the 8 ablation cells
+    differ over a long-enough sim horizon."""
+    import argparse
+    from evaluate_policies import generate_sweep, HORIZON_VALUES  # noqa: WPS433
+    args = argparse.Namespace(
+        sweep_kind="ablation",
+        smoke=True,
+        scheduler_time=BASE_TS_2020,
+        source_grids=[DEFAULT_SOURCE_GRID],
+        source_regions=None,
+        timestamps=[BASE_TS_2020],
+        app_size_mb=64.0,
+        expected_completion_min=2880,
+        expected_migration_min=5,
+        deadline_multiplier=1.5,
+        lookahead_hours=48,
+        include_network_power=True,
+    )
+    configs = list(generate_sweep(args))
+    assert len(configs) == 8, (
+        f"Expected 8 ablation cells in smoke mode, got {len(configs)}"
+    )
+    floor = max(HORIZON_VALUES) * 60
+    offending = [c.expected_completion_min for c in configs if c.expected_completion_min < floor]
+    assert not offending, (
+        f"ablation smoke cfgs must have expected_completion_min >= {floor}, "
+        f"got offending values {sorted(set(offending))}"
+    )
+
+
 def test_2022_timestamp_hard_block():
     """check_split_access on a 2022 timestamp must raise RuntimeError (D-23)."""
     raised = False
@@ -278,6 +339,8 @@ def main():
         test_policy1_baseline_zero_savings,
         test_ablation_cell_enumeration_eight_cells,
         test_horizon_sweep_seven_values,
+        test_main_sweep_smoke_overrides_completion_min,
+        test_ablation_sweep_smoke_overrides_completion_min,
         test_2022_timestamp_hard_block,
         test_intensity_lookup_filters_2022,
     ]
