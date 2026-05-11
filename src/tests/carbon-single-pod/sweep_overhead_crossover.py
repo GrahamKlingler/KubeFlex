@@ -1,14 +1,25 @@
 #!/usr/bin/env python3
-"""Policy 2 vs Policy 6 overhead-crossover sensitivity sweep (quick task 260511-gnm).
+"""Policy 2 vs Policy 6 BANC<->CISO overhead-crossover sweep (quick task 260511-jce, extends 260511-gnm).
 
 This is a one-shot orchestrator that answers the thesis question:
     "At what migration overhead does the naive always-migrate-to-best policy
     (Policy 2) start to beat the heuristic (Policy 6)?"
 
+The default sweep is now BANC<->CISO **directional**: both grids are CAL-region
+neighbors with genuinely competitive carbon intensities, unlike the prior
+ISNE->SCL pair (260511-gnm) where SCL was ~44x cleaner so Policy 6 migrated
+regardless of overhead. The combination of (a) the minute-granular sim-core
+(260511-jce) and (b) a competitive grid pair yields a well-posed crossover
+question. See
+``.planning/quick/260511-jce-extend-policy-2-vs-policy-6-overhead-swe/260511-jce-CONTEXT.md``
+for the locked decisions.
+
 The sweep is a single linked knob: for each candidate overhead value
-``m`` (minutes) in the grid [0, 5, 10, ..., 60], we
+``m`` (minutes) in the grid [0, 5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 240,
+360], we
   (a) set ``RunConfig.expected_migration_min = m`` so the *actual* simulated
-      migration cost scales with the swept knob, and
+      migration cost (now minute-granular per 260511-jce) scales with the
+      swept knob, and
   (b) wrap the run in a ``scaled_overhead(m)`` context manager that
       monkey-patches ``heuristics.policy_heuristic.{ckpt_overhead,
       send_overhead, restore_overhead}`` (the *bound* symbols inside Policy 6,
@@ -29,13 +40,16 @@ This script does NOT modify ``_simulation_core.py``, ``evaluate_policies.py``,
 imports them and patches the Policy 6 bindings inside a context manager that
 restores the originals on exit.
 
-Outputs (under ``data/quick/260511-gnm-overhead-crossover/``):
-  - ``curves.csv``           -- long-format per-run results
-  - ``curves.png``           -- mean-carbon-vs-overhead line plot
-  - ``crossover_summary.md`` -- crossover value (or "no crossover in swept
-                                range") plus methodology + per-overhead table
+Outputs (under ``data/quick/260511-jce-banc-ciso-overhead-crossover/``):
+  - ``curves.csv``           -- long-format per-run results (one row per
+                                (overhead, direction, policy, start_ts)).
+  - ``curves.png``           -- two-subplot mean-carbon-vs-overhead line plot
+                                (BANC->CISO and CISO->BANC).
+  - ``crossover_summary.md`` -- per-direction crossover value (or "no crossover
+                                in swept range") plus methodology + per-overhead
+                                carbon + mig_count table.
 
-Reference: .planning/quick/260511-gnm-find-overhead-threshold-where-policy-2-b/260511-gnm-CONTEXT.md
+Reference: .planning/quick/260511-jce-extend-policy-2-vs-policy-6-overhead-swe/260511-jce-CONTEXT.md
 """
 
 import argparse
@@ -74,12 +88,19 @@ from heuristics import overhead as oh_mod  # noqa: E402
 
 # ── Constants (LOCKED by CONTEXT.md) ─────────────────────────────────
 
-OVERHEAD_GRID_MIN = (0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60)
+# 13-value grid up to 360 min (260511-jce locked). Denser at the low end where
+# crossovers are likely; coarser past 60 min where multi-hour overhead regimes
+# only matter qualitatively.
+OVERHEAD_GRID_MIN = (0, 5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 240, 360)
 POLICIES = (2, 6)
 OUT_DIR = (
     Path(__file__).resolve().parent.parent.parent.parent
-    / "data" / "quick" / "260511-gnm-overhead-crossover"
+    / "data" / "quick" / "260511-jce-banc-ciso-overhead-crossover"
 )
+# BANC and CISO are both CAL-region grids with competitive carbon intensities;
+# the directional pairs let us answer the crossover question in both
+# directions on a single sweep run.
+DIRECTIONAL_PAIRS = (("BANC", "CISO"), ("CISO", "BANC"))  # LOCKED
 ANCHOR_APP_SIZE_MB = 64.0  # canonical app size used for the baseline anchor
 
 
@@ -162,19 +183,25 @@ class scaled_overhead:
 
 # ── Sweep core ────────────────────────────────────────────────────────
 
-def _pick_anchor_grid(usable_grids):
+def _pick_anchor_grid(usable_grids, preferred=("BANC", "CISO", "ISNE")):
     """Return the grid to use as the linked-knob baseline anchor.
 
-    Prefer ISNE (Phase 4 dev-period NE source) when available; otherwise fall
-    back to the first usable grid (alphabetical order).
+    Prefer BANC/CISO (the 260511-jce directional-pair endpoints); fall back to
+    ISNE for backward compat with 260511-gnm callers; otherwise the first
+    usable grid (alphabetical order).
     """
-    if "ISNE" in usable_grids:
-        return "ISNE"
+    for g in preferred:
+        if g in usable_grids:
+            return g
     return usable_grids[0]
 
 
 def _pick_source_grids(usable_grids, override):
-    """Resolve --source-grids CLI override or default to a single NE source."""
+    """Resolve --source-grids CLI override or default to a single NE source.
+
+    Kept for backward compatibility with 260511-gnm callers; the 260511-jce
+    default sweep uses :func:`_resolve_directional_pairs` instead.
+    """
     if override:
         bad = [g for g in override if g not in usable_grids]
         if bad:
@@ -188,6 +215,48 @@ def _pick_source_grids(usable_grids, override):
     return [usable_grids[0]]
 
 
+def _resolve_directional_pairs(usable_grids, override_pairs):
+    """Return list of (source_grid, dest_grid) pairs to sweep.
+
+    Default: BANC<->CISO bidirectional. CLI ``--pairs`` can override with a list
+    of ``SRC:DST`` tokens.
+    """
+    if override_pairs is None:
+        pairs = list(DIRECTIONAL_PAIRS)
+    else:
+        pairs = []
+        for tok in override_pairs:
+            try:
+                s, d = tok.split(":")
+            except ValueError:
+                raise SystemExit(
+                    f"[SWEEP] bad --pairs token {tok!r}; expected SRC:DST"
+                )
+            pairs.append((s, d))
+    bad = [(s, d) for s, d in pairs
+           if s not in usable_grids or d not in usable_grids]
+    if bad:
+        raise SystemExit(
+            f"[SWEEP] requested directional pairs {bad} not in usable set "
+            f"{usable_grids}"
+        )
+    return pairs
+
+
+def _build_two_grid_lookup(full_lookup, src_grid, dst_grid):
+    """Subset ``full_lookup`` to ``(src_grid, ts)`` and ``(dst_grid, ts)`` entries only.
+
+    ``simulate_one_run`` infers available grids from the lookup keys
+    (``sorted(set(g for g, _ts in lookup.keys()))`` in _simulation_core.py
+    line 174), so restricting the lookup to two grids is how we constrain
+    Policy 6's destination search to a single candidate per direction.
+    """
+    return {
+        (g, ts): v for (g, ts), v in full_lookup.items()
+        if g in (src_grid, dst_grid)
+    }
+
+
 def _resolve_timestamps(all_ts, num):
     """Sub-sample ``all_ts`` to roughly ``num`` evenly-spaced timestamps."""
     if num <= 0:
@@ -198,8 +267,12 @@ def _resolve_timestamps(all_ts, num):
     return list(all_ts[::step])[:num]
 
 
-def run_sweep(lookup, source_grids, timestamps, anchor_grid):
-    """Execute the 13 x 2 x len(timestamps) x len(source_grids) cell sweep.
+def run_sweep(full_lookup, directional_pairs, timestamps, anchor_grid):
+    """Execute the 13 x len(directional_pairs) x 2 x len(timestamps) cell sweep.
+
+    For each directional ``(src, dst)`` pair we build a two-grid lookup so
+    Policy 6 sees exactly one candidate destination (the directional partner),
+    then iterate overhead values, timestamps, and policies.
 
     Returns:
         Tuple[List[dict], float] of (per-run rows, baseline_total_min used
@@ -207,7 +280,7 @@ def run_sweep(lookup, source_grids, timestamps, anchor_grid):
     """
     template = RunConfig(
         start_ts=0,
-        source_grid=source_grids[0],
+        source_grid=directional_pairs[0][0],
         policy_id=2,
         app_size_mb=ANCHOR_APP_SIZE_MB,
         expected_completion_min=2880,
@@ -233,24 +306,26 @@ def run_sweep(lookup, source_grids, timestamps, anchor_grid):
         with scaled_overhead(float(m), anchor_grid) as so:
             baseline_total_min_seen = so.baseline_total_min  # constant across m
             print(
-                f"[PATCH] overhead_min={m:>2d} scale={so.scale:.4f} "
+                f"[PATCH] overhead_min={m:>3d} scale={so.scale:.4f} "
                 f"(baseline={so.baseline_total_min:.3f} min, anchor={anchor_grid})"
             )
-            for ts in timestamps:
-                for g in source_grids:
+            for src, dst in directional_pairs:
+                pair_lookup = _build_two_grid_lookup(full_lookup, src, dst)
+                for ts in timestamps:
                     for p in POLICIES:
                         cfg = replace(
                             template,
                             start_ts=ts,
-                            source_grid=g,
+                            source_grid=src,
                             policy_id=p,
                             expected_migration_min=int(m),
                         )
-                        out = simulate_one_run(lookup, cfg)
+                        out = simulate_one_run(pair_lookup, cfg)
                         rows.append({
                             "overhead_min": m,
                             "policy": p,
-                            "source_grid": g,
+                            "source_grid": src,
+                            "dest_grid": dst,
                             "start_ts": ts,
                             "total_carbon_gco2": out["total_carbon_gco2"],
                             "baseline_carbon_gco2": out["baseline_carbon_gco2"],
@@ -267,6 +342,10 @@ def per_cell_means(rows):
 
     Each value is the mean ``total_carbon_gco2`` across samples for that
     (overhead, policy) cell. ``float('nan')`` when no samples exist.
+
+    Kept for backward compatibility; the 260511-jce sweep uses
+    :func:`per_cell_means_by_direction` which preserves the (source, dest)
+    dimension.
     """
     p2_means, p6_means = [], []
     for m in OVERHEAD_GRID_MIN:
@@ -277,6 +356,41 @@ def per_cell_means(rows):
         p2_means.append(mean(v2) if v2 else float("nan"))
         p6_means.append(mean(v6) if v6 else float("nan"))
     return p2_means, p6_means
+
+
+def per_cell_means_by_direction(rows, directional_pairs):
+    """Return per-(src, dst) total-carbon and migration-count mean dicts.
+
+    Output structure::
+
+        carbon[(src, dst)][policy_id] -> list aligned to OVERHEAD_GRID_MIN
+        mig_count[(src, dst)][policy_id] -> list aligned to OVERHEAD_GRID_MIN
+
+    Where each list element is the mean across the per-timestamp samples for
+    that (overhead, direction, policy) cell. NaN when no samples exist.
+    """
+    out_carbon = {pair: {p: [] for p in POLICIES} for pair in directional_pairs}
+    out_mig = {pair: {p: [] for p in POLICIES} for pair in directional_pairs}
+    for m in OVERHEAD_GRID_MIN:
+        for src, dst in directional_pairs:
+            for p in POLICIES:
+                vals = [r["total_carbon_gco2"] for r in rows
+                        if r["overhead_min"] == m
+                        and r["policy"] == p
+                        and r["source_grid"] == src
+                        and r["dest_grid"] == dst]
+                migs = [r["migration_count"] for r in rows
+                        if r["overhead_min"] == m
+                        and r["policy"] == p
+                        and r["source_grid"] == src
+                        and r["dest_grid"] == dst]
+                out_carbon[(src, dst)][p].append(
+                    mean(vals) if vals else float("nan")
+                )
+                out_mig[(src, dst)][p].append(
+                    mean(migs) if migs else float("nan")
+                )
+    return out_carbon, out_mig
 
 
 def find_crossover(p2_means, p6_means):
@@ -310,12 +424,15 @@ def find_crossover(p2_means, p6_means):
 
 def write_csv(rows, path):
     fieldnames = [
-        "overhead_min", "policy", "source_grid", "start_ts",
+        "overhead_min", "policy", "source_grid", "dest_grid", "start_ts",
         "total_carbon_gco2", "baseline_carbon_gco2", "migration_count",
     ]
     rows_sorted = sorted(
         rows,
-        key=lambda r: (r["overhead_min"], r["policy"], r["source_grid"], r["start_ts"]),
+        key=lambda r: (
+            r["overhead_min"], r["source_grid"], r["dest_grid"],
+            r["policy"], r["start_ts"],
+        ),
     )
     with open(path, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)
@@ -324,44 +441,59 @@ def write_csv(rows, path):
             w.writerow(r)
 
 
-def write_plot(p2_means, p6_means, crossover_min, source_grids, timestamps, path):
-    fig, ax = plt.subplots(figsize=(10, 6))
-    ax.plot(
-        OVERHEAD_GRID_MIN, p2_means,
-        marker="o", linewidth=1.8, color=POLICY_COLORS[2],
-        label="Policy 2 (always-best)",
+def write_plot(carbon_by_dir, crossovers_by_dir, directional_pairs,
+               timestamps, path):
+    """Two-subplot figure: one direction per axes.
+
+    Each subplot shows mean total carbon vs migration overhead for Policy 2
+    and Policy 6, with the per-direction crossover annotated (when present).
+    """
+    fig, axes = plt.subplots(
+        1, len(directional_pairs), figsize=(14, 6), sharey=True
     )
-    ax.plot(
-        OVERHEAD_GRID_MIN, p6_means,
-        marker="o", linewidth=1.8, color=POLICY_COLORS[6],
-        label="Policy 6 (heuristic)",
-    )
-    if crossover_min is not None:
-        ax.axvline(x=crossover_min, linestyle="--", color="gray", linewidth=1.0)
-        y_top = max(
-            max(v for v in p2_means if v == v),
-            max(v for v in p6_means if v == v),
+    if len(directional_pairs) == 1:
+        axes = [axes]
+    for ax, pair in zip(axes, directional_pairs):
+        src, dst = pair
+        p2_means = carbon_by_dir[pair][2]
+        p6_means = carbon_by_dir[pair][6]
+        ax.plot(
+            OVERHEAD_GRID_MIN, p2_means,
+            marker="o", linewidth=1.8, color=POLICY_COLORS[2],
+            label="Policy 2 (always-best)",
         )
-        ax.text(
-            crossover_min, y_top, f" crossover ~ {crossover_min:g} min",
-            color="gray", va="top", ha="left",
+        ax.plot(
+            OVERHEAD_GRID_MIN, p6_means,
+            marker="o", linewidth=1.8, color=POLICY_COLORS[6],
+            label="Policy 6 (heuristic)",
         )
-    ax.set_title("Policy 2 vs Policy 6 -- carbon vs migration overhead (linked knob)")
-    ax.set_xlabel("Migration overhead (minutes)")
-    ax.set_ylabel("Mean total carbon (gCO2eq, HW-scaled)")
-    ax.grid(True, linestyle=":", linewidth=0.5, alpha=0.6)
-    ax.legend(loc="lower left")
-    sample_txt = (
-        f"{len(timestamps)} starts x {len(source_grids)} grid(s); "
-        f"48 h jobs; --use-hw"
+        cross = crossovers_by_dir.get(pair)
+        if cross is not None:
+            cm, _idx = cross
+            ax.axvline(x=cm, linestyle="--", color="gray", linewidth=1.0)
+            y_top = max(
+                max(v for v in p2_means if v == v),
+                max(v for v in p6_means if v == v),
+            )
+            ax.text(
+                cm, y_top, f" crossover ~ {cm:g} min",
+                color="gray", va="top", ha="left",
+            )
+        ax.set_title(f"{src} -> {dst}")
+        ax.set_xlabel("Migration overhead (minutes)")
+        ax.grid(True, linestyle=":", linewidth=0.5, alpha=0.6)
+        ax.legend(loc="lower left")
+    axes[0].set_ylabel("Mean total carbon (gCO2eq, HW-scaled)")
+    fig.suptitle(
+        "Policy 2 vs Policy 6 -- carbon vs migration overhead "
+        "(BANC<->CISO, linked knob)"
     )
-    ax.text(
-        0.99, 0.02, sample_txt,
-        transform=ax.transAxes,
-        ha="right", va="bottom",
-        fontsize=8, color="dimgray",
+    fig.text(
+        0.99, 0.02,
+        f"{len(timestamps)} starts; 48 h jobs; --use-hw",
+        ha="right", va="bottom", fontsize=8, color="dimgray",
     )
-    fig.tight_layout()
+    fig.tight_layout(rect=[0, 0.02, 1, 0.96])
     fig.savefig(path, dpi=140)
     plt.close(fig)
 
@@ -379,82 +511,94 @@ def _git_short_sha():
 
 
 def write_summary_md(
-    path, crossover_min, crossover_idx, p2_means, p6_means,
-    baseline_total_min, anchor_grid, source_grids, timestamps,
+    path, crossovers_by_dir, carbon_by_dir, mig_count_by_dir,
+    directional_pairs, baseline_total_min, anchor_grid, timestamps,
 ):
+    """Render the per-direction crossover summary markdown.
+
+    For each directional pair, emit:
+      - The crossover overhead (interpolated to 0.1 min) or "none in [0, 360]".
+      - A per-overhead table of (P2 carbon, P6 carbon, diff, P2 mig_count,
+        P6 mig_count) so the user can sanity-check the linked-knob effect
+        on Policy 6's migration count.
+    """
     now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
     sha = _git_short_sha()
 
-    if crossover_min is None:
-        result_line = (
-            "**Crossover:** none in swept range "
-            f"[0, {OVERHEAD_GRID_MIN[-1]}] min. Policy 6 dominates throughout."
-        )
-    else:
-        i = crossover_idx
-        x0, x1 = OVERHEAD_GRID_MIN[i - 1], OVERHEAD_GRID_MIN[i]
-        result_line = (
-            f"**Crossover:** Policy 2 beats Policy 6 at overhead >= "
-            f"{crossover_min} min (interpolated between {x0} and {x1} min)."
-        )
-
-    # Per-overhead table
-    table_lines = [
-        "| overhead_min | Policy 2 | Policy 6 | P2 - P6 |",
-        "| --- | --- | --- | --- |",
-    ]
-    for i, m in enumerate(OVERHEAD_GRID_MIN):
-        p2 = p2_means[i]
-        p6 = p6_means[i]
-        d = p2 - p6
-        table_lines.append(
-            f"| {m} | {p2:.1f} | {p6:.1f} | {d:+.1f} |"
-        )
-
-    md = []
-    md.append("# Policy 2 vs Policy 6 -- Overhead Crossover")
-    md.append("")
-    md.append("**Quick task:** 260511-gnm")
-    md.append(f"**Generated:** {now_iso}")
-    md.append(f"**Git SHA:** {sha}")
-    md.append("")
-    md.append("## Result")
-    md.append("")
-    md.append(result_line)
-    md.append("")
-    md.append("## Methodology")
-    md.append("")
-    md.append(
-        "- Linked-knob sweep: `expected_migration_min` is set to each grid value "
-        "AND Policy 6's internal overhead estimates "
-        "(`ckpt_overhead`/`send_overhead`/`restore_overhead` as bound in "
-        "`heuristics.policy_heuristic`) are scaled by "
-        "`target_minutes / baseline_total_min`."
-    )
-    md.append(
-        f"- Baseline total used for scaling: `{baseline_total_min:.3f}` min "
-        f"(linear fit at {ANCHOR_APP_SIZE_MB:g} MB, anchor grid `{anchor_grid}` "
-        "used as both src and dst)."
-    )
-    md.append(f"- Grid: {list(OVERHEAD_GRID_MIN)}")
-    md.append(
-        f"- Samples: {len(timestamps)} 2020 hourly starts x source_grids="
-        f"{source_grids} (sub-sampled from Phase 4 `_main_sweep_timestamps`)."
-    )
-    md.append(
+    md = [
+        "# Policy 2 vs Policy 6 -- BANC<->CISO Overhead Crossover",
+        "",
+        "**Quick task:** 260511-jce",
+        f"**Generated:** {now_iso}",
+        f"**Git SHA:** {sha}",
+        "",
+        "## Sim-core formula (260511-jce)",
+        "",
+        "Migration carbon at decision hour: "
+        "`(expected_migration_min / 60) * source_intensity_at_h` "
+        "(HW-scaled iff `use_hw=True`).",
+        "Cooldown: `max(0, ceil((expected_migration_min - 60) / 60))` hours.",
+        "During cooldown, intensity accumulates on the target grid.",
+        "",
+        "## Methodology",
+        "",
+        "- Linked-knob sweep: `expected_migration_min` AND Policy 6's bound "
+        "overhead helpers "
+        "(`ckpt_overhead`/`send_overhead`/`restore_overhead` in "
+        "`heuristics.policy_heuristic`) scaled by "
+        "`target_minutes / baseline_total_min`.",
+        f"- Baseline total: `{baseline_total_min:.3f}` min "
+        f"(linear fit at {ANCHOR_APP_SIZE_MB:g} MB, anchor `{anchor_grid}`).",
+        f"- Grid: {list(OVERHEAD_GRID_MIN)}",
+        f"- Samples: {len(timestamps)} 2020 hourly starts per direction.",
+        f"- Directions: {[f'{s}->{d}' for s, d in directional_pairs]}",
         "- Settings: app_size_mb=64, expected_completion_min=2880 (48 h), "
-        "use_hw=True."
-    )
-    md.append("")
-    md.append("## Per-overhead mean total carbon (gCO2eq)")
-    md.append("")
-    md.extend(table_lines)
-    md.append("")
-    md.append("## Files")
-    md.append("")
-    md.append("- `curves.csv` -- long-format per-run results.")
-    md.append("- `curves.png` -- Policy 2 vs Policy 6 line plot with crossover annotation.")
-    md.append("")
+        "use_hw=True.",
+        "",
+    ]
+
+    for pair in directional_pairs:
+        src, dst = pair
+        cross = crossovers_by_dir.get(pair)
+        md.append(f"## {src} -> {dst}")
+        md.append("")
+        if cross is None:
+            md.append(
+                f"**Crossover:** none in swept range "
+                f"[0, {OVERHEAD_GRID_MIN[-1]}] min for this direction."
+            )
+        else:
+            cm, idx = cross
+            x0, x1 = OVERHEAD_GRID_MIN[idx - 1], OVERHEAD_GRID_MIN[idx]
+            md.append(
+                f"**Crossover:** Policy 2 beats Policy 6 at overhead >= "
+                f"{cm} min (interpolated between {x0} and {x1} min)."
+            )
+        md.append("")
+        md.append(
+            "| overhead_min | P2 carbon | P6 carbon | P2 - P6 | "
+            "P2 mig_count | P6 mig_count |"
+        )
+        md.append("| --- | --- | --- | --- | --- | --- |")
+        c = carbon_by_dir[pair]
+        mc = mig_count_by_dir[pair]
+        for i, m in enumerate(OVERHEAD_GRID_MIN):
+            md.append(
+                f"| {m} | {c[2][i]:.1f} | {c[6][i]:.1f} | "
+                f"{c[2][i] - c[6][i]:+.1f} | "
+                f"{mc[2][i]:.2f} | {mc[6][i]:.2f} |"
+            )
+        md.append("")
+
+    md.extend([
+        "## Files",
+        "",
+        "- `curves.csv` -- long-format per-run results (one row per "
+        "(overhead, direction, policy, start_ts)).",
+        "- `curves.png` -- two-subplot P2 vs P6 line plot with per-direction "
+        "crossover annotation.",
+        "",
+    ])
 
     with open(path, "w") as f:
         f.write("\n".join(md))
@@ -464,16 +608,19 @@ def write_summary_md(
 
 def _parse_args(argv=None):
     p = argparse.ArgumentParser(
-        description="Policy 2 vs Policy 6 overhead-crossover sweep (260511-gnm)"
+        description="Policy 2 vs Policy 6 BANC<->CISO overhead-crossover sweep "
+                    "(260511-jce, extends 260511-gnm)"
     )
     p.add_argument("--regions-dir", default=None,
                    help="Override regions tree root (default: data/regions/)")
-    p.add_argument("--source-grids", nargs="+", default=None,
-                   help="Source grids to use (default: ['ISNE'])")
+    p.add_argument("--pairs", nargs="+", default=None,
+                   help="Directional pairs as SRC:DST tokens, e.g. BANC:CISO. "
+                        "Default: BANC:CISO and CISO:BANC.")
     p.add_argument("--num-timestamps", type=int, default=24,
-                   help="Number of sub-sampled 2020 hourly starts (default: 24)")
+                   help="Number of sub-sampled 2020 hourly starts per direction "
+                        "(default: 24)")
     p.add_argument("--smoke", action="store_true",
-                   help="Smoke run with N=4 starts for <30 s sanity check")
+                   help="Smoke run with N=4 starts for <60 s sanity check")
     p.add_argument("--out-dir", default=None,
                    help="Override output directory")
     return p.parse_args(argv)
@@ -504,8 +651,22 @@ def main(argv=None) -> int:
         )
         return 1
 
-    source_grids = _pick_source_grids(usable, args.source_grids)
-    anchor_grid = _pick_anchor_grid(usable)
+    # Resolve directional pairs (default BANC<->CISO bidirectional).
+    directional_pairs = _resolve_directional_pairs(usable, args.pairs)
+    # Anchor grid is one shared scalar for the linked-knob baseline. Prefer
+    # BANC because it's an endpoint of both default pairs.
+    pair_grids = tuple({g for pair in directional_pairs for g in pair})
+    anchor_grid = _pick_anchor_grid(usable, preferred=("BANC", "CISO", "ISNE"))
+
+    # Validate both pair endpoints are usable.
+    missing = [g for g in pair_grids if g not in usable]
+    if missing:
+        print(
+            f"[SWEEP] ERROR: directional pair endpoints {missing} not in "
+            f"usable grid set ({usable})",
+            file=sys.stderr,
+        )
+        return 1
 
     # Sub-sampled timestamps from Phase 4's main-sweep 2020 set.
     all_ts = _main_sweep_timestamps(2020)
@@ -515,7 +676,7 @@ def main(argv=None) -> int:
     print(
         f"[SWEEP] regions_root={regions_root}\n"
         f"[SWEEP] usable_grids={usable}\n"
-        f"[SWEEP] source_grids={source_grids} anchor={anchor_grid}\n"
+        f"[SWEEP] directional_pairs={directional_pairs} anchor={anchor_grid}\n"
         f"[SWEEP] timestamps: {len(timestamps)} starts "
         f"(first={timestamps[0]}, last={timestamps[-1]})\n"
         f"[SWEEP] overhead_grid={list(OVERHEAD_GRID_MIN)} min\n"
@@ -523,20 +684,33 @@ def main(argv=None) -> int:
         f"[SWEEP] out_dir={out_dir}"
     )
 
-    # Build the intensity lookup once (D-23 enforced inside the helper).
+    # Build the intensity lookup once, restricted to the directional-pair
+    # endpoints to keep memory small (D-23 enforced inside the helper).
     lookup = build_intensity_lookup_from_regions_tree(
-        regions_root, allowed_grids=tuple(usable),
+        regions_root, allowed_grids=tuple(sorted(pair_grids)),
     )
     print(f"[SWEEP] intensity_lookup: {len(lookup)} (grid, ts) entries")
 
-    rows, baseline_total_min = run_sweep(lookup, source_grids, timestamps, anchor_grid)
+    rows, baseline_total_min = run_sweep(
+        lookup, directional_pairs, timestamps, anchor_grid,
+    )
     print(
         f"[SWEEP] completed {len(rows)} simulated runs in "
         f"{time.time() - t0:.2f} s"
     )
 
-    p2_means, p6_means = per_cell_means(rows)
-    crossover_min, crossover_idx = find_crossover(p2_means, p6_means)
+    carbon_by_dir, mig_count_by_dir = per_cell_means_by_direction(
+        rows, directional_pairs,
+    )
+    crossovers_by_dir = {}
+    for pair in directional_pairs:
+        cm, idx = find_crossover(
+            carbon_by_dir[pair][2], carbon_by_dir[pair][6],
+        )
+        if cm is None:
+            crossovers_by_dir[pair] = None
+        else:
+            crossovers_by_dir[pair] = (cm, idx)
 
     # Write artifacts.
     csv_path = out_dir / "curves.csv"
@@ -545,24 +719,31 @@ def main(argv=None) -> int:
 
     write_csv(rows, csv_path)
     print(f"[PLOT] wrote {csv_path}")
-    write_plot(p2_means, p6_means, crossover_min, source_grids, timestamps, png_path)
+    write_plot(
+        carbon_by_dir, crossovers_by_dir, directional_pairs,
+        timestamps, png_path,
+    )
     print(f"[PLOT] wrote {png_path}")
     write_summary_md(
-        md_path, crossover_min, crossover_idx, p2_means, p6_means,
-        baseline_total_min, anchor_grid, source_grids, timestamps,
+        md_path, crossovers_by_dir, carbon_by_dir, mig_count_by_dir,
+        directional_pairs, baseline_total_min, anchor_grid, timestamps,
     )
     print(f"[PLOT] wrote {md_path}")
 
-    if crossover_min is None:
-        print(
-            "[SWEEP] RESULT: no crossover in swept range "
-            f"[0, {OVERHEAD_GRID_MIN[-1]}] min -- Policy 6 dominates throughout."
-        )
-    else:
-        print(
-            f"[SWEEP] RESULT: crossover at overhead ~ {crossover_min} min "
-            "(Policy 2 reaches/beats Policy 6 at or beyond this overhead)."
-        )
+    for pair in directional_pairs:
+        cross = crossovers_by_dir.get(pair)
+        src, dst = pair
+        if cross is None:
+            print(
+                f"[SWEEP] RESULT {src}->{dst}: no crossover in swept range "
+                f"[0, {OVERHEAD_GRID_MIN[-1]}] min."
+            )
+        else:
+            cm, _idx = cross
+            print(
+                f"[SWEEP] RESULT {src}->{dst}: crossover at overhead ~ "
+                f"{cm} min."
+            )
 
     print(f"[SWEEP] total wall-clock: {time.time() - t0:.2f} s")
     return 0
