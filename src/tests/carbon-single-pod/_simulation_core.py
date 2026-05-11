@@ -199,6 +199,11 @@ def simulate_one_run(intensity_lookup, cfg):
     baseline_carbon = 0.0
     hours_tracked = 0
     migrating_cooldown = 0  # hours remaining in migration (pod unavailable)
+    # Additive diagnostic (quick task 260511-kqo): list of successful migration
+    # destinations in chronological order. Does NOT include the source grid.
+    # Empty list when no migrations occurred. Existing tests/callers ignore
+    # unknown return-dict keys.
+    dest_grids_visited = []
 
     policy_obj = _get_policy_for_config(cfg)
 
@@ -262,6 +267,8 @@ def simulate_one_run(intensity_lookup, cfg):
                     int(math.ceil((cfg.expected_migration_min - 60) / 60.0)),
                 )
                 current_grid = target_grid
+                # 260511-kqo: track destinations for downstream diagnostics.
+                dest_grids_visited.append(target_grid)
 
     # Derived metrics. The CLI wrapper computes total_runtime_ms,
     # migration_overhead_ms, migration_fraction, migration_carbon_est, and
@@ -320,4 +327,7 @@ def simulate_one_run(intensity_lookup, cfg):
         "completed_hours": hours_tracked,
         "sweep_kind": cfg.sweep_kind,
         "wrapped_into_val": wrapped_into_val,  # side-channel for metadata.json (D-22)
+        # 260511-kqo: additive diagnostic — chronological list of successful
+        # migration destinations (excluding source). Empty list = no migrations.
+        "dest_grids_visited": dest_grids_visited,
     }
