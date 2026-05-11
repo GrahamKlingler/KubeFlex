@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
-"""Policy 2 vs Policy 6 BANC<->CISO overhead-crossover sweep (quick task 260511-jce, extends 260511-gnm).
+"""Three-policy BANC<->CISO overhead-crossover sweep (quick task 260511-k7l, extends 260511-jce).
 
 This is a one-shot orchestrator that answers the thesis question:
-    "At what migration overhead does the naive always-migrate-to-best policy
-    (Policy 2) start to beat the heuristic (Policy 6)?"
+    "How do Policies 2 (always-best), 5 (always-best-1h), and 6 (heuristic)
+    compare on the BANC<->CISO directional sweep as migration overhead grows,
+    and where (if anywhere) do their carbon curves cross?"
 
-The default sweep is now BANC<->CISO **directional**: both grids are CAL-region
-neighbors with genuinely competitive carbon intensities, unlike the prior
-ISNE->SCL pair (260511-gnm) where SCL was ~44x cleaner so Policy 6 migrated
-regardless of overhead. The combination of (a) the minute-granular sim-core
-(260511-jce) and (b) a competitive grid pair yields a well-posed crossover
-question. See
-``.planning/quick/260511-jce-extend-policy-2-vs-policy-6-overhead-swe/260511-jce-CONTEXT.md``
-for the locked decisions.
+The default sweep is BANC<->CISO **directional** across **policies 2, 5, and 6**.
+Both grids are CAL-region neighbors with genuinely competitive carbon
+intensities, unlike the prior ISNE->SCL pair (260511-gnm) where SCL was ~44x
+cleaner so Policy 6 migrated regardless of overhead. The combination of (a) the
+minute-granular sim-core (260511-jce), (b) a competitive grid pair, and (c) an
+intermediate baseline policy (Policy 5: always-best with one-hour lookahead but
+no overhead model) yields a well-posed three-curve comparison.
+
+Reference: ``.planning/quick/260511-k7l-add-policy-5-to-banc-ciso-overhead-cross/260511-k7l-PLAN.md``
+and ``.planning/quick/260511-jce-extend-policy-2-vs-policy-6-overhead-swe/260511-jce-CONTEXT.md``.
 
 The sweep is a single linked knob: for each candidate overhead value
 ``m`` (minutes) in the grid [0, 5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 240,
@@ -26,6 +29,11 @@ The sweep is a single linked knob: for each candidate overhead value
       not the source module) so that Policy 6's stay-vs-migrate estimate
       *also* scales linearly with the swept knob.
 
+The ``scaled_overhead`` patch is a no-op for Policy 2 and Policy 5 because
+neither imports the overhead helpers; they still feel overhead via
+``cfg.expected_migration_min`` which the sim core's minute-granular charge
+applies uniformly across all policies.
+
 CRITICAL: ``src/controller/heuristics/policy_heuristic.py`` line 29 does
     from heuristics.overhead import (ckpt_overhead, send_overhead,
                                      restore_overhead, NETWORK_POWER_WATTS)
@@ -38,18 +46,22 @@ its own bound reference. The patch must target
 This script does NOT modify ``_simulation_core.py``, ``evaluate_policies.py``,
 ``policy_heuristic.py``, ``overhead.py``, or ``evaluation_plots.py``. It only
 imports them and patches the Policy 6 bindings inside a context manager that
-restores the originals on exit.
+restores the originals on exit. The sim core and ``scaled_overhead`` patch are
+unchanged from 260511-jce; only the policy list and downstream aggregation /
+plot / summary code are generalized to handle arbitrary policy subsets.
 
-Outputs (under ``data/quick/260511-jce-banc-ciso-overhead-crossover/``):
+Outputs (under ``data/quick/260511-k7l-banc-ciso-3policy-overhead-crossover/``):
   - ``curves.csv``           -- long-format per-run results (one row per
                                 (overhead, direction, policy, start_ts)).
   - ``curves.png``           -- two-subplot mean-carbon-vs-overhead line plot
-                                (BANC->CISO and CISO->BANC).
-  - ``crossover_summary.md`` -- per-direction crossover value (or "no crossover
-                                in swept range") plus methodology + per-overhead
-                                carbon + mig_count table.
-
-Reference: .planning/quick/260511-jce-extend-policy-2-vs-policy-6-overhead-swe/260511-jce-CONTEXT.md
+                                (BANC->CISO and CISO->BANC) with one curve per
+                                swept policy.
+  - ``crossover_summary.md`` -- per-direction pairwise crossover analysis
+                                (P5-vs-P2, P5-vs-P6, P2-vs-P6 by default) plus
+                                methodology, per-overhead carbon + mig_count
+                                table, and a "Sanity checks" subsection
+                                reporting migration-count ranges for each
+                                policy.
 """
 
 import argparse
@@ -86,16 +98,29 @@ from heuristics import policy_heuristic as ph  # noqa: E402
 from heuristics import overhead as oh_mod  # noqa: E402
 
 
-# ── Constants (LOCKED by CONTEXT.md) ─────────────────────────────────
+# ── Constants (LOCKED by CONTEXT.md / k7l PLAN) ──────────────────────
 
 # 13-value grid up to 360 min (260511-jce locked). Denser at the low end where
 # crossovers are likely; coarser past 60 min where multi-hour overhead regimes
 # only matter qualitatively.
 OVERHEAD_GRID_MIN = (0, 5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 240, 360)
-POLICIES = (2, 6)
+# Default policy list for the three-policy crossover sweep (260511-k7l).
+# Order is preserved for plot/CSV/summary ordering — users can pass
+# --policies to swap or reorder.
+POLICIES_DEFAULT = (2, 5, 6)
+# Friendly names for each policy id (used in plot legends and summaries).
+POLICY_NAMES = {
+    1: "no-migration",
+    2: "always-best",
+    3: "forecast-sum",
+    4: "adaptive",
+    5: "always-best-1h",
+    6: "heuristic",
+}
+VALID_POLICY_IDS = frozenset(POLICY_NAMES.keys())
 OUT_DIR = (
     Path(__file__).resolve().parent.parent.parent.parent
-    / "data" / "quick" / "260511-jce-banc-ciso-overhead-crossover"
+    / "data" / "quick" / "260511-k7l-banc-ciso-3policy-overhead-crossover"
 )
 # BANC and CISO are both CAL-region grids with competitive carbon intensities;
 # the directional pairs let us answer the crossover question in both
@@ -243,6 +268,41 @@ def _resolve_directional_pairs(usable_grids, override_pairs):
     return pairs
 
 
+def _resolve_policies(override_csv):
+    """Parse ``--policies`` CSV (e.g. ``"2,5,6"``) into an ordered tuple of ints.
+
+    Default: :data:`POLICIES_DEFAULT`. Rejects duplicates (so the same policy
+    can't be plotted twice) and unknown policy ids (must be in 1..6).
+    The order the user typed is preserved.
+    """
+    if override_csv is None:
+        return tuple(POLICIES_DEFAULT)
+    raw = [tok.strip() for tok in override_csv.split(",") if tok.strip()]
+    if not raw:
+        raise SystemExit(
+            f"[SWEEP] --policies must be a non-empty comma-separated list "
+            f"(got {override_csv!r})"
+        )
+    try:
+        parsed = tuple(int(tok) for tok in raw)
+    except ValueError:
+        raise SystemExit(
+            f"[SWEEP] --policies tokens must all be integers (got {raw!r})"
+        )
+    bad = [p for p in parsed if p not in VALID_POLICY_IDS]
+    if bad:
+        raise SystemExit(
+            f"[SWEEP] --policies contains unknown ids {bad}; "
+            f"valid ids are {sorted(VALID_POLICY_IDS)}"
+        )
+    if len(set(parsed)) != len(parsed):
+        raise SystemExit(
+            f"[SWEEP] --policies contains duplicates ({parsed}); "
+            f"each policy may appear at most once"
+        )
+    return parsed
+
+
 def _build_two_grid_lookup(full_lookup, src_grid, dst_grid):
     """Subset ``full_lookup`` to ``(src_grid, ts)`` and ``(dst_grid, ts)`` entries only.
 
@@ -267,8 +327,8 @@ def _resolve_timestamps(all_ts, num):
     return list(all_ts[::step])[:num]
 
 
-def run_sweep(full_lookup, directional_pairs, timestamps, anchor_grid):
-    """Execute the 13 x len(directional_pairs) x 2 x len(timestamps) cell sweep.
+def run_sweep(full_lookup, directional_pairs, timestamps, anchor_grid, policies):
+    """Execute the 13 x len(directional_pairs) x len(policies) x len(timestamps) cell sweep.
 
     For each directional ``(src, dst)`` pair we build a two-grid lookup so
     Policy 6 sees exactly one candidate destination (the directional partner),
@@ -281,7 +341,7 @@ def run_sweep(full_lookup, directional_pairs, timestamps, anchor_grid):
     template = RunConfig(
         start_ts=0,
         source_grid=directional_pairs[0][0],
-        policy_id=2,
+        policy_id=policies[0],
         app_size_mb=ANCHOR_APP_SIZE_MB,
         expected_completion_min=2880,
         expected_migration_min=5,
@@ -300,9 +360,9 @@ def run_sweep(full_lookup, directional_pairs, timestamps, anchor_grid):
 
     for m in OVERHEAD_GRID_MIN:
         # The scaled_overhead context manager patches Policy 6's bound
-        # overhead helpers. Policy 2 doesn't call them, so the patch is a
-        # no-op for Policy 2 runs -- Policy 2 only feels overhead via
-        # cfg.expected_migration_min, which we set below.
+        # overhead helpers. Policies 2 and 5 don't call them, so the patch
+        # is a no-op for those runs -- Policies 2 and 5 only feel overhead
+        # via cfg.expected_migration_min, which we set below.
         with scaled_overhead(float(m), anchor_grid) as so:
             baseline_total_min_seen = so.baseline_total_min  # constant across m
             print(
@@ -312,7 +372,7 @@ def run_sweep(full_lookup, directional_pairs, timestamps, anchor_grid):
             for src, dst in directional_pairs:
                 pair_lookup = _build_two_grid_lookup(full_lookup, src, dst)
                 for ts in timestamps:
-                    for p in POLICIES:
+                    for p in policies:
                         cfg = replace(
                             template,
                             start_ts=ts,
@@ -337,28 +397,7 @@ def run_sweep(full_lookup, directional_pairs, timestamps, anchor_grid):
 
 # ── Aggregation & crossover detection ────────────────────────────────
 
-def per_cell_means(rows):
-    """Return (p2_means, p6_means) lists indexed by OVERHEAD_GRID_MIN.
-
-    Each value is the mean ``total_carbon_gco2`` across samples for that
-    (overhead, policy) cell. ``float('nan')`` when no samples exist.
-
-    Kept for backward compatibility; the 260511-jce sweep uses
-    :func:`per_cell_means_by_direction` which preserves the (source, dest)
-    dimension.
-    """
-    p2_means, p6_means = [], []
-    for m in OVERHEAD_GRID_MIN:
-        v2 = [r["total_carbon_gco2"] for r in rows
-              if r["overhead_min"] == m and r["policy"] == 2]
-        v6 = [r["total_carbon_gco2"] for r in rows
-              if r["overhead_min"] == m and r["policy"] == 6]
-        p2_means.append(mean(v2) if v2 else float("nan"))
-        p6_means.append(mean(v6) if v6 else float("nan"))
-    return p2_means, p6_means
-
-
-def per_cell_means_by_direction(rows, directional_pairs):
+def per_cell_means_by_direction(rows, directional_pairs, policies):
     """Return per-(src, dst) total-carbon and migration-count mean dicts.
 
     Output structure::
@@ -369,11 +408,11 @@ def per_cell_means_by_direction(rows, directional_pairs):
     Where each list element is the mean across the per-timestamp samples for
     that (overhead, direction, policy) cell. NaN when no samples exist.
     """
-    out_carbon = {pair: {p: [] for p in POLICIES} for pair in directional_pairs}
-    out_mig = {pair: {p: [] for p in POLICIES} for pair in directional_pairs}
+    out_carbon = {pair: {p: [] for p in policies} for pair in directional_pairs}
+    out_mig = {pair: {p: [] for p in policies} for pair in directional_pairs}
     for m in OVERHEAD_GRID_MIN:
         for src, dst in directional_pairs:
-            for p in POLICIES:
+            for p in policies:
                 vals = [r["total_carbon_gco2"] for r in rows
                         if r["overhead_min"] == m
                         and r["policy"] == p
@@ -393,31 +432,52 @@ def per_cell_means_by_direction(rows, directional_pairs):
     return out_carbon, out_mig
 
 
-def find_crossover(p2_means, p6_means):
-    """Locate the first overhead at which Policy 2 stops being worse than Policy 6.
+def find_crossover_pair(a_means, b_means, a_name, b_name):
+    """Locate the first overhead at which curve ``a`` stops being worse than ``b``.
 
-    Definition: ``diff[i] = P2[i] - P6[i]``. Positive means Policy 2 is worse.
+    Definition: ``diff[i] = a[i] - b[i]``. Positive means ``a`` is worse.
     Crossover is the smallest ``i >= 1`` where ``sign(diff[i-1]) != sign(diff[i])``
-    AND ``diff[i] <= 0`` (P2 now equal or better). Linear interpolation between
+    AND ``diff[i] <= 0`` (``a`` now equal or better). Linear interpolation between
     the bracketing grid points gives the crossover minute, rounded to 0.1.
 
     Returns:
-        Tuple[Optional[float], Optional[int]] -- (crossover_min, i) where i is
-        the right-side grid index used. Both are None when no crossover exists
-        in the swept range.
+        Tuple[Optional[float], Optional[int], Optional[str]] -- (crossover_min,
+        i, direction_str) where i is the right-side grid index used and
+        direction_str is e.g. ``"{a_name} beats {b_name} at overhead >= X min"``.
+        All three are None when no crossover exists in the swept range.
     """
-    diff = [p2 - p6 for p2, p6 in zip(p2_means, p6_means)]
+    diff = [a - b for a, b in zip(a_means, b_means)]
     for i in range(1, len(OVERHEAD_GRID_MIN)):
         y0, y1 = diff[i - 1], diff[i]
-        # Sign-change AND P2 now wins-or-ties.
+        # Sign-change AND `a` now wins-or-ties.
         if (y0 > 0 and y1 <= 0):
             x0, x1 = OVERHEAD_GRID_MIN[i - 1], OVERHEAD_GRID_MIN[i]
             if y1 == y0:
                 # Degenerate flat segment; skip this segment, keep scanning.
                 continue
             x_cross = x0 - y0 * (x1 - x0) / (y1 - y0)
-            return round(x_cross, 1), i
-    return None, None
+            cm = round(x_cross, 1)
+            direction_str = (
+                f"{a_name} beats {b_name} at overhead >= {cm} min "
+                f"(interpolated between {x0} and {x1} min)"
+            )
+            return cm, i, direction_str
+    return None, None, None
+
+
+def _ordered_pairs(policies):
+    """Return ordered list of (a, b) pairs from a policy list, preserving order.
+
+    For policies (2, 5, 6) returns [(2, 5), (2, 6), (5, 6)] — the canonical
+    upper-triangular ordering. Each pair is tested twice in the summary (once
+    with a vs b and once with b vs a) so we capture sign-change crossovers in
+    both directions.
+    """
+    pairs = []
+    for i, a in enumerate(policies):
+        for b in policies[i + 1:]:
+            pairs.append((a, b))
+    return pairs
 
 
 # ── Artifact writers ──────────────────────────────────────────────────
@@ -441,52 +501,81 @@ def write_csv(rows, path):
             w.writerow(r)
 
 
-def write_plot(carbon_by_dir, crossovers_by_dir, directional_pairs,
-               timestamps, path):
+def write_plot(carbon_by_dir, pair_crossovers, directional_pairs,
+               timestamps, policies, path):
     """Two-subplot figure: one direction per axes.
 
-    Each subplot shows mean total carbon vs migration overhead for Policy 2
-    and Policy 6, with the per-direction crossover annotated (when present).
+    Each subplot shows mean total carbon vs migration overhead for each swept
+    policy, with up to two of the most informative pairwise crossovers
+    annotated (P5-vs-P6 first; P2-vs-P6 second when present and distinct).
+
+    ``pair_crossovers`` is a nested dict
+    ``pair_crossovers[(src, dst)][(a, b)] -> (cm, idx, direction_str) or None``.
     """
     fig, axes = plt.subplots(
         1, len(directional_pairs), figsize=(14, 6), sharey=True
     )
     if len(directional_pairs) == 1:
         axes = [axes]
+
+    # Annotation priority: P5-vs-P6, P2-vs-P6, P5-vs-P2 (and reversed forms).
+    # We try each in order and annotate at most two (offset y to avoid overlap).
+    priority_pairs = [
+        (5, 6), (6, 5), (2, 6), (6, 2), (2, 5), (5, 2),
+    ]
+
     for ax, pair in zip(axes, directional_pairs):
         src, dst = pair
-        p2_means = carbon_by_dir[pair][2]
-        p6_means = carbon_by_dir[pair][6]
-        ax.plot(
-            OVERHEAD_GRID_MIN, p2_means,
-            marker="o", linewidth=1.8, color=POLICY_COLORS[2],
-            label="Policy 2 (always-best)",
-        )
-        ax.plot(
-            OVERHEAD_GRID_MIN, p6_means,
-            marker="o", linewidth=1.8, color=POLICY_COLORS[6],
-            label="Policy 6 (heuristic)",
-        )
-        cross = crossovers_by_dir.get(pair)
-        if cross is not None:
-            cm, _idx = cross
+        # Plot every swept policy as its own curve.
+        per_policy_means = {p: carbon_by_dir[pair][p] for p in policies}
+        for p in policies:
+            color = POLICY_COLORS.get(p, "#000000")
+            name = POLICY_NAMES.get(p, f"policy {p}")
+            ax.plot(
+                OVERHEAD_GRID_MIN, per_policy_means[p],
+                marker="o", linewidth=1.8, color=color,
+                label=f"Policy {p} ({name})",
+            )
+
+        # y_top across all curves for annotation placement.
+        all_vals = [v for vs in per_policy_means.values() for v in vs if v == v]
+        y_top = max(all_vals) if all_vals else 1.0
+
+        # Annotate up to two crossovers using priority ordering.
+        annotated = []
+        for (a, b) in priority_pairs:
+            if (a, b) not in pair_crossovers.get(pair, {}):
+                continue
+            cross = pair_crossovers[pair][(a, b)]
+            if cross is None:
+                continue
+            cm, _idx, _direction_str = cross
+            # De-dup: skip if a near-identical x value already annotated.
+            if any(abs(cm - prev_cm) < 0.05 for prev_cm, _, _ in annotated):
+                continue
+            annotated.append((cm, a, b))
+            if len(annotated) >= 2:
+                break
+
+        for idx, (cm, a, b) in enumerate(annotated):
             ax.axvline(x=cm, linestyle="--", color="gray", linewidth=1.0)
-            y_top = max(
-                max(v for v in p2_means if v == v),
-                max(v for v in p6_means if v == v),
-            )
+            # Second annotation offset slightly downward (relative y) to avoid
+            # overlapping the first.
+            y_text = y_top if idx == 0 else y_top * 0.92
             ax.text(
-                cm, y_top, f" crossover ~ {cm:g} min",
-                color="gray", va="top", ha="left",
+                cm, y_text,
+                f" P{a} beats P{b} ~ {cm:g} min",
+                color="gray", va="top", ha="left", fontsize=8,
             )
+
         ax.set_title(f"{src} -> {dst}")
         ax.set_xlabel("Migration overhead (minutes)")
         ax.grid(True, linestyle=":", linewidth=0.5, alpha=0.6)
-        ax.legend(loc="lower left")
+        ax.legend(loc="lower left", fontsize=8)
     axes[0].set_ylabel("Mean total carbon (gCO2eq, HW-scaled)")
     fig.suptitle(
-        "Policy 2 vs Policy 6 -- carbon vs migration overhead "
-        "(BANC<->CISO, linked knob)"
+        f"Policies {', '.join(str(p) for p in policies)} -- "
+        f"carbon vs migration overhead (BANC<->CISO, linked knob)"
     )
     fig.text(
         0.99, 0.02,
@@ -511,28 +600,40 @@ def _git_short_sha():
 
 
 def write_summary_md(
-    path, crossovers_by_dir, carbon_by_dir, mig_count_by_dir,
+    path, pair_crossovers, carbon_by_dir, mig_count_by_dir,
     directional_pairs, baseline_total_min, anchor_grid, timestamps,
+    policies,
 ):
-    """Render the per-direction crossover summary markdown.
+    """Render the per-direction pairwise crossover summary markdown.
 
     For each directional pair, emit:
-      - The crossover overhead (interpolated to 0.1 min) or "none in [0, 360]".
-      - A per-overhead table of (P2 carbon, P6 carbon, diff, P2 mig_count,
-        P6 mig_count) so the user can sanity-check the linked-knob effect
-        on Policy 6's migration count.
+      - Pairwise crossover sentences for all ordered pairs in ``policies`` —
+        both ``(a, b)`` and ``(b, a)`` directions so we capture sign changes
+        regardless of which curve starts higher.
+      - A per-overhead table with one carbon column and one mig-count column
+        per swept policy.
+      - A "Sanity checks" subsection reporting min/max migration counts per
+        policy (Policy 5 should be approximately constant; Policy 6 should
+        drop with overhead).
     """
     now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
     sha = _git_short_sha()
+    policies_csv = ", ".join(str(p) for p in policies)
+    policies_label = " vs ".join(f"Policy {p}" for p in policies)
+    policy_legend = ", ".join(
+        f"P{p}={POLICY_NAMES.get(p, str(p))}" for p in policies
+    )
 
     md = [
-        "# Policy 2 vs Policy 6 -- BANC<->CISO Overhead Crossover",
+        f"# Policies {policies_csv} -- BANC<->CISO Overhead Crossover (260511-k7l)",
         "",
-        "**Quick task:** 260511-jce",
+        f"**Quick task:** 260511-k7l (extends 260511-jce)",
+        f"**Comparison:** {policies_label}",
+        f"**Policy legend:** {policy_legend}",
         f"**Generated:** {now_iso}",
         f"**Git SHA:** {sha}",
         "",
-        "## Sim-core formula (260511-jce)",
+        "## Sim-core formula (unchanged from 260511-jce)",
         "",
         "Migration carbon at decision hour: "
         "`(expected_migration_min / 60) * source_intensity_at_h` "
@@ -542,11 +643,17 @@ def write_summary_md(
         "",
         "## Methodology",
         "",
+        f"- Policies compared: {policies_label}.",
         "- Linked-knob sweep: `expected_migration_min` AND Policy 6's bound "
         "overhead helpers "
         "(`ckpt_overhead`/`send_overhead`/`restore_overhead` in "
         "`heuristics.policy_heuristic`) scaled by "
         "`target_minutes / baseline_total_min`.",
+        "- **The `scaled_overhead` monkey-patch is a no-op for Policies 2 and 5.** "
+        "Neither imports the overhead helpers; they only feel overhead via "
+        "`cfg.expected_migration_min` (the sim core's minute-granular "
+        "source-side carbon charge at the decision hour). The linked knob "
+        "bites Policy 6 alone via its heuristic overhead estimator.",
         f"- Baseline total: `{baseline_total_min:.3f}` min "
         f"(linear fit at {ANCHOR_APP_SIZE_MB:g} MB, anchor `{anchor_grid}`).",
         f"- Grid: {list(OVERHEAD_GRID_MIN)}",
@@ -557,37 +664,78 @@ def write_summary_md(
         "",
     ]
 
+    ordered_pairs = _ordered_pairs(policies)
+
     for pair in directional_pairs:
         src, dst = pair
-        cross = crossovers_by_dir.get(pair)
         md.append(f"## {src} -> {dst}")
         md.append("")
-        if cross is None:
-            md.append(
-                f"**Crossover:** none in swept range "
-                f"[0, {OVERHEAD_GRID_MIN[-1]}] min for this direction."
-            )
-        else:
-            cm, idx = cross
-            x0, x1 = OVERHEAD_GRID_MIN[idx - 1], OVERHEAD_GRID_MIN[idx]
-            md.append(
-                f"**Crossover:** Policy 2 beats Policy 6 at overhead >= "
-                f"{cm} min (interpolated between {x0} and {x1} min)."
-            )
+        md.append("**Pairwise crossover analysis:**")
         md.append("")
-        md.append(
-            "| overhead_min | P2 carbon | P6 carbon | P2 - P6 | "
-            "P2 mig_count | P6 mig_count |"
-        )
-        md.append("| --- | --- | --- | --- | --- | --- |")
+        # For each ordered pair (a, b) where a precedes b in policies, report
+        # both (a vs b) and (b vs a) — only one direction can fire at a time
+        # so we emit a single "no crossover" line when neither does.
+        for (a, b) in ordered_pairs:
+            ab = pair_crossovers.get(pair, {}).get((a, b))
+            ba = pair_crossovers.get(pair, {}).get((b, a))
+            if ab is not None:
+                _cm, _idx, direction_str = ab
+                md.append(f"- P{a} vs P{b}: {direction_str}.")
+            elif ba is not None:
+                _cm, _idx, direction_str = ba
+                md.append(f"- P{a} vs P{b}: {direction_str}.")
+            else:
+                md.append(
+                    f"- P{a} vs P{b}: no crossover in swept range "
+                    f"[0, {OVERHEAD_GRID_MIN[-1]}] min."
+                )
+        md.append("")
+
+        # Per-overhead carbon + mig-count table. One carbon column and one
+        # mig-count column per swept policy; diff column omitted to keep
+        # the table narrow (pairwise crossover statements above carry the
+        # comparisons).
+        header_cells = ["overhead_min"]
+        header_cells += [f"P{p} carbon" for p in policies]
+        header_cells += [f"P{p} mig_count" for p in policies]
+        md.append("| " + " | ".join(header_cells) + " |")
+        md.append("| " + " | ".join(["---"] * len(header_cells)) + " |")
         c = carbon_by_dir[pair]
         mc = mig_count_by_dir[pair]
         for i, m in enumerate(OVERHEAD_GRID_MIN):
+            row_cells = [str(m)]
+            row_cells += [f"{c[p][i]:.1f}" for p in policies]
+            row_cells += [f"{mc[p][i]:.2f}" for p in policies]
+            md.append("| " + " | ".join(row_cells) + " |")
+        md.append("")
+
+        # Sanity checks: per-policy mig-count min/max across overhead grid.
+        md.append("**Sanity checks (migration-count range across overhead grid):**")
+        md.append("")
+        md.append("| Policy | min mig_count | max mig_count | range |")
+        md.append("| --- | --- | --- | --- |")
+        for p in policies:
+            vals = [v for v in mc[p] if v == v]  # filter NaN
+            if not vals:
+                md.append(f"| P{p} | -- | -- | -- |")
+                continue
+            mn, mx = min(vals), max(vals)
             md.append(
-                f"| {m} | {c[2][i]:.1f} | {c[6][i]:.1f} | "
-                f"{c[2][i] - c[6][i]:+.1f} | "
-                f"{mc[2][i]:.2f} | {mc[6][i]:.2f} |"
+                f"| P{p} ({POLICY_NAMES.get(p, str(p))}) | "
+                f"{mn:.2f} | {mx:.2f} | {(mx - mn):.2f} |"
             )
+        md.append("")
+        md.append(
+            "Expected pattern: Policy 5's range is near zero (its decision "
+            "ignores the overhead knob — it only compares the current grid "
+            "against the partner grid one hour ahead). Policy 2's range is "
+            "also small (always-best with no overhead model), but may drop "
+            "slightly at very high overhead as the source-side minute-granular "
+            "cost in the sim core renders some marginal migrations no longer "
+            "worth it. Policy 6's range is larger (the linked knob bites: at "
+            "high overhead its heuristic refuses migrations it would have "
+            "made at low overhead)."
+        )
         md.append("")
 
     md.extend([
@@ -595,8 +743,8 @@ def write_summary_md(
         "",
         "- `curves.csv` -- long-format per-run results (one row per "
         "(overhead, direction, policy, start_ts)).",
-        "- `curves.png` -- two-subplot P2 vs P6 line plot with per-direction "
-        "crossover annotation.",
+        "- `curves.png` -- two-subplot multi-policy line plot with pairwise "
+        "crossover annotations where present.",
         "",
     ])
 
@@ -608,14 +756,22 @@ def write_summary_md(
 
 def _parse_args(argv=None):
     p = argparse.ArgumentParser(
-        description="Policy 2 vs Policy 6 BANC<->CISO overhead-crossover sweep "
-                    "(260511-jce, extends 260511-gnm)"
+        description="Three-policy BANC<->CISO overhead-crossover sweep "
+                    "(260511-k7l, extends 260511-jce)"
     )
     p.add_argument("--regions-dir", default=None,
                    help="Override regions tree root (default: data/regions/)")
     p.add_argument("--pairs", nargs="+", default=None,
                    help="Directional pairs as SRC:DST tokens, e.g. BANC:CISO. "
                         "Default: BANC:CISO and CISO:BANC.")
+    p.add_argument(
+        "--policies", default=None,
+        help=(
+            "Comma-separated policy ids to sweep (e.g. '2,5,6' or '2,6'). "
+            "Default: 2,5,6. Ids must be in 1..6 and unique; the order you "
+            "type controls plot/CSV/summary ordering."
+        ),
+    )
     p.add_argument("--num-timestamps", type=int, default=24,
                    help="Number of sub-sampled 2020 hourly starts per direction "
                         "(default: 24)")
@@ -653,6 +809,8 @@ def main(argv=None) -> int:
 
     # Resolve directional pairs (default BANC<->CISO bidirectional).
     directional_pairs = _resolve_directional_pairs(usable, args.pairs)
+    # Resolve policy list (default POLICIES_DEFAULT = (2, 5, 6)).
+    policies = _resolve_policies(args.policies)
     # Anchor grid is one shared scalar for the linked-knob baseline. Prefer
     # BANC because it's an endpoint of both default pairs.
     pair_grids = tuple({g for pair in directional_pairs for g in pair})
@@ -680,7 +838,7 @@ def main(argv=None) -> int:
         f"[SWEEP] timestamps: {len(timestamps)} starts "
         f"(first={timestamps[0]}, last={timestamps[-1]})\n"
         f"[SWEEP] overhead_grid={list(OVERHEAD_GRID_MIN)} min\n"
-        f"[SWEEP] policies={list(POLICIES)}\n"
+        f"[SWEEP] policies={list(policies)}\n"
         f"[SWEEP] out_dir={out_dir}"
     )
 
@@ -692,7 +850,7 @@ def main(argv=None) -> int:
     print(f"[SWEEP] intensity_lookup: {len(lookup)} (grid, ts) entries")
 
     rows, baseline_total_min = run_sweep(
-        lookup, directional_pairs, timestamps, anchor_grid,
+        lookup, directional_pairs, timestamps, anchor_grid, policies,
     )
     print(
         f"[SWEEP] completed {len(rows)} simulated runs in "
@@ -700,17 +858,40 @@ def main(argv=None) -> int:
     )
 
     carbon_by_dir, mig_count_by_dir = per_cell_means_by_direction(
-        rows, directional_pairs,
+        rows, directional_pairs, policies,
     )
-    crossovers_by_dir = {}
+
+    # Compute pairwise crossovers for every ordered (a, b) pair across the
+    # swept policy list, in both directions (a vs b and b vs a). This lets
+    # the summary emit pairwise sentences without re-running find_crossover
+    # for each rendering call.
+    pair_crossovers = {}
     for pair in directional_pairs:
-        cm, idx = find_crossover(
-            carbon_by_dir[pair][2], carbon_by_dir[pair][6],
-        )
-        if cm is None:
-            crossovers_by_dir[pair] = None
-        else:
-            crossovers_by_dir[pair] = (cm, idx)
+        d = {}
+        for a in policies:
+            for b in policies:
+                if a == b:
+                    continue
+                d[(a, b)] = find_crossover_pair(
+                    carbon_by_dir[pair][a], carbon_by_dir[pair][b],
+                    f"P{a}", f"P{b}",
+                )
+                if d[(a, b)][0] is None:
+                    d[(a, b)] = None
+        pair_crossovers[pair] = d
+
+    # Quick stdout sanity print of mig-count ranges (helps debugging when
+    # numbers look off — Policy 5's range should be near zero).
+    for pair in directional_pairs:
+        src, dst = pair
+        for p in policies:
+            vals = [v for v in mig_count_by_dir[pair][p] if v == v]
+            if vals:
+                print(
+                    f"[SWEEP] Policy {p} mig_count range {src}->{dst}: "
+                    f"[{min(vals):.2f}..{max(vals):.2f}] "
+                    f"(span={(max(vals) - min(vals)):.2f})"
+                )
 
     # Write artifacts.
     csv_path = out_dir / "curves.csv"
@@ -720,30 +901,32 @@ def main(argv=None) -> int:
     write_csv(rows, csv_path)
     print(f"[PLOT] wrote {csv_path}")
     write_plot(
-        carbon_by_dir, crossovers_by_dir, directional_pairs,
-        timestamps, png_path,
+        carbon_by_dir, pair_crossovers, directional_pairs,
+        timestamps, policies, png_path,
     )
     print(f"[PLOT] wrote {png_path}")
     write_summary_md(
-        md_path, crossovers_by_dir, carbon_by_dir, mig_count_by_dir,
+        md_path, pair_crossovers, carbon_by_dir, mig_count_by_dir,
         directional_pairs, baseline_total_min, anchor_grid, timestamps,
+        policies,
     )
     print(f"[PLOT] wrote {md_path}")
 
+    # Per-direction RESULT lines summarizing pairwise crossovers.
+    ordered_pairs = _ordered_pairs(policies)
     for pair in directional_pairs:
-        cross = crossovers_by_dir.get(pair)
         src, dst = pair
-        if cross is None:
-            print(
-                f"[SWEEP] RESULT {src}->{dst}: no crossover in swept range "
-                f"[0, {OVERHEAD_GRID_MIN[-1]}] min."
-            )
-        else:
-            cm, _idx = cross
-            print(
-                f"[SWEEP] RESULT {src}->{dst}: crossover at overhead ~ "
-                f"{cm} min."
-            )
+        parts = []
+        for (a, b) in ordered_pairs:
+            ab = pair_crossovers[pair].get((a, b))
+            ba = pair_crossovers[pair].get((b, a))
+            cross = ab if ab is not None else ba
+            if cross is None:
+                parts.append(f"P{a}-vs-P{b}: no crossover in [0, {OVERHEAD_GRID_MIN[-1]}] min")
+            else:
+                cm, _idx, direction_str = cross
+                parts.append(f"P{a}-vs-P{b}: {direction_str}")
+        print(f"[SWEEP] RESULT {src}->{dst}: " + "; ".join(parts) + ".")
 
     print(f"[SWEEP] total wall-clock: {time.time() - t0:.2f} s")
     return 0
