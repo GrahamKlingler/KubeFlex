@@ -895,9 +895,9 @@ def write_summary_md(
     )
 
     md = [
-        f"# Policies {policies_csv} -- BANC<->CISO Overhead Crossover (260511-k7l)",
+        f"# Policies {policies_csv} -- Pairwise Overhead Crossover (260511-kqo)",
         "",
-        f"**Quick task:** 260511-k7l (extends 260511-jce)",
+        f"**Quick task:** 260511-kqo (extends 260511-k7l / 260511-jce)",
         f"**Comparison:** {policies_label}",
         f"**Policy legend:** {policy_legend}",
         f"**Generated:** {now_iso}",
