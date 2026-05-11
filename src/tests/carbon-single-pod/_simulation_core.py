@@ -162,7 +162,14 @@ def simulate_one_run(intensity_lookup, cfg):
     # split_at_start is "train" or "val"; we tolerate both as start points.
 
     total_sim_hours = int(math.ceil(cfg.expected_completion_min / 60.0))
-    migration_hours = max(1, int(math.ceil(cfg.expected_migration_min / 60.0)))
+    # Minute-granular migration accounting (quick task 260511-jce). The previous
+    # `migration_hours = max(1, ceil(m/60))` quantization treated every overhead
+    # in [1, 60] min as if it cost 1 full hour of cooldown, AND charged no
+    # carbon for the migration work itself. Both have been replaced with the
+    # locked formula in CONTEXT.md:
+    #   migration_carbon = (m / 60) * source_intensity_at_h   (HW-scaled iff cfg.use_hw)
+    #   cooldown_hours   = max(0, ceil((m - 60) / 60))
+    migration_fraction_h = cfg.expected_migration_min / 60.0  # float hours; 30 min -> 0.5
     migration_seconds_real = cfg.expected_migration_min * 60.0
 
     # Derive available grids from the intensity_lookup keys so the pure function
@@ -237,7 +244,23 @@ def simulate_one_run(intensity_lookup, cfg):
             )
             if should_migrate and target_grid:
                 migration_count += 1
-                migrating_cooldown = migration_hours - 1
+                # Minute-granular migration accounting (260511-jce). `intensity`
+                # is the source-grid intensity at the decision hour, already
+                # HW-scaled iff cfg.use_hw=True by the loop body above; re-
+                # applying HW scaling here would double-count -- do not. During
+                # cooldown the pod continues accumulating intensity on the now-
+                # target grid (target-side cost), which the existing loop body
+                # already does.
+                if intensity is not None:
+                    migration_carbon = migration_fraction_h * intensity
+                    total_carbon += migration_carbon
+                # Cooldown: 0 for sub-hour migrations (<=60 min); ceil((m-60)/60)
+                # for longer migrations. 30 min -> 0; 60 min -> 0; 61 min -> 1;
+                # 90 min -> 1; 120 min -> 1; 180 min -> 2; 360 min -> 5.
+                migrating_cooldown = max(
+                    0,
+                    int(math.ceil((cfg.expected_migration_min - 60) / 60.0)),
+                )
                 current_grid = target_grid
 
     # Derived metrics. The CLI wrapper computes total_runtime_ms,

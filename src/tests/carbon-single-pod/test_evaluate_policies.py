@@ -328,6 +328,137 @@ def test_intensity_lookup_filters_2022():
         )
 
 
+# ── 260511-jce: minute-granular migration carbon regression tests ─
+
+def _make_two_grid_lookup(hours: int, src_grid: str, dst_grid: str,
+                          src_intensity: float, dst_intensity: float):
+    """Build a (src, dst) intensity lookup with constant per-hour values.
+
+    Used by the 260511-jce minute-granular migration carbon regression tests so
+    we can predict total_carbon analytically: source intensity is `src_intensity`
+    every hour, destination intensity is `dst_intensity` every hour, both flat
+    across `hours` consecutive timestamps starting at BASE_TS_2020.
+    """
+    lookup = {}
+    for h in range(hours):
+        ts = BASE_TS_2020 + h * 3600
+        lookup[(src_grid, ts)] = src_intensity
+        lookup[(dst_grid, ts)] = dst_intensity
+    return lookup
+
+
+def test_migration_carbon_minute_granular():
+    """30-min migration on a flat-intensity fixture charges 0.5 * source_intensity.
+
+    Fixture: ISNE (source) constant 100.0 gCO2/kWh, TVA (dest) constant 50.0
+    gCO2/kWh, 2-hour sim, Policy 2, use_hw=False. Policy 2 migrates at h=0
+    (TVA is cheaper than ISNE). With m=30 and the LOCKED 260511-jce formula:
+        h=0: source intensity 100 added, migration charges 0.5*100=50, switch to TVA.
+        h=1: target intensity 50 added.
+    Expected total_carbon = 100 + 50 + 50 = 200.0 gCO2eq.
+    """
+    from _simulation_core import RunConfig, simulate_one_run  # noqa: WPS433
+    lookup = _make_two_grid_lookup(2, "ISNE", "TVA", 100.0, 50.0)
+    cfg = RunConfig(
+        start_ts=BASE_TS_2020,
+        source_grid="ISNE",
+        policy_id=2,
+        expected_completion_min=120,
+        expected_migration_min=30,
+        use_hw=False,
+        hw_weighting=False,
+        overhead_cost=False,
+        deadline_gate=False,
+        include_network_power=False,
+        sweep_kind="main",
+    )
+    result = simulate_one_run(lookup, cfg)
+    assert result["migration_count"] == 1, (
+        f"Expected 1 migration on cheaper-dest fixture, got "
+        f"{result['migration_count']}"
+    )
+    expected = 100.0 + 0.5 * 100.0 + 50.0  # source-h0 + migration-charge + target-h1
+    got = result["total_carbon_gco2"]
+    assert abs(got - expected) < 0.6, (
+        f"minute-granular migration carbon broken: total={got}, expected~{expected}"
+    )
+
+
+def test_migration_carbon_zero_overhead_is_free():
+    """expected_migration_min=0 yields zero migration carbon (free instantaneous switch).
+
+    Same fixture as test_migration_carbon_minute_granular, but m=0 -> migration
+    fraction is 0 so no migration carbon is charged; cooldown is 0 so no extra
+    blocked hours. Result must equal the hourly accumulation only.
+    """
+    from _simulation_core import RunConfig, simulate_one_run  # noqa: WPS433
+    lookup = _make_two_grid_lookup(2, "ISNE", "TVA", 100.0, 50.0)
+    cfg = RunConfig(
+        start_ts=BASE_TS_2020,
+        source_grid="ISNE",
+        policy_id=2,
+        expected_completion_min=120,
+        expected_migration_min=0,
+        use_hw=False,
+        hw_weighting=False,
+        overhead_cost=False,
+        deadline_gate=False,
+        include_network_power=False,
+        sweep_kind="main",
+    )
+    result = simulate_one_run(lookup, cfg)
+    assert result["migration_count"] == 1, (
+        f"Expected 1 migration on cheaper-dest fixture, got "
+        f"{result['migration_count']}"
+    )
+    expected = 100.0 + 50.0  # source-h0 + target-h1, no migration charge
+    got = result["total_carbon_gco2"]
+    assert abs(got - expected) < 0.6, (
+        f"m=0 should be free, got total={got}, expected~{expected}"
+    )
+
+
+def test_migration_cooldown_blocks_second_migration_over_120min():
+    """m=120 yields cooldown=1, so in a 4-hour Policy-2 sim with strictly cheaper
+    destinations available every hour we observe exactly 2 migrations (h=0
+    migrates, h=1 blocked, h=2 migrates, h=3 blocked).
+
+    Fixture: ISNE source (100), TVA (50), SWPP (10) all flat across 4 hours.
+    Policy 2 always wants the min-carbon grid -- SWPP at hour 0. After migrating
+    to SWPP it would stay there since SWPP remains cheapest. To force a second
+    migration attempt at hour 2 we vary the cheapest-grid identity over time:
+    hours 0-1 SWPP is cheapest (10), hours 2-3 TVA is cheapest (5). Without
+    cooldown Policy 2 would migrate every hour; with cooldown=1 the sequence
+    is h=0 migrate (->SWPP), h=1 blocked, h=2 migrate (->TVA), h=3 blocked.
+    """
+    from _simulation_core import RunConfig, simulate_one_run  # noqa: WPS433
+    # Build the lookup manually because we want time-varying SWPP/TVA values.
+    lookup = {}
+    for h in range(4):
+        ts = BASE_TS_2020 + h * 3600
+        lookup[("ISNE", ts)] = 100.0
+        lookup[("TVA", ts)] = 5.0 if h >= 2 else 50.0
+        lookup[("SWPP", ts)] = 10.0 if h <= 1 else 50.0
+    cfg = RunConfig(
+        start_ts=BASE_TS_2020,
+        source_grid="ISNE",
+        policy_id=2,
+        expected_completion_min=240,
+        expected_migration_min=120,  # cooldown = ceil((120-60)/60) = 1
+        use_hw=False,
+        hw_weighting=False,
+        overhead_cost=False,
+        deadline_gate=False,
+        include_network_power=False,
+        sweep_kind="main",
+    )
+    result = simulate_one_run(lookup, cfg)
+    assert result["migration_count"] == 2, (
+        f"Expected exactly 2 migrations (h=0 migrate, h=1 cooldown, h=2 "
+        f"migrate, h=3 cooldown), got {result['migration_count']}"
+    )
+
+
 # ── Runner ────────────────────────────────────────────────────────
 
 def main():
@@ -343,6 +474,10 @@ def main():
         test_ablation_sweep_smoke_overrides_completion_min,
         test_2022_timestamp_hard_block,
         test_intensity_lookup_filters_2022,
+        # 260511-jce: minute-granular migration carbon regressions.
+        test_migration_carbon_minute_granular,
+        test_migration_carbon_zero_overhead_is_free,
+        test_migration_cooldown_blocks_second_migration_over_120min,
     ]
     passed = 0
     failed = 0

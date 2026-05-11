@@ -361,7 +361,14 @@ def run_expected_simulation(args):
     out_dir.mkdir(parents=True, exist_ok=True)
 
     total_sim_hours = int(math.ceil(args.expected_completion / 60.0))
-    migration_hours = max(1, int(math.ceil(args.expected_migration / 60.0)))
+    # 260511-jce: minute-granular migration accounting. Cooldown follows the
+    # locked formula max(0, ceil((m - 60) / 60)); the banner-friendly
+    # "migration_hours" is just cooldown + 1 so the printed banner still
+    # reflects "how many sim hours the pod is unavailable" including the
+    # decision hour itself.
+    migration_cooldown_h = max(0, int(math.ceil((args.expected_migration - 60) / 60.0)))
+    migration_hours = migration_cooldown_h + 1
+    migration_fraction_h = args.expected_migration / 60.0
 
     # Resolve source grid (honor deprecated --source-region alias).
     source_grid = getattr(args, "source_grid", None) or getattr(args, "source_region", None)
@@ -391,7 +398,7 @@ def run_expected_simulation(args):
     print(f"  Using Hardware:      {args.use_hw}")
     print(f"  Scheduler start:     {args.scheduler_time}")
     print(f"  Expected completion: {args.expected_completion} min ({total_sim_hours} hours)")
-    print(f"  Migration time:      {args.expected_migration} min ({migration_hours} hours)")
+    print(f"  Migration time:      {args.expected_migration} min (cooldown={migration_cooldown_h}h)")
     print(f"  Source grid:         {source_grid}")
     print(f"  Regions tree:        {regions_root}")
     print(f"  Output:              {out_dir}")
@@ -462,6 +469,10 @@ def run_expected_simulation(args):
     baseline_carbon = 0.0
     hours_tracked = 0
     migrating_cooldown = 0  # hours remaining in migration (pod unavailable)
+    # 260511-jce: track cumulative source-side migration carbon charged at
+    # decision hours; replaces the legacy "fraction of total_carbon" estimate
+    # for the per-run results.csv `migration_carbon_gco2` column.
+    migration_carbon_charged_total = 0.0
 
     carbon_rows = []
     migration_events = []
@@ -531,6 +542,17 @@ def run_expected_simulation(args):
                 old_grid = current_grid
                 old_intensity = intensity  # already hw-adjusted if use_hw
 
+                # 260511-jce: minute-granular source-side migration carbon.
+                # Charge `migration_fraction_h * old_intensity` (source intensity
+                # at the decision hour, HW-scaled iff --use-hw is set, so we do
+                # NOT re-apply HW scaling here). Mirrors the new sim-core
+                # accounting in _simulation_core.simulate_one_run so the parity
+                # assertion below still holds.
+                if old_intensity is not None:
+                    migration_carbon_h = migration_fraction_h * old_intensity
+                    total_carbon += migration_carbon_h
+                    migration_carbon_charged_total += migration_carbon_h
+
                 raw_new = lookup_intensity(intensity_lookup, target_grid, sim_ts)
                 if args.use_hw and raw_new is not None:
                     new_intensity = raw_new * HW_TABLE[target_grid].power_per_core
@@ -552,7 +574,7 @@ def run_expected_simulation(args):
                     "reason": "",
                 })
 
-                migrating_cooldown = migration_hours - 1  # current hour counts as 1
+                migrating_cooldown = migration_cooldown_h  # 0 for sub-hour migrations (260511-jce)
                 current_grid = target_grid
                 status = f"  >>> MIGRATE to {target_grid}"
             elif args.policy == 6 and hasattr(policy_obj, 'last_skip_reason') and policy_obj.last_skip_reason == "deadline_gate":
@@ -595,8 +617,11 @@ def run_expected_simulation(args):
     # ── Compute derived metrics ───────────────────────────────────
     total_runtime_ms = total_sim_hours * 3600 * 1000
     migration_overhead_ms = migration_count * int(migration_seconds_real * 1000)
-    migration_fraction = migration_overhead_ms / total_runtime_ms if total_runtime_ms > 0 else 0
-    migration_carbon_est = total_carbon * migration_fraction
+    # 260511-jce: with explicit per-migration source-side carbon now booked
+    # into total_carbon at decision time, the legacy "fraction of total_carbon"
+    # estimate is replaced by the cumulative migration carbon charged in the
+    # loop.
+    migration_carbon_est = migration_carbon_charged_total
     job_time_carbon = total_carbon - migration_carbon_est
 
     # ── Write output files ────────────────────────────────────────
