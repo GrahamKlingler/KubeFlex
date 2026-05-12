@@ -47,3 +47,4 @@ sim_time,sim_datetime,grid,intensity_gco2kwh,cumulative_carbon_gco2,migrations_s
 1609621200,2021-01-02 21:00,SCL,0.0,665.0,1,carbon-pod-1
 1609624800,2021-01-02 22:00,SCL,0.0,665.0,1,carbon-pod-1
 1609628400,2021-01-02 23:00,SCL,0.0,665.0,1,carbon-pod-1
+1609632000,2021-01-03 00:00,SCL,0.0,665.0,1,carbon-pod-1

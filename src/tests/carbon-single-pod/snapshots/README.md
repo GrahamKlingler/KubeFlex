@@ -90,3 +90,48 @@ destination). The migration-carbon-only delta is `51.2 - 27.7 ≈ 23.5 gCO2`
 which is in the same order of magnitude as the predicted 16 gCO2 (the source
 intensity at the migration hour is ~614 gCO2/kWh at AECI vs ~195 at the v1
 NE-region source, so `5/60 * 614 ≈ 51.2`).
+
+## Snapshot v3 (260512-kfc regen)
+
+**Generated:** 2026-05-12
+**Git SHA at snapshot (v3):** 96a816f (after the 260512-kfc Task 1 commit)
+**Snapshot version:** v3 (260512-kfc regen)
+
+The sim core was extended so that migration minutes do NOT count toward
+useful job completion. A 2880-min job that accrues N total migration-minutes
+now runs for `ceil((2880 + N) / 60)` wall-clock hours instead of a fixed 48
+hours. The minute-granular migration-carbon lump-charge formula from
+260511-jce is UNCHANGED; only the loop termination model and the per-hour
+useful/migration-minute accounting are new.
+
+See `.planning/quick/260512-kfc-sim-core-extend-total-runtime-so-migrati/260512-kfc-PLAN.md`
+for the full motivation and design.
+
+**Why regenerate:** The v2 snapshot was generated under the fixed-48-hour
+loop. Any Policy-6 run that migrates now extends past 48 hours by its
+cumulative migration time, which shifts `total_runtime_ms` (now
+`hours_tracked * 3600 * 1000`), `baseline_carbon_gco2` (baseline accumulates
+over the longer wall-clock duration), and `hours_tracked` itself.
+
+**v2 vs v3 (canonical Policy-6 / 2880-min / 5-min-migration run):**
+
+| Field | v2 (2026-05-11) | v3 (2026-05-12) |
+| --- | --- | --- |
+| `total_carbon_gco2` | 665.0 | 665.0 |
+| `migration_carbon_gco2` | 51.2 | 51.2 |
+| `job_time_carbon_gco2` | 613.8 | 613.8 |
+| `baseline_carbon_gco2` | 30476.6 | 31134.7 |
+| `hours_tracked` | 48 | 49 |
+| `total_runtime_ms` | 172800000 | 176400000 |
+| `migration_events` | `node-AECI,AECI,node-SCL,SCL,...` | `node-AECI,AECI,node-SCL,SCL,...` |
+
+The canonical Policy-6 run performs 1 migration of 5 min; the new
+`hours_tracked = 49` reflects one extra hour for the 5-min migration push
+past 2880 min useful work (`(2880 + 5)/60 -> ceil = 49`). `total_carbon` is
+unchanged because the post-migration grid (SCL) reports 0.0 intensity for
+every hour in the run, so the extra wall-clock hour adds no real intensity.
+`baseline_carbon_gco2` rises by exactly one AECI-hour at the post-migration
+timestamp (`31134.7 - 30476.6 = 658.1`), confirming the variable-runtime
+model is bookkeeping the extra wall-clock hour correctly. `migration_events`
+is unchanged because the migration decision still happens at the same hour
+with the same source/target.
