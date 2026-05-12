@@ -823,7 +823,7 @@ def write_plot(carbon_by_dir, pair_crossovers, directional_pairs,
     if pair_count <= 2:
         for ax in axes:
             ax.set_xlabel("Migration overhead (minutes)")
-            ax.legend(loc="lower left", fontsize=8)
+            ax.legend(loc="upper left", fontsize=8)
         axes[0].set_ylabel("Mean total carbon (gCO2eq, HW-scaled)")
     else:
         # In grid mode: x-label on bottom row, y-label on left column only,
@@ -839,7 +839,7 @@ def write_plot(carbon_by_dir, pair_crossovers, directional_pairs,
         # Legend only on the first non-empty subplot.
         for ax, pair in zip(axes, ordered_pairs_for_plot):
             if pair is not None:
-                ax.legend(loc="lower left", fontsize=7)
+                ax.legend(loc="upper left", fontsize=7)
                 break
 
     fig.suptitle(
@@ -1100,7 +1100,7 @@ def write_all_grids_plot(carbon_by_policy, mig_by_policy, policies,
         f"dynamic source per start_ts (260511-kqo)"
     )
     ax.grid(True, linestyle=":", linewidth=0.5, alpha=0.6)
-    ax.legend(loc="lower left", fontsize=9)
+    ax.legend(loc="upper left", fontsize=9)
     fig.text(
         0.99, 0.02,
         f"{len(timestamps)} starts; 48 h jobs; --use-hw; "
