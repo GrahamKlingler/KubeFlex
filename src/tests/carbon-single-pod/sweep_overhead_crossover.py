@@ -466,16 +466,39 @@ def run_sweep(full_lookup, directional_pairs, timestamps, anchor_grid, policies)
                             policy_id=p,
                             expected_migration_min=int(m),
                         )
-                        out = simulate_one_run(pair_lookup, cfg)
+                        # 260512-kfc: the new useful-work-driven sim raises
+                        # RuntimeError if a pathological policy (e.g. Policy 2
+                        # with 360-min migrations on a fixture that keeps
+                        # offering a cheaper destination) can't reach the
+                        # useful-work target within 2x its hour-equivalent. We
+                        # record such cells as NaN/0 and continue the sweep
+                        # so the rest of the grid still produces curves.
+                        try:
+                            out = simulate_one_run(pair_lookup, cfg)
+                            tc = out["total_carbon_gco2"]
+                            bc = out["baseline_carbon_gco2"]
+                            mc = out["migration_count"]
+                        except RuntimeError as e:
+                            if "safety cap" in str(e).lower():
+                                print(
+                                    f"[CAP] safety cap fired for p={p} "
+                                    f"src={src} dst={dst} ts={ts} m={m}: "
+                                    "marking NaN and continuing"
+                                )
+                                tc = float("nan")
+                                bc = float("nan")
+                                mc = float("nan")
+                            else:
+                                raise
                         rows.append({
                             "overhead_min": m,
                             "policy": p,
                             "source_grid": src,
                             "dest_grid": dst,
                             "start_ts": ts,
-                            "total_carbon_gco2": out["total_carbon_gco2"],
-                            "baseline_carbon_gco2": out["baseline_carbon_gco2"],
-                            "migration_count": out["migration_count"],
+                            "total_carbon_gco2": tc,
+                            "baseline_carbon_gco2": bc,
+                            "migration_count": mc,
                         })
 
     return rows, baseline_total_min_seen if baseline_total_min_seen is not None else 0.0
@@ -548,15 +571,31 @@ def run_sweep_all_grids(
                         policy_id=p,
                         expected_migration_min=int(m),
                     )
-                    out = simulate_one_run(pool_lookup, cfg)
+                    # 260512-kfc: see run_sweep — same safety-cap handling.
+                    try:
+                        out = simulate_one_run(pool_lookup, cfg)
+                        tc = out["total_carbon_gco2"]
+                        mc = out["migration_count"]
+                        dgv = "|".join(out["dest_grids_visited"])
+                    except RuntimeError as e:
+                        if "safety cap" in str(e).lower():
+                            print(
+                                f"[CAP] safety cap fired for p={p} src={src} "
+                                f"ts={ts} m={m}: marking NaN and continuing"
+                            )
+                            tc = float("nan")
+                            mc = float("nan")
+                            dgv = ""
+                        else:
+                            raise
                     rows.append({
                         "overhead_min": m,
                         "start_ts": ts,
                         "source_grid_chosen": src,
                         "policy": p,
-                        "total_carbon": out["total_carbon_gco2"],
-                        "migration_count": out["migration_count"],
-                        "dest_grids_visited": "|".join(out["dest_grids_visited"]),
+                        "total_carbon": tc,
+                        "migration_count": mc,
+                        "dest_grids_visited": dgv,
                     })
 
     return (
@@ -663,19 +702,27 @@ def aggregate_all_grids(rows, policies):
     Also exposes carbon_by_policy and mig_by_policy lists aligned to
     OVERHEAD_GRID_MIN for plotting and crossover detection.
     """
+    import math as _math
     agg = {}
     for m in OVERHEAD_GRID_MIN:
         for p in policies:
-            carb = [r["total_carbon"] for r in rows
-                    if r["overhead_min"] == m and r["policy"] == p]
-            migs = [r["migration_count"] for r in rows
-                    if r["overhead_min"] == m and r["policy"] == p]
+            # 260512-kfc: drop NaN cells (recorded when the sim's safety cap
+            # fired for pathological policy/overhead combos). pstdev raises
+            # AttributeError on NaN; mean propagates it. Filter at the source.
+            carb_raw = [r["total_carbon"] for r in rows
+                        if r["overhead_min"] == m and r["policy"] == p]
+            migs_raw = [r["migration_count"] for r in rows
+                        if r["overhead_min"] == m and r["policy"] == p]
+            carb = [v for v in carb_raw if not (isinstance(v, float) and _math.isnan(v))]
+            migs = [v for v in migs_raw if not (isinstance(v, float) and _math.isnan(v))]
+            n_dropped = len(carb_raw) - len(carb)
             if carb:
                 agg[(m, p)] = {
                     "mean_total_carbon": mean(carb),
                     "std_total_carbon": pstdev(carb) if len(carb) > 1 else 0.0,
-                    "mean_migration_count": mean(migs),
+                    "mean_migration_count": mean(migs) if migs else float("nan"),
                     "n_samples": len(carb),
+                    "n_safety_cap_dropped": n_dropped,
                 }
             else:
                 agg[(m, p)] = {
@@ -683,6 +730,7 @@ def aggregate_all_grids(rows, policies):
                     "std_total_carbon": float("nan"),
                     "mean_migration_count": float("nan"),
                     "n_samples": 0,
+                    "n_safety_cap_dropped": n_dropped,
                 }
     # Aligned per-policy lists (handy for plotting and crossover detection).
     carbon_by_policy = {
