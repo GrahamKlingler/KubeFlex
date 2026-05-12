@@ -355,10 +355,16 @@ def test_migration_carbon_minute_granular():
     (TVA is cheaper than ISNE). With m=30 and the LOCKED 260511-jce formula:
         h=0: source intensity 100 added, migration charges 0.5*100=50, switch to TVA.
         h=1: target intensity 50 added.
-    Expected total_carbon = 100 + 50 + 50 = 200.0 gCO2eq.
+
+    260512-kfc: useful-work-driven termination. The 30-min migration at h=0
+    consumes 30 of the hour's useful minutes, so reaching the 120-min useful
+    target now takes 3 wall-clock hours instead of 2. Carbon accumulates one
+    extra hour on the target grid. Expected total = 100 + 50 + 50 + 50 = 250.0.
     """
     from _simulation_core import RunConfig, simulate_one_run  # noqa: WPS433
-    lookup = _make_two_grid_lookup(2, "ISNE", "TVA", 100.0, 50.0)
+    # 4 hours of lookup data so the sim has slack to reach 120 useful minutes
+    # after the 30-min migration extends the runtime.
+    lookup = _make_two_grid_lookup(4, "ISNE", "TVA", 100.0, 50.0)
     cfg = RunConfig(
         start_ts=BASE_TS_2020,
         source_grid="ISNE",
@@ -377,10 +383,18 @@ def test_migration_carbon_minute_granular():
         f"Expected 1 migration on cheaper-dest fixture, got "
         f"{result['migration_count']}"
     )
-    expected = 100.0 + 0.5 * 100.0 + 50.0  # source-h0 + migration-charge + target-h1
+    # 260512-kfc: useful-work-driven termination extends to 3 hours wall-clock.
+    expected = 100.0 + 0.5 * 100.0 + 50.0 + 50.0  # h0 src + mig + h1 tgt + h2 tgt
     got = result["total_carbon_gco2"]
     assert abs(got - expected) < 0.6, (
         f"minute-granular migration carbon broken: total={got}, expected~{expected}"
+    )
+    assert result["completed_hours"] == 3, (
+        f"Expected completed_hours=3 (h=0 mig consumes 30 useful min -> 4th hour "
+        f"to reach 120 useful), got {result['completed_hours']}"
+    )
+    assert result["useful_minutes_completed"] >= 120, (
+        f"useful_minutes_completed={result['useful_minutes_completed']} < 120"
     )
 
 
@@ -418,33 +432,48 @@ def test_migration_carbon_zero_overhead_is_free():
     )
 
 
-def test_migration_cooldown_blocks_second_migration_over_120min():
-    """m=120 yields cooldown=1, so in a 4-hour Policy-2 sim with strictly cheaper
-    destinations available every hour we observe exactly 2 migrations (h=0
-    migrates, h=1 blocked, h=2 migrates, h=3 blocked).
+def test_migration_minutes_remaining_gates_re_migration_during_in_progress():
+    """260512-kfc: replaces test_migration_cooldown_blocks_second_migration_over_120min.
 
-    Fixture: ISNE source (100), TVA (50), SWPP (10) all flat across 4 hours.
-    Policy 2 always wants the min-carbon grid -- SWPP at hour 0. After migrating
-    to SWPP it would stay there since SWPP remains cheapest. To force a second
-    migration attempt at hour 2 we vary the cheapest-grid identity over time:
-    hours 0-1 SWPP is cheapest (10), hours 2-3 TVA is cheapest (5). Without
-    cooldown Policy 2 would migrate every hour; with cooldown=1 the sequence
-    is h=0 migrate (->SWPP), h=1 blocked, h=2 migrate (->TVA), h=3 blocked.
+    `migrating_cooldown` was removed; the equivalent gate is now
+    `migration_minutes_remaining`. While a migration is in-progress (mig_min_rem
+    > 0 at the start of the hour) no new migration decision can fire.
+
+    Fixture (10-hour lookup with slack so useful work can finish):
+      ISNE (source) = 100 every hour
+      SWPP cheaper at h=0..1 (=10), then 50 from h>=2
+      TVA  cheaper at h>=2 (=5), then 50 at h<2
+    Policy 2 with m=90 (1.5 hours of migration):
+      h=0: mig_min_rem=0 -> Policy 2 picks SWPP (10 < 100). Migration starts:
+           mig_min_rem=90, consumed=60, mig_min_rem=30, useful_this_hour=0.
+      h=1: mig_min_rem=30 -> consume 30, mig_min_rem=0, useful_this_hour=30.
+           NO migration decision (we entered the hour mid-migration).
+      h=2: mig_min_rem=0 -> Policy 2 picks TVA (5 < SWPP's 50). Migration:
+           mig_min_rem=90, consumed=60, useful=0.
+      h=3: mig_min_rem=30 -> useful=30, no decision.
+      h=4..N: TVA remains cheapest current_grid (5 is the lowest), so Policy 2
+           stops migrating. useful=60/hr. Continues until useful_min_completed
+           >= 240 (4 hours useful).
+    Total useful so far at end of h=3: 0+30+0+30 = 60. Need 180 more useful
+    minutes -> 3 more hours of 60 useful -> ends at h=6.
+
+    Expected: migration_count == 2, hours_tracked == 7.
     """
     from _simulation_core import RunConfig, simulate_one_run  # noqa: WPS433
-    # Build the lookup manually because we want time-varying SWPP/TVA values.
+    # Build a 10-hour lookup so the sim has slack to reach 240 useful minutes
+    # despite the migrations.
     lookup = {}
-    for h in range(4):
+    for h in range(10):
         ts = BASE_TS_2020 + h * 3600
         lookup[("ISNE", ts)] = 100.0
-        lookup[("TVA", ts)] = 5.0 if h >= 2 else 50.0
         lookup[("SWPP", ts)] = 10.0 if h <= 1 else 50.0
+        lookup[("TVA", ts)] = 5.0 if h >= 2 else 50.0
     cfg = RunConfig(
         start_ts=BASE_TS_2020,
         source_grid="ISNE",
         policy_id=2,
         expected_completion_min=240,
-        expected_migration_min=120,  # cooldown = ceil((120-60)/60) = 1
+        expected_migration_min=90,
         use_hw=False,
         hw_weighting=False,
         overhead_cost=False,
@@ -454,8 +483,112 @@ def test_migration_cooldown_blocks_second_migration_over_120min():
     )
     result = simulate_one_run(lookup, cfg)
     assert result["migration_count"] == 2, (
-        f"Expected exactly 2 migrations (h=0 migrate, h=1 cooldown, h=2 "
-        f"migrate, h=3 cooldown), got {result['migration_count']}"
+        f"Expected exactly 2 migrations (h=0 -> SWPP, h=2 -> TVA), "
+        f"got {result['migration_count']}"
+    )
+    # After both migrations TVA is the cheapest grid; Policy 2 stays put.
+    # Useful minutes per hour:
+    #   h=0: 0 (60-60 mig)
+    #   h=1: 30 (60-30 mig tail)
+    #   h=2: 0 (60-60 mig)
+    #   h=3: 30 (60-30 mig tail)
+    #   h=4: 60
+    #   h=5: 60
+    #   h=6: 60  -> cumulative 240, terminate (overshoots to exactly 240)
+    # Total wall-clock = 7 hours.
+    assert result["completed_hours"] == 7, (
+        f"Expected completed_hours=7 (4 useful hours + 3 hours of in-progress "
+        f"migration consuming useful minutes), got {result['completed_hours']}"
+    )
+
+
+# ── 260512-kfc: useful-work-driven termination regression tests ──────
+
+def test_sim_extends_runtime_for_migration_minutes():
+    """260512-kfc: a single 30-min migration in a 2880-min job extends total
+    wall-clock from 48 to 49 hours; useful_minutes_completed lands within
+    [2880, 2940).
+    """
+    from _simulation_core import RunConfig, simulate_one_run  # noqa: WPS433
+    # 60 hours of constant-intensity 2-grid fixture so the sim never runs out
+    # of data. SWPP cheaper than ISNE so Policy 2 migrates exactly once at h=0
+    # and then stays put.
+    lookup = {}
+    for h in range(60):
+        ts = BASE_TS_2020 + h * 3600
+        lookup[("ISNE", ts)] = 100.0
+        lookup[("SWPP", ts)] = 50.0
+    cfg = RunConfig(
+        start_ts=BASE_TS_2020,
+        source_grid="ISNE",
+        policy_id=2,
+        expected_completion_min=2880,
+        expected_migration_min=30,
+        use_hw=False,
+        hw_weighting=False,
+        overhead_cost=False,
+        deadline_gate=False,
+        include_network_power=False,
+        sweep_kind="main",
+    )
+    result = simulate_one_run(lookup, cfg)
+    assert result["migration_count"] == 1, (
+        f"Expected 1 migration, got {result['migration_count']}"
+    )
+    assert result["completed_hours"] == 49, (
+        f"Expected completed_hours=49 (2880 useful min + 30 mig min consuming "
+        f"useful in h=0 -> 2910 min wall, 49 hours), "
+        f"got {result['completed_hours']}"
+    )
+    assert 2880 <= result["useful_minutes_completed"] < 2940, (
+        f"useful_minutes_completed out of range [2880, 2940): "
+        f"{result['useful_minutes_completed']}"
+    )
+
+
+def test_sim_safety_cap_fires_on_pathological_policy():
+    """260512-kfc: a fixture that forces Policy 2 to migrate every hour with
+    m=60 (full-hour migrations, zero useful work) hits the safety cap
+    `max_iter_hours = ceil(2 * useful_minutes_target / 60)` and raises
+    RuntimeError.
+    """
+    from _simulation_core import RunConfig, simulate_one_run  # noqa: WPS433
+    # Three grids; rotate the cheapest each hour so Policy 2 always wants to
+    # switch. Need m=60 so the entire hour is consumed by migration and
+    # useful_minutes_this_hour == 0. But m=60 means migration_minutes_remaining
+    # goes to 0 by end of hour -> Policy 2 makes another decision next hour.
+    # With rotating mins, the target is always different from current_grid,
+    # so Policy 2 keeps migrating every hour -> safety cap fires.
+    lookup = {}
+    for h in range(200):  # well past the safety cap of 96
+        ts = BASE_TS_2020 + h * 3600
+        # Rotate the strict min: ISNE (h%3==0), TVA (h%3==1), SWPP (h%3==2).
+        lookup[("ISNE", ts)] = 10.0 if h % 3 == 0 else 100.0
+        lookup[("TVA", ts)] = 10.0 if h % 3 == 1 else 100.0
+        lookup[("SWPP", ts)] = 10.0 if h % 3 == 2 else 100.0
+    cfg = RunConfig(
+        start_ts=BASE_TS_2020,
+        source_grid="ISNE",
+        policy_id=2,
+        expected_completion_min=2880,
+        expected_migration_min=60,  # full-hour migrations
+        use_hw=False,
+        hw_weighting=False,
+        overhead_cost=False,
+        deadline_gate=False,
+        include_network_power=False,
+        sweep_kind="main",
+    )
+    raised = False
+    msg = ""
+    try:
+        simulate_one_run(lookup, cfg)
+    except RuntimeError as e:
+        msg = str(e)
+        raised = "safety cap" in msg.lower()
+    assert raised, (
+        "Expected safety-cap RuntimeError on pathological migrate-every-hour "
+        f"fixture; got raised={raised}, msg={msg!r}"
     )
 
 
@@ -477,7 +610,11 @@ def main():
         # 260511-jce: minute-granular migration carbon regressions.
         test_migration_carbon_minute_granular,
         test_migration_carbon_zero_overhead_is_free,
-        test_migration_cooldown_blocks_second_migration_over_120min,
+        # 260512-kfc: replaces the cooldown gate test (migrating_cooldown removed).
+        test_migration_minutes_remaining_gates_re_migration_during_in_progress,
+        # 260512-kfc: useful-work-driven termination + safety cap regressions.
+        test_sim_extends_runtime_for_migration_minutes,
+        test_sim_safety_cap_fires_on_pathological_policy,
     ]
     passed = 0
     failed = 0
