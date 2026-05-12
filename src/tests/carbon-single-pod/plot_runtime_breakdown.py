@@ -383,9 +383,17 @@ def plot_one_cell(
     out_dir: Path,
     app_size_mb: float,
     dpi: int,
-    total_sim_hours: int = 48,
+    total_sim_hours: Optional[int] = None,
 ) -> Tuple[Path, List[Dict[str, Any]]]:
     """Run the per-policy sims for one (direction, start_ts) cell, render PNG.
+
+    260512-kfc: ``total_sim_hours`` is now optional and used only as a plot
+    x-axis overhead. When omitted (default), the x-axis upper bound is computed
+    from ``max(out["completed_hours"] for out in all_policy_outs)`` so policies
+    that extend past 48 hours (because they migrated and migration minutes no
+    longer count toward useful completion) are NOT visually truncated. Each
+    policy's swimlane is rendered out to its own ``completed_hours`` so the
+    Gantt chart visibly shows different end times per policy.
 
     Returns:
         (png_path, rows) where ``rows`` is a list of dicts (one per policy)
@@ -407,6 +415,9 @@ def plot_one_cell(
 
     rows: List[Dict[str, Any]] = []
 
+    # 260512-kfc: run ALL policy sims first so we can compute the max
+    # completed_hours and size the x-axis to fit the longest swimlane.
+    policy_outs: List[Dict[str, Any]] = []
     for p in policies:
         cfg = RunConfig(
             start_ts=start_ts,
@@ -418,10 +429,25 @@ def plot_one_cell(
             sweep_kind="runtime_breakdown",
         )
         out = simulate_with_decisions(pair_lookup, cfg)
+        policy_outs.append(out)
 
+    # 260512-kfc: derive plot x-axis from longest policy. If caller passed an
+    # explicit total_sim_hours (legacy), use max(explicit, observed) so legacy
+    # callers don't shrink the axis below what's actually needed.
+    observed_max = max(out["completed_hours"] for out in policy_outs)
+    if total_sim_hours is None:
+        plot_hours = int(observed_max)
+    else:
+        plot_hours = max(int(total_sim_hours), int(observed_max))
+
+    for p, out in zip(policies, policy_outs):
+        # Render each policy's swimlane out to ITS OWN completed_hours so the
+        # Gantt chart visibly distinguishes policies that took longer (because
+        # migration minutes extended their wall-clock duration).
+        policy_hours = int(out["completed_hours"])
         segments = reconstruct_state_segments(
             events=out["migration_events"],
-            total_hours=total_sim_hours,
+            total_hours=policy_hours,
             source_grid=src_grid,
             overhead_min=float(overhead_min),
             hw_table=HW_TABLE,
@@ -438,11 +464,15 @@ def plot_one_cell(
                 edgecolor="none",
             ))
 
-        # Right-edge annotation: total carbon + migration count.
+        # Right-edge annotation anchored to the SHARED plot edge so all
+        # annotations line up vertically. Include hours_tracked so the
+        # variable-end-time effect is also reported numerically.
         ax.text(
-            total_sim_hours + 0.3,
+            plot_hours + 0.3,
             y_idx,
-            f"{out['total_carbon_gco2']:.0f} gCO2 · {out['migration_count']} migr",
+            f"{out['total_carbon_gco2']:.0f} gCO2 · "
+            f"{out['migration_count']} migr · "
+            f"{policy_hours}h",
             va="center", ha="left", fontsize=9,
         )
 
@@ -462,9 +492,10 @@ def plot_one_cell(
             "dest_grids_visited": dest_grids,
         })
 
-    # Axes formatting.
-    ax.set_xlim(0, total_sim_hours + 4)  # leave right margin for annotations
-    ax.set_xlabel("hour of 48-hour simulation")
+    # Axes formatting. 260512-kfc: x-axis upper bound from observed/explicit max.
+    ax.set_xlim(0, plot_hours + 6)  # leave right margin for annotations
+    ax.set_xlabel(f"hour of {plot_hours}-hour simulation (wall-clock; "
+                  f"variable per policy under 260512-kfc useful-work termination)")
     ax.set_yticks(list(range(len(policies))))
     ax.set_yticklabels([f"P{p}" for p in policies])
     ax.invert_yaxis()  # P1 at top, P6 at bottom
