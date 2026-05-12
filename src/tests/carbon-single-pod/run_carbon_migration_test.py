@@ -360,14 +360,12 @@ def run_expected_simulation(args):
     out_dir = Path(args.out_dir) if args.out_dir else OUT_DIR_BASE / f"{ts}_policy{args.policy}_expected"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    total_sim_hours = int(math.ceil(args.expected_completion / 60.0))
-    # 260511-jce: minute-granular migration accounting. Cooldown follows the
-    # locked formula max(0, ceil((m - 60) / 60)); the banner-friendly
-    # "migration_hours" is just cooldown + 1 so the printed banner still
-    # reflects "how many sim hours the pod is unavailable" including the
-    # decision hour itself.
-    migration_cooldown_h = max(0, int(math.ceil((args.expected_migration - 60) / 60.0)))
-    migration_hours = migration_cooldown_h + 1
+    # 260512-kfc: useful-work-driven termination. total_sim_hours is now a
+    # VARIABLE derived from the wall-clock loop's exit `hour`. We no longer
+    # precompute it as `ceil(expected_completion / 60.0)` because migration
+    # minutes do not count toward useful completion: a policy that migrates
+    # extends its wall-clock duration. The minute-granular migration carbon
+    # lump-charge formula from 260511-jce is UNCHANGED.
     migration_fraction_h = args.expected_migration / 60.0
 
     # Resolve source grid (honor deprecated --source-region alias).
@@ -397,8 +395,13 @@ def run_expected_simulation(args):
         print(f"  Deadline gate:       {'on' if args.deadline_gate else 'off'}")
     print(f"  Using Hardware:      {args.use_hw}")
     print(f"  Scheduler start:     {args.scheduler_time}")
-    print(f"  Expected completion: {args.expected_completion} min ({total_sim_hours} hours)")
-    print(f"  Migration time:      {args.expected_migration} min (cooldown={migration_cooldown_h}h)")
+    # 260512-kfc: wall-clock duration is variable per policy (depends on how
+    # many migrations the policy commits during the run). Print only the
+    # useful-minutes target up front; the derived wall-clock hours are
+    # reported in the summary banner after the loop exits.
+    print(f"  Expected completion: {args.expected_completion} min useful work")
+    print(f"  Migration time:      {args.expected_migration} min per event "
+          f"(wall-clock extends by cumulative migration time)")
     print(f"  Source grid:         {source_grid}")
     print(f"  Regions tree:        {regions_root}")
     print(f"  Output:              {out_dir}")
@@ -468,7 +471,11 @@ def run_expected_simulation(args):
     total_carbon = 0.0
     baseline_carbon = 0.0
     hours_tracked = 0
-    migrating_cooldown = 0  # hours remaining in migration (pod unavailable)
+    # 260512-kfc: replaces `migrating_cooldown`. See sim core for design notes.
+    migration_minutes_remaining = 0
+    useful_minutes_completed = 0
+    useful_minutes_target = int(args.expected_completion)
+    max_iter_hours = int(math.ceil(2 * useful_minutes_target / 60.0))
     # 260511-jce: track cumulative source-side migration carbon charged at
     # decision hours; replaces the legacy "fraction of total_carbon" estimate
     # for the per-run results.csv `migration_carbon_gco2` column.
@@ -483,7 +490,14 @@ def run_expected_simulation(args):
 
     policy_obj = get_policy(args)
 
-    for hour in range(total_sim_hours):
+    hour = 0
+    while useful_minutes_completed < useful_minutes_target:
+        if hour >= max_iter_hours:
+            raise RuntimeError(
+                "[SIM] simulation exceeded safety cap of {} hours; policy {} "
+                "may be migrating pathologically".format(max_iter_hours, args.policy)
+            )
+
         sim_ts = current_sim_time + hour * 3600
         sim_dt = datetime.fromtimestamp(sim_ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
         sim_timestamps.append(sim_ts)
@@ -521,12 +535,24 @@ def run_expected_simulation(args):
         })
 
         status = ""
-        if migrating_cooldown > 0:
-            migrating_cooldown -= 1
-            status = f"  [MIGRATING - {migrating_cooldown}h remaining]"
+        # 260512-kfc: per-hour migration-minutes accounting; mirrors sim core.
+        if migration_minutes_remaining > 0:
+            migration_minutes_this_hour = min(60, migration_minutes_remaining)
+            migration_minutes_remaining -= migration_minutes_this_hour
+            status = (
+                f"  [MIGRATING - {migration_minutes_remaining} min remaining "
+                f"after this hour]"
+            )
         else:
-            # Check if policy wants to migrate
-            remaining_hours = max(1, total_sim_hours - hour)
+            migration_minutes_this_hour = 0
+            # 260512-kfc: tighter "hours of useful work remaining" estimate
+            # (mirrors sim core change at the same lines).
+            remaining_hours = max(
+                1,
+                int(math.ceil(
+                    (useful_minutes_target - useful_minutes_completed) / 60.0
+                )),
+            )
             should_migrate, target_grid = policy_obj.decide(
                 intensity_lookup, grids, current_grid, sim_ts,
                 remaining_hours,
@@ -545,9 +571,9 @@ def run_expected_simulation(args):
                 # 260511-jce: minute-granular source-side migration carbon.
                 # Charge `migration_fraction_h * old_intensity` (source intensity
                 # at the decision hour, HW-scaled iff --use-hw is set, so we do
-                # NOT re-apply HW scaling here). Mirrors the new sim-core
-                # accounting in _simulation_core.simulate_one_run so the parity
-                # assertion below still holds.
+                # NOT re-apply HW scaling here). Mirrors the sim-core accounting
+                # in _simulation_core.simulate_one_run so the parity assertion
+                # below still holds.
                 if old_intensity is not None:
                     migration_carbon_h = migration_fraction_h * old_intensity
                     total_carbon += migration_carbon_h
@@ -574,7 +600,13 @@ def run_expected_simulation(args):
                     "reason": "",
                 })
 
-                migrating_cooldown = migration_cooldown_h  # 0 for sub-hour migrations (260511-jce)
+                # 260512-kfc: migration starts immediately and consumes up to
+                # 60 min of this hour; replaces `migrating_cooldown` with
+                # minute-granular tracking.
+                migration_minutes_remaining = int(args.expected_migration)
+                consumed_now = min(60, migration_minutes_remaining)
+                migration_minutes_this_hour = consumed_now
+                migration_minutes_remaining -= consumed_now
                 current_grid = target_grid
                 status = f"  >>> MIGRATE to {target_grid}"
             elif args.policy == 6 and hasattr(policy_obj, 'last_skip_reason') and policy_obj.last_skip_reason == "deadline_gate":
@@ -594,10 +626,21 @@ def run_expected_simulation(args):
                     "reason": "deadline_gate",
                 })
 
+        # 260512-kfc: useful minutes this hour = 60 - in-progress migration min.
+        useful_minutes_this_hour = 60 - migration_minutes_this_hour
+        useful_minutes_completed += useful_minutes_this_hour
+
         int_str = f"{intensity:.1f}" if intensity is not None else "N/A"
         unit = "gCO2" if args.use_hw else "gCO2/kWh"
         print(f"  [Hour {hour + 1:3d}] sim={sim_dt}  grid={current_grid:6s}  "
               f"intensity={int_str:>7s} {unit}  cumulative={total_carbon:.1f}{status}")
+
+        hour += 1
+
+    # 260512-kfc: total_sim_hours is now a derived value (variable per policy
+    # depending on how many migrations were committed). Used below by the
+    # derived-metrics block and the summary banner.
+    total_sim_hours = hour
 
     print()
 
@@ -612,6 +655,25 @@ def run_expected_simulation(args):
     assert abs(_result["total_carbon_gco2"] - round(total_carbon, 1)) < 0.5, (
         "_simulation_core parity break: pure total={} "
         "vs CLI loop total={:.1f}".format(_result["total_carbon_gco2"], total_carbon)
+    )
+    # 260512-kfc: additionally check that the new useful_minutes_completed
+    # field is at least the configured target. Catches the case where the new
+    # while-loop terminates prematurely.
+    assert _result.get("useful_minutes_completed") is not None, (
+        "_simulation_core parity break: useful_minutes_completed missing"
+    )
+    assert _result["useful_minutes_completed"] >= int(args.expected_completion), (
+        "_simulation_core parity break: useful_minutes_completed={} < "
+        "expected_completion={}".format(
+            _result["useful_minutes_completed"], args.expected_completion,
+        )
+    )
+    # Also verify the CLI loop's wall-clock hours match the sim core's value.
+    assert _result["completed_hours"] == total_sim_hours, (
+        "_simulation_core parity break: pure completed_hours={} "
+        "vs CLI loop total_sim_hours={}".format(
+            _result["completed_hours"], total_sim_hours,
+        )
     )
 
     # ── Compute derived metrics ───────────────────────────────────

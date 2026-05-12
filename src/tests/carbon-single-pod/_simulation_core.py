@@ -161,14 +161,19 @@ def simulate_one_run(intensity_lookup, cfg):
     split_at_start = check_split_access(cfg.start_ts)
     # split_at_start is "train" or "val"; we tolerate both as start points.
 
-    total_sim_hours = int(math.ceil(cfg.expected_completion_min / 60.0))
-    # Minute-granular migration accounting (quick task 260511-jce). The previous
-    # `migration_hours = max(1, ceil(m/60))` quantization treated every overhead
-    # in [1, 60] min as if it cost 1 full hour of cooldown, AND charged no
-    # carbon for the migration work itself. Both have been replaced with the
-    # locked formula in CONTEXT.md:
-    #   migration_carbon = (m / 60) * source_intensity_at_h   (HW-scaled iff cfg.use_hw)
-    #   cooldown_hours   = max(0, ceil((m - 60) / 60))
+    # 260512-kfc: useful-work-driven termination. The 260511-jce sim core used a
+    # fixed-length `for hour in range(total_sim_hours)` loop where
+    # total_sim_hours = ceil(expected_completion_min / 60.0). That treated
+    # migration minutes as if they counted toward useful job completion, so a
+    # policy that migrated still finished in the same 48 wall-clock hours.
+    # The new model accounts for migration minutes separately: useful minutes
+    # per hour shrink by the in-progress migration's per-hour minute consumption,
+    # and the wall-clock loop terminates only when `useful_minutes_completed`
+    # reaches `useful_minutes_target = cfg.expected_completion_min`. Total
+    # wall-clock duration is now a VARIABLE derived value: hours_tracked =
+    # ceil((useful_minutes_target + total_migration_minutes_consumed) / 60).
+    # The 260511-jce minute-granular migration-carbon lump charge at the decision
+    # hour is UNCHANGED.
     migration_fraction_h = cfg.expected_migration_min / 60.0  # float hours; 30 min -> 0.5
     migration_seconds_real = cfg.expected_migration_min * 60.0
 
@@ -198,7 +203,20 @@ def simulate_one_run(intensity_lookup, cfg):
     total_carbon = 0.0
     baseline_carbon = 0.0
     hours_tracked = 0
-    migrating_cooldown = 0  # hours remaining in migration (pod unavailable)
+    # 260512-kfc: state across hours; replaces `migrating_cooldown`. Tracks how
+    # many minutes of the in-progress migration are still pending. The pod is
+    # unavailable for useful work for these minutes; carbon still accumulates
+    # on the current grid (target-side, since current_grid was switched to
+    # target at the decision hour, matching the 260511-jce semantics).
+    migration_minutes_remaining = 0
+    useful_minutes_completed = 0
+    useful_minutes_target = cfg.expected_completion_min
+    # 260512-kfc safety cap: pathological policies (e.g. m=60 every hour with
+    # rotating-cheapest fixtures) would never advance useful_minutes_completed.
+    # Cap at 2x the target's hour-equivalent so a 48-hour useful job can't take
+    # more than ~96 wall-clock hours. RuntimeError fires loudly if exceeded so
+    # the policy / fixture issue is visible.
+    max_iter_hours = int(math.ceil(2 * useful_minutes_target / 60.0))
     # Additive diagnostic (quick task 260511-kqo): list of successful migration
     # destinations in chronological order. Does NOT include the source grid.
     # Empty list when no migrations occurred. Existing tests/callers ignore
@@ -207,7 +225,16 @@ def simulate_one_run(intensity_lookup, cfg):
 
     policy_obj = _get_policy_for_config(cfg)
 
-    for hour in range(total_sim_hours):
+    hour = 0
+    while useful_minutes_completed < useful_minutes_target:
+        if hour >= max_iter_hours:
+            raise RuntimeError(
+                "[SIM] simulation exceeded safety cap of {} hours; policy {} "
+                "may be migrating pathologically (cfg={!r})".format(
+                    max_iter_hours, cfg.policy_id, cfg,
+                )
+            )
+
         sim_ts = cfg.start_ts + hour * 3600
 
         raw_intensity = lookup_intensity(intensity_lookup, current_grid, sim_ts)
@@ -230,10 +257,26 @@ def simulate_one_run(intensity_lookup, cfg):
             baseline_carbon += baseline_intensity
         hours_tracked += 1
 
-        if migrating_cooldown > 0:
-            migrating_cooldown -= 1
+        # 260512-kfc: per-hour migration-minutes accounting. If a migration is
+        # in progress from a prior hour, consume up to 60 of those minutes
+        # before considering a new decision. Only when migration_minutes_remaining
+        # reaches 0 may a new migration decision be made.
+        if migration_minutes_remaining > 0:
+            migration_minutes_this_hour = min(60, migration_minutes_remaining)
+            migration_minutes_remaining -= migration_minutes_this_hour
+            # No new migration decision this hour; still mid-migration.
         else:
-            remaining_hours = max(1, total_sim_hours - hour)
+            migration_minutes_this_hour = 0
+            # 260512-kfc: tighter "hours of useful work remaining" estimate
+            # than the prior `total_sim_hours - hour`; preserves the prior
+            # intent without inflating the policy's deadline view by the
+            # safety-cap slack.
+            remaining_hours = max(
+                1,
+                int(math.ceil(
+                    (useful_minutes_target - useful_minutes_completed) / 60.0
+                )),
+            )
             should_migrate, target_grid = _simulate_policy_decision(
                 policy_obj,
                 intensity_lookup,
@@ -249,26 +292,34 @@ def simulate_one_run(intensity_lookup, cfg):
             )
             if should_migrate and target_grid:
                 migration_count += 1
-                # Minute-granular migration accounting (260511-jce). `intensity`
-                # is the source-grid intensity at the decision hour, already
-                # HW-scaled iff cfg.use_hw=True by the loop body above; re-
-                # applying HW scaling here would double-count -- do not. During
-                # cooldown the pod continues accumulating intensity on the now-
-                # target grid (target-side cost), which the existing loop body
-                # already does.
+                # 260511-jce: minute-granular migration carbon (UNCHANGED).
+                # `intensity` is the source-grid intensity at the decision hour,
+                # already HW-scaled iff cfg.use_hw=True by the loop body above.
                 if intensity is not None:
                     migration_carbon = migration_fraction_h * intensity
                     total_carbon += migration_carbon
-                # Cooldown: 0 for sub-hour migrations (<=60 min); ceil((m-60)/60)
-                # for longer migrations. 30 min -> 0; 60 min -> 0; 61 min -> 1;
-                # 90 min -> 1; 120 min -> 1; 180 min -> 2; 360 min -> 5.
-                migrating_cooldown = max(
-                    0,
-                    int(math.ceil((cfg.expected_migration_min - 60) / 60.0)),
-                )
+                # 260512-kfc: migration starts immediately at the decision hour
+                # and consumes up to 60 min of this hour. Replaces the prior
+                # hour-quantized `migrating_cooldown = max(0, ceil((m-60)/60))`
+                # approach with minute-granular tracking.
+                migration_minutes_remaining = cfg.expected_migration_min
+                consumed_now = min(60, migration_minutes_remaining)
+                migration_minutes_this_hour = consumed_now
+                migration_minutes_remaining -= consumed_now
                 current_grid = target_grid
                 # 260511-kqo: track destinations for downstream diagnostics.
                 dest_grids_visited.append(target_grid)
+
+        # 260512-kfc: useful minutes this hour = whatever's left of the 60-min
+        # window after subtracting in-progress migration time.
+        useful_minutes_this_hour = 60 - migration_minutes_this_hour
+        useful_minutes_completed += useful_minutes_this_hour
+        hour += 1
+
+    # 260512-kfc: final wall-clock duration is a derived per-policy value
+    # (variable; was previously a fixed precomputed constant). Used below by
+    # the end-of-year-wrap detection block.
+    total_sim_hours = hour
 
     # Derived metrics. The CLI wrapper computes total_runtime_ms,
     # migration_overhead_ms, migration_fraction, migration_carbon_est, and
@@ -325,6 +376,10 @@ def simulate_one_run(intensity_lookup, cfg):
         "savings_pct": round(savings_pct, 3),
         "migration_count": migration_count,
         "completed_hours": hours_tracked,
+        # 260512-kfc: useful minutes accumulated by the end of the run. Equals
+        # cfg.expected_completion_min plus the final-hour overshoot (bounded by
+        # min(60, 60 - migration_minutes_this_hour)). Additive return field.
+        "useful_minutes_completed": useful_minutes_completed,
         "sweep_kind": cfg.sweep_kind,
         "wrapped_into_val": wrapped_into_val,  # side-channel for metadata.json (D-22)
         # 260511-kqo: additive diagnostic — chronological list of successful
