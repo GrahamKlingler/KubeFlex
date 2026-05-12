@@ -3,16 +3,29 @@
 
 Complementary view to ``sweep_overhead_crossover.py``: instead of aggregating
 many runs into mean-carbon-vs-overhead curves, this script zooms into specific
-48-hour simulation traces and (in Task 2 of the plan) visualizes — per policy —
-what the pod is doing at each hour of the simulation:
+48-hour simulation traces and visualizes — per policy — what the pod is doing
+at each hour of the simulation:
 
   - running on the BANC grid (one color)
   - running on the CISO grid (another color)
   - in the middle of a migration (split into ckpt / send / restore phases)
 
-This file currently contains the Task 1 data-producing core (no matplotlib
-imports yet): ``simulate_with_decisions`` and ``synthesize_phase_durations``.
-Task 2 adds the per-cell plotter, the CLI, and the runs_summary.csv writer.
+Output (locked defaults, 4 seasonal starts x 2 directions x 6 policies x
+1 overhead value = 48 sims producing 8 PNGs + ``runs_summary.csv``):
+
+  data/quick/260512-j87-runtime-breakdown-banc-ciso/
+    30min_2020-01-16_BANC-CISO.png
+    30min_2020-01-16_CISO-BANC.png
+    30min_2020-04-16_BANC-CISO.png
+    30min_2020-04-16_CISO-BANC.png
+    30min_2020-07-17_BANC-CISO.png
+    30min_2020-07-17_CISO-BANC.png
+    30min_2020-10-16_BANC-CISO.png
+    30min_2020-10-16_CISO-BANC.png
+    runs_summary.csv
+
+Reproducibility: the sim is deterministic given an ``intensity_lookup`` and a
+``RunConfig`` — same inputs produce byte-identical PNGs and CSV across runs.
 
 Design notes:
 
@@ -39,10 +52,13 @@ Design notes:
     we do not exercise that regime; the plot caption notes the disclaimer.
 """
 
+import argparse
+import csv
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 # Project import shim (mirror sweep_overhead_crossover.py lines 99-102 so we
 # can import the same controller-package modules without installing them).
@@ -63,11 +79,15 @@ from heuristics.overhead import (  # noqa: E402
 )
 from sweep_overhead_crossover import (  # noqa: E402
     ANCHOR_APP_SIZE_MB,
+    DIRECTIONAL_PAIRS,
     _build_two_grid_lookup,
 )
 
 
 # ── Constants (LOCKED by CONTEXT.md) ──────────────────────────────────
+
+POLICIES_DEFAULT: Tuple[int, ...] = (1, 2, 3, 4, 5, 6)
+VALID_POLICY_IDS = frozenset(POLICIES_DEFAULT)
 
 # 4 seasonal anchors (one per quarter) at 00:00 UTC, in 2020.
 SEASONAL_STARTS_2020: Tuple[int, ...] = tuple(
@@ -77,6 +97,27 @@ SEASONAL_STARTS_2020: Tuple[int, ...] = tuple(
 
 # Single overhead value mid-range; sub-hour so phase breakdown is interesting.
 OVERHEAD_MIN_DEFAULT: int = 30
+
+# Repo data root: data/quick/...
+_DATA_QUICK = (
+    Path(__file__).resolve().parent.parent.parent.parent / "data" / "quick"
+)
+OUT_DIR_DEFAULT: Path = _DATA_QUICK / "260512-j87-runtime-breakdown-banc-ciso"
+
+# Plot colors (LOCKED in CONTEXT.md "Claude's Discretion").
+COLOR_MAP: Dict[str, str] = {
+    "grid_BANC": "#1f77b4",   # saturated blue
+    "grid_CISO": "#ff7f0e",   # saturated orange
+    "ckpt":      "#bdbdbd",   # light gray
+    "send":      "#757575",   # medium gray
+    "restore":   "#37474f",   # dark charcoal
+}
+
+# Caption locked verbatim by must_haves entry 7.
+SUBTITLE_LOCKED: str = (
+    "Phase durations synthesized from heuristics/overhead.py linear fits at "
+    "64 MB, scaled proportionally to match the 30-min sim overhead."
+)
 
 
 # ── Task 1: Data-producing core ──────────────────────────────────────
@@ -202,6 +243,495 @@ def synthesize_phase_durations(
     )
 
 
+# ── Task 2: Per-cell plotter, CLI, and CSV writer ────────────────────
+
+def build_full_lookup(
+    regions_root: Path = DEFAULT_REGIONS_TREE_DIR,
+    allowed_grids: Tuple[str, ...] = ("BANC", "CISO"),
+) -> Dict[Tuple[str, int], float]:
+    """Load the full ``{(grid, ts): intensity}`` lookup for the given grids.
+
+    Mirrors the loader call pattern from
+    ``sweep_overhead_crossover._run_pairwise_mode`` (line ~1378). Default to
+    just BANC and CISO since the LOCKED scope is the BANC↔CISO pair.
+    """
+    return build_intensity_lookup_from_regions_tree(
+        Path(regions_root), allowed_grids=tuple(sorted(allowed_grids)),
+    )
+
+
+def reconstruct_state_segments(
+    events: List[Dict[str, Any]],
+    total_hours: int,
+    source_grid: str,
+    overhead_min: float,
+    hw_table: Dict[str, Any],
+    app_size_mb: float,
+) -> List[Tuple[float, float, str]]:
+    """Reconstruct per-hour state into a list of ``(x_start, x_end, color_key)`` segments.
+
+    Algorithm:
+      - Walk hours ``0..total_hours-1`` tracking ``current_grid``.
+      - Hour h with no migration event: one segment
+        ``(h, h+1, "grid_<current>")``.
+      - Hour h with a migration event (overhead <= 60 min): split the hour
+        into four sub-segments —
+          1. ``(h, h + t_pre, "grid_<source>")`` running on source pre-migration
+          2. ``(h + t_pre, h + t_pre + t_ck, "ckpt")``
+          3. ``(h + t_pre + t_ck, h + t_pre + t_ck + t_sn, "send")``
+          4. ``(h + t_pre + t_ck + t_sn, h + 1, "restore")``
+        For the locked 30-min overhead, ``t_pre = 0.5`` and the remaining
+        0.5 h splits proportionally per ``synthesize_phase_durations``.
+      - After migration, ``current_grid = target_grid`` for subsequent hours.
+
+    For ``overhead_min > 60`` the migration phases would spill into hours
+    h+1, h+2, ... This case is NOT exercised by the locked 30-min overhead;
+    we implement it for forward-compatibility by laying the three phases
+    contiguously on the time axis starting at the decision hour and filling
+    any trailing remainder of the migration-end hour with the destination
+    grid.
+    """
+    # Index events by their decision hour for O(1) lookup.
+    event_by_hour: Dict[int, Dict[str, Any]] = {e["hour"]: e for e in events}
+
+    segments: List[Tuple[float, float, str]] = []
+    current_grid = source_grid
+
+    h = 0
+    while h < total_hours:
+        if h not in event_by_hour:
+            segments.append((float(h), float(h + 1), f"grid_{current_grid}"))
+            h += 1
+            continue
+
+        evt = event_by_hour[h]
+        src_grid_h = evt["source_grid"]
+        dst_grid_h = evt["target_grid"]
+        # Defensive: the captured source_grid at decision time should equal
+        # the local current_grid we've been tracking. If not, the events
+        # cannot represent a valid hour-by-hour trace.
+        if src_grid_h != current_grid:
+            raise AssertionError(
+                f"[BREAKDOWN] event source_grid={src_grid_h!r} != tracked "
+                f"current_grid={current_grid!r} at hour {h}; event list "
+                f"inconsistent with hour-by-hour state reconstruction."
+            )
+
+        ck_min, sn_min, rs_min = synthesize_phase_durations(
+            hw_table[src_grid_h], hw_table[dst_grid_h],
+            app_size_mb, float(overhead_min),
+        )
+        # Convert minutes to fractional hours within the hour-axis.
+        ck_h = ck_min / 60.0
+        sn_h = sn_min / 60.0
+        rs_h = rs_min / 60.0
+        total_h = ck_h + sn_h + rs_h  # equals overhead_min/60.0
+
+        if overhead_min <= 60.0:
+            # Sub-hour migration: hour h has [pre-run on src | ck | sn | rs]
+            # filling the 60-min window.
+            t_pre = 1.0 - total_h  # >= 0 for overhead <= 60
+            t0 = float(h)
+            t1 = t0 + t_pre
+            t2 = t1 + ck_h
+            t3 = t2 + sn_h
+            t4 = t3 + rs_h  # equals h + 1
+            if t_pre > 0.0:
+                segments.append((t0, t1, f"grid_{src_grid_h}"))
+            segments.append((t1, t2, "ckpt"))
+            segments.append((t2, t3, "send"))
+            segments.append((t3, t4, "restore"))
+            current_grid = dst_grid_h
+            h += 1
+        else:
+            # Multi-hour migration (forward-compat path; NOT exercised by the
+            # locked 30-min overhead). Migration starts immediately at the
+            # decision hour and spans ``total_h`` hours; the destination grid
+            # fills the remainder of the migration-end hour. Subsequent
+            # full hours run on the destination grid.
+            t0 = float(h)
+            t1 = t0 + ck_h
+            t2 = t1 + sn_h
+            t3 = t2 + rs_h
+            segments.append((t0, t1, "ckpt"))
+            segments.append((t1, t2, "send"))
+            segments.append((t2, t3, "restore"))
+            current_grid = dst_grid_h
+            # Determine how many full hours have elapsed since hour h.
+            consumed_full_hours = int(t3) - h  # floor(t3) - h
+            frac_end = t3 - (h + consumed_full_hours)
+            if frac_end > 0.0:
+                # Mid-hour remainder of the migration-end hour: destination.
+                segments.append((
+                    h + consumed_full_hours + frac_end,
+                    float(h + consumed_full_hours + 1),
+                    f"grid_{current_grid}",
+                ))
+                h += consumed_full_hours + 1
+            else:
+                h += consumed_full_hours
+
+    return segments
+
+
+def plot_one_cell(
+    direction: Tuple[str, str],
+    start_ts: int,
+    policies: Tuple[int, ...],
+    overhead_min: int,
+    full_lookup: Dict[Tuple[str, int], float],
+    out_dir: Path,
+    app_size_mb: float,
+    dpi: int,
+    total_sim_hours: int = 48,
+) -> Tuple[Path, List[Dict[str, Any]]]:
+    """Run the per-policy sims for one (direction, start_ts) cell, render PNG.
+
+    Returns:
+        (png_path, rows) where ``rows`` is a list of dicts (one per policy)
+        suitable for appending to ``runs_summary.csv``.
+    """
+    # Local matplotlib import keeps Task 1's data-producing core import-free
+    # of mpl unless plotting is actually requested.
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Rectangle, Patch
+
+    src_grid, dst_grid = direction
+    pair_lookup = _build_two_grid_lookup(full_lookup, src_grid, dst_grid)
+
+    iso_date = datetime.fromtimestamp(start_ts, tz=timezone.utc).date().isoformat()
+
+    fig, ax = plt.subplots(figsize=(12, 9), dpi=dpi)
+
+    rows: List[Dict[str, Any]] = []
+
+    for p in policies:
+        cfg = RunConfig(
+            start_ts=start_ts,
+            source_grid=src_grid,
+            policy_id=p,
+            app_size_mb=app_size_mb,
+            expected_migration_min=int(overhead_min),
+            use_hw=True,
+            sweep_kind="runtime_breakdown",
+        )
+        out = simulate_with_decisions(pair_lookup, cfg)
+
+        segments = reconstruct_state_segments(
+            events=out["migration_events"],
+            total_hours=total_sim_hours,
+            source_grid=src_grid,
+            overhead_min=float(overhead_min),
+            hw_table=HW_TABLE,
+            app_size_mb=app_size_mb,
+        )
+
+        y_idx = policies.index(p)  # 0..len(policies)-1, top-down via invert
+        for x0, x1, key in segments:
+            ax.add_patch(Rectangle(
+                (x0, y_idx - 0.4),
+                x1 - x0,
+                0.8,
+                facecolor=COLOR_MAP[key],
+                edgecolor="none",
+            ))
+
+        # Right-edge annotation: total carbon + migration count.
+        ax.text(
+            total_sim_hours + 0.3,
+            y_idx,
+            f"{out['total_carbon_gco2']:.0f} gCO2 · {out['migration_count']} migr",
+            va="center", ha="left", fontsize=9,
+        )
+
+        # CSV row for this run.
+        mig_hours = "|".join(str(e["hour"]) for e in out["migration_events"])
+        dest_grids = "|".join(out["dest_grids_visited"])
+        rows.append({
+            "direction": f"{src_grid}-{dst_grid}",
+            "start_ts_iso": iso_date,
+            "start_ts_unix": start_ts,
+            "policy": p,
+            "overhead_min": overhead_min,
+            "app_size_mb": app_size_mb,
+            "total_carbon_gco2": out["total_carbon_gco2"],
+            "migration_count": out["migration_count"],
+            "migration_hours": mig_hours,
+            "dest_grids_visited": dest_grids,
+        })
+
+    # Axes formatting.
+    ax.set_xlim(0, total_sim_hours + 4)  # leave right margin for annotations
+    ax.set_xlabel("hour of 48-hour simulation")
+    ax.set_yticks(list(range(len(policies))))
+    ax.set_yticklabels([f"P{p}" for p in policies])
+    ax.invert_yaxis()  # P1 at top, P6 at bottom
+    ax.set_ylim(len(policies) - 0.5, -0.5)
+    ax.grid(True, axis="x", linestyle=":", alpha=0.35)
+    ax.set_axisbelow(True)
+
+    # Title + subtitle.
+    title_main = (
+        f"Runtime breakdown — {src_grid}→{dst_grid}, start {iso_date} UTC, "
+        f"overhead={overhead_min} min, app={app_size_mb} MB"
+    )
+    ax.set_title(title_main, fontsize=12, pad=12)
+    # Subtitle as a fig.text just below the axes title (anchored to fig).
+    fig.text(
+        0.5, 0.92,
+        SUBTITLE_LOCKED,
+        ha="center", va="bottom", fontsize=9, style="italic", color="#444",
+    )
+
+    # Shared legend across all 5 categories.
+    legend_handles = [
+        Patch(facecolor=COLOR_MAP["grid_BANC"], label="running on BANC"),
+        Patch(facecolor=COLOR_MAP["grid_CISO"], label="running on CISO"),
+        Patch(facecolor=COLOR_MAP["ckpt"],      label="checkpoint"),
+        Patch(facecolor=COLOR_MAP["send"],      label="send"),
+        Patch(facecolor=COLOR_MAP["restore"],   label="restore"),
+    ]
+    fig.legend(
+        handles=legend_handles,
+        loc="lower center",
+        ncol=5,
+        frameon=False,
+        bbox_to_anchor=(0.5, 0.01),
+    )
+
+    # Leave room for the subtitle (top) and legend (bottom).
+    fig.subplots_adjust(top=0.88, bottom=0.10)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    png_path = out_dir / f"{overhead_min}min_{iso_date}_{src_grid}-{dst_grid}.png"
+    # ``metadata={"Software": "matplotlib"}`` keeps PNG metadata
+    # version-independent (some matplotlib versions embed a timestamp in the
+    # default metadata).
+    fig.savefig(
+        png_path,
+        dpi=dpi,
+        bbox_inches="tight",
+        metadata={"Software": "matplotlib"},
+    )
+    plt.close(fig)
+    return png_path, rows
+
+
+def write_runs_summary(rows: List[Dict[str, Any]], csv_path: Path) -> None:
+    """Emit the locked-schema ``runs_summary.csv`` at ``csv_path``."""
+    header = [
+        "direction", "start_ts_iso", "start_ts_unix", "policy", "overhead_min",
+        "app_size_mb", "total_carbon_gco2", "migration_count",
+        "migration_hours", "dest_grids_visited",
+    ]
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(csv_path, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=header)
+        w.writeheader()
+        for r in rows:
+            w.writerow({k: r[k] for k in header})
+
+
+# ── CLI ──────────────────────────────────────────────────────────────
+
+def _parse_starts(arg: Optional[str]) -> Tuple[int, ...]:
+    """Parse ``--starts`` either as comma-separated ISO dates or quarter aliases.
+
+    Default (None) returns the 4 seasonal anchor timestamps.
+    """
+    if arg is None:
+        return SEASONAL_STARTS_2020
+    raw = [tok.strip() for tok in arg.split(",") if tok.strip()]
+    if not raw:
+        return SEASONAL_STARTS_2020
+    out: List[int] = []
+    aliases = {
+        "JAN": 0, "Q1": 0,
+        "APR": 1, "Q2": 1,
+        "JUL": 2, "Q3": 2,
+        "OCT": 3, "Q4": 3,
+    }
+    for tok in raw:
+        upper = tok.upper()
+        if upper in aliases:
+            out.append(SEASONAL_STARTS_2020[aliases[upper]])
+            continue
+        # Try ISO date YYYY-MM-DD.
+        try:
+            dt = datetime.fromisoformat(tok).replace(tzinfo=timezone.utc)
+            out.append(int(dt.timestamp()))
+        except ValueError:
+            raise SystemExit(
+                f"[BREAKDOWN] bad --starts token {tok!r}; expected one of "
+                f"{{JAN,APR,JUL,OCT,Q1..Q4}} or ISO date YYYY-MM-DD"
+            )
+    return tuple(out)
+
+
+def _parse_pairs(arg: Optional[str]) -> Tuple[Tuple[str, str], ...]:
+    """Parse ``--pair SRC:DST,SRC:DST`` (default: BANC↔CISO bidirectional)."""
+    if arg is None:
+        return DIRECTIONAL_PAIRS
+    pairs: List[Tuple[str, str]] = []
+    for tok in arg.split(","):
+        tok = tok.strip()
+        if not tok:
+            continue
+        try:
+            s, d = tok.split(":")
+        except ValueError:
+            raise SystemExit(
+                f"[BREAKDOWN] bad --pair token {tok!r}; expected SRC:DST"
+            )
+        pairs.append((s, d))
+    if not pairs:
+        return DIRECTIONAL_PAIRS
+    return tuple(pairs)
+
+
+def _parse_policies(arg: Optional[str]) -> Tuple[int, ...]:
+    """Parse ``--policies 1,2,3,4,5,6`` (default: all 6)."""
+    if arg is None:
+        return POLICIES_DEFAULT
+    raw = [tok.strip() for tok in arg.split(",") if tok.strip()]
+    try:
+        out = tuple(int(t) for t in raw)
+    except ValueError:
+        raise SystemExit(
+            f"[BREAKDOWN] --policies must be integers (got {raw!r})"
+        )
+    bad = [p for p in out if p not in VALID_POLICY_IDS]
+    if bad:
+        raise SystemExit(
+            f"[BREAKDOWN] unknown policy ids {bad}; valid: "
+            f"{sorted(VALID_POLICY_IDS)}"
+        )
+    if len(set(out)) != len(out):
+        raise SystemExit(f"[BREAKDOWN] --policies contains duplicates: {out}")
+    return out
+
+
+def _build_argparser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        description="Gantt-style runtime-breakdown plot per policy "
+                    "(quick task 260512-j87).",
+    )
+    p.add_argument(
+        "--starts", default=None,
+        help="Comma-separated ISO dates or quarter aliases "
+             "(JAN,APR,JUL,OCT). Default: all 4 seasonal anchors.",
+    )
+    p.add_argument(
+        "--all-seasonal", action="store_true",
+        help="Alias for the default 4-seasonal-anchor start set.",
+    )
+    p.add_argument(
+        "--overhead", type=int, default=OVERHEAD_MIN_DEFAULT,
+        help=f"Migration overhead in minutes (default: "
+             f"{OVERHEAD_MIN_DEFAULT}).",
+    )
+    p.add_argument(
+        "--pair", default=None,
+        help="Comma-separated SRC:DST directional pairs "
+             "(default: BANC:CISO,CISO:BANC).",
+    )
+    p.add_argument(
+        "--policies", default=None,
+        help="Comma-separated policy ids "
+             "(default: 1,2,3,4,5,6).",
+    )
+    p.add_argument(
+        "--out-dir", default=str(OUT_DIR_DEFAULT),
+        help=f"Output directory (default: {OUT_DIR_DEFAULT}).",
+    )
+    p.add_argument(
+        "--app-size-mb", type=float, default=ANCHOR_APP_SIZE_MB,
+        help=f"Application checkpoint size in MB (default: "
+             f"{ANCHOR_APP_SIZE_MB}).",
+    )
+    p.add_argument(
+        "--dpi", type=int, default=100,
+        help="Figure DPI (default: 100 → 1200x900).",
+    )
+    p.add_argument(
+        "--smoke-only", action="store_true",
+        help="Run the Task 1 smoke test only (no artifacts produced).",
+    )
+    return p
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    args = _build_argparser().parse_args(argv)
+    if args.smoke_only:
+        _smoke_test()
+        return 0
+
+    starts = _parse_starts(args.starts)
+    pairs = _parse_pairs(args.pair)
+    policies = _parse_policies(args.policies)
+    overhead_min = int(args.overhead)
+    out_dir = Path(args.out_dir)
+    app_size_mb = float(args.app_size_mb)
+    dpi = int(args.dpi)
+
+    print(
+        f"[BREAKDOWN] starts={[datetime.fromtimestamp(s, tz=timezone.utc).date().isoformat() for s in starts]}\n"
+        f"[BREAKDOWN] pairs={list(pairs)}\n"
+        f"[BREAKDOWN] policies={list(policies)}\n"
+        f"[BREAKDOWN] overhead_min={overhead_min}\n"
+        f"[BREAKDOWN] app_size_mb={app_size_mb}\n"
+        f"[BREAKDOWN] out_dir={out_dir}"
+    )
+
+    t0 = time.time()
+    # Resolve the union of grids referenced by --pair so the loader picks
+    # up exactly the CSVs needed.
+    pair_grids = tuple(sorted({g for pair in pairs for g in pair}))
+    full_lookup = build_full_lookup(
+        regions_root=DEFAULT_REGIONS_TREE_DIR,
+        allowed_grids=pair_grids,
+    )
+    print(
+        f"[BREAKDOWN] full_lookup loaded: {len(full_lookup)} (grid, ts) "
+        f"entries across {pair_grids}"
+    )
+
+    all_rows: List[Dict[str, Any]] = []
+    n_pngs = 0
+    for direction in pairs:
+        for start_ts in starts:
+            png_path, rows = plot_one_cell(
+                direction=direction,
+                start_ts=start_ts,
+                policies=policies,
+                overhead_min=overhead_min,
+                full_lookup=full_lookup,
+                out_dir=out_dir,
+                app_size_mb=app_size_mb,
+                dpi=dpi,
+            )
+            all_rows.extend(rows)
+            n_pngs += 1
+            iso_date = datetime.fromtimestamp(
+                start_ts, tz=timezone.utc,
+            ).date().isoformat()
+            print(
+                f"[BREAKDOWN] {iso_date} {direction[0]}→{direction[1]} → "
+                f"{png_path} ({len(rows)} sims)"
+            )
+
+    csv_path = out_dir / "runs_summary.csv"
+    write_runs_summary(all_rows, csv_path)
+    elapsed = time.time() - t0
+    print(
+        f"[BREAKDOWN] Done. {n_pngs} PNGs + runs_summary.csv at {out_dir} "
+        f"(wall={elapsed:.2f}s, total sims={len(all_rows)})"
+    )
+    return 0
+
+
 # ── Smoke test (Task 1 acceptance) ───────────────────────────────────
 
 def _smoke_test() -> None:
@@ -265,4 +795,6 @@ def _smoke_test() -> None:
 
 
 if __name__ == "__main__":
-    _smoke_test()
+    # Default (no args): run the full 8-PNG batch. ``--smoke-only`` runs the
+    # Task 1 smoke test only.
+    sys.exit(main(sys.argv[1:]))
