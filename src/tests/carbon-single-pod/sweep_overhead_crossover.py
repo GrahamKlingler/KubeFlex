@@ -438,6 +438,10 @@ def run_sweep(full_lookup, directional_pairs, timestamps, anchor_grid, policies)
         deadline_gate=True,
         include_network_power=True,
         use_hw=True,
+        # 260513-dkb: 10x cap (480h for a 2880-min job) admits legitimate-but-slow
+        # P2/P5 cells at m>=180 that the prior 2x cap (96h) was NaN'ing out and
+        # biasing aggregate curves downward via survivorship.
+        max_wall_clock_multiplier=10.0,
         sweep_kind="overhead_crossover",
     )
 
@@ -538,6 +542,10 @@ def run_sweep_all_grids(
         deadline_gate=True,
         include_network_power=True,
         use_hw=use_hw,
+        # 260513-dkb: 10x cap (480h for a 2880-min job) admits legitimate-but-slow
+        # P2/P5 cells at m>=180 that the prior 2x cap (96h) was NaN'ing out and
+        # biasing aggregate curves downward via survivorship.
+        max_wall_clock_multiplier=10.0,
         sweep_kind="overhead_crossover",
     )
 
@@ -1452,6 +1460,8 @@ def _run_pairwise_mode(
             RunConfig(
                 start_ts=timestamps[0], source_grid=directional_pairs[0][0],
                 policy_id=policies[0],
+                # 260513-dkb: match the sweep's 10x cap for consistency.
+                max_wall_clock_multiplier=10.0,
             ),
         )
         assert "dest_grids_visited" in sample, (

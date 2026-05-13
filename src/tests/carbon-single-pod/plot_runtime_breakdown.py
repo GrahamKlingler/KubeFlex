@@ -426,6 +426,10 @@ def plot_one_cell(
             app_size_mb=app_size_mb,
             expected_migration_min=int(overhead_min),
             use_hw=True,
+            # 260513-dkb: 10x cap matches the sweep harness so Gantt plots can
+            # render high-overhead policies that would otherwise hit the default
+            # 2x cap (96h).
+            max_wall_clock_multiplier=10.0,
             sweep_kind="runtime_breakdown",
         )
         out = simulate_with_decisions(pair_lookup, cfg)
@@ -785,6 +789,8 @@ def _smoke_test() -> None:
         app_size_mb=ANCHOR_APP_SIZE_MB,
         expected_migration_min=OVERHEAD_MIN_DEFAULT,
         use_hw=True,
+        # 260513-dkb: 10x cap matches the main runner.
+        max_wall_clock_multiplier=10.0,
         sweep_kind="runtime_breakdown_smoke",
     )
     print(f"[SMOKE] simulate_with_decisions(cfg={cfg})")
