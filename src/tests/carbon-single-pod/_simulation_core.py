@@ -77,6 +77,7 @@ class RunConfig:
     include_network_power: bool = True      # sub-toggle of overhead_cost
     network_power_watts: float = NETWORK_POWER_WATTS  # ablation knob, forwarded to HeuristicPolicy
     use_hw: bool = True                     # P1..P5 hardware scaling
+    max_wall_clock_multiplier: float = 2.0  # 260513-dkb: safety-cap multiplier (sweeps override to 10.0)
     sweep_kind: str = "main"                # 'main' | 'ablation' | 'horizon'
 
 
@@ -216,7 +217,11 @@ def simulate_one_run(intensity_lookup, cfg):
     # Cap at 2x the target's hour-equivalent so a 48-hour useful job can't take
     # more than ~96 wall-clock hours. RuntimeError fires loudly if exceeded so
     # the policy / fixture issue is visible.
-    max_iter_hours = int(math.ceil(2 * useful_minutes_target / 60.0))
+    # 260513-dkb: multiplier is now configurable via RunConfig.max_wall_clock_multiplier
+    # (default 2.0 preserves the original cap; sweeps override to 10.0 to admit
+    # legitimate-but-slow high-overhead cells that were being NaN'd out by the
+    # 2x cap, masking true monotonic-increasing P2/P5 curves under survivorship).
+    max_iter_hours = int(math.ceil(cfg.max_wall_clock_multiplier * useful_minutes_target / 60.0))
     # Additive diagnostic (quick task 260511-kqo): list of successful migration
     # destinations in chronological order. Does NOT include the source grid.
     # Empty list when no migrations occurred. Existing tests/callers ignore
