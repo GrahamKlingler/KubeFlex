@@ -413,12 +413,21 @@ def _resolve_timestamps(all_ts, num):
     return list(all_ts[::step])[:num]
 
 
-def run_sweep(full_lookup, directional_pairs, timestamps, anchor_grid, policies):
+def run_sweep(
+    full_lookup, directional_pairs, timestamps, anchor_grid, policies,
+    use_hw=True, hw_weighting=True,
+):
     """Execute the 13 x len(directional_pairs) x len(policies) x len(timestamps) cell sweep.
 
     For each directional ``(src, dst)`` pair we build a two-grid lookup so
     Policy 6 sees exactly one candidate destination (the directional partner),
     then iterate overhead values, timestamps, and policies.
+
+    Args:
+        use_hw: If False, the sim core does NOT multiply intensity by
+            ``HW_TABLE[grid].power_per_core`` (RunConfig.use_hw=False).
+        hw_weighting: If False, Policy 6's internal heuristic does NOT
+            HW-weight its scores (RunConfig.hw_weighting=False).
 
     Returns:
         Tuple[List[dict], float] of (per-run rows, baseline_total_min used
@@ -433,11 +442,11 @@ def run_sweep(full_lookup, directional_pairs, timestamps, anchor_grid, policies)
         expected_migration_min=5,
         deadline_multiplier=1.5,
         lookahead_hours=48,
-        hw_weighting=True,
+        hw_weighting=hw_weighting,
         overhead_cost=True,
         deadline_gate=True,
         include_network_power=True,
-        use_hw=True,
+        use_hw=use_hw,
         # 260513-dkb: 10x cap (480h for a 2880-min job) admits legitimate-but-slow
         # P2/P5 cells at m>=180 that the prior 2x cap (96h) was NaN'ing out and
         # biasing aggregate curves downward via survivorship.
@@ -510,6 +519,7 @@ def run_sweep(full_lookup, directional_pairs, timestamps, anchor_grid, policies)
 
 def run_sweep_all_grids(
     full_lookup, hw_grids, timestamps, anchor_grid, policies, use_hw=True,
+    hw_weighting=True,
 ):
     """Execute the all-grids sweep (Sweep B, 260511-kqo).
 
@@ -521,6 +531,13 @@ def run_sweep_all_grids(
     The full 26-grid pool is presented as destinations to every policy. The
     ``scaled_overhead`` monkey-patch wraps each overhead level so Policy 6's
     heuristic-internal estimate scales with the swept knob.
+
+    Args:
+        use_hw: If False, the sim core does NOT multiply intensity by HW power.
+            ALSO controls the dynamic argmin source picker — when use_hw is
+            False, the source is chosen on raw intensity rather than HW-scaled.
+        hw_weighting: If False, Policy 6's internal heuristic does NOT
+            HW-weight its scores (RunConfig.hw_weighting=False).
 
     Returns:
         Tuple[List[dict], float, List[Tuple[int, str]]] of (per-run rows,
@@ -537,7 +554,7 @@ def run_sweep_all_grids(
         expected_migration_min=5,
         deadline_multiplier=1.5,
         lookahead_hours=48,
-        hw_weighting=True,
+        hw_weighting=hw_weighting,
         overhead_cost=True,
         deadline_gate=True,
         include_network_power=True,
@@ -774,7 +791,7 @@ def write_csv(rows, path):
 
 
 def write_plot(carbon_by_dir, pair_crossovers, directional_pairs,
-               timestamps, policies, path):
+               timestamps, policies, path, use_hw=True):
     """Multi-subplot figure dispatching layout on len(directional_pairs).
 
     - <= 2 pairs: legacy single-row layout, one axes per pair.
@@ -876,11 +893,17 @@ def write_plot(carbon_by_dir, pair_crossovers, directional_pairs,
         ax.tick_params(axis="both", labelsize=8)
 
     # Axis labels + legend depend on layout.
+    # 260514-jp2: when --no-hw is set, swap the y-axis qualifier so labels
+    # truthfully describe the run. Default (use_hw=True) preserves the
+    # existing strings byte-for-byte.
     if pair_count <= 2:
         for ax in axes:
             ax.set_xlabel("Migration overhead (minutes)")
             ax.legend(loc="upper left", fontsize=8)
-        axes[0].set_ylabel("Mean total carbon (gCO2eq, HW-scaled)")
+        if use_hw:
+            axes[0].set_ylabel("Mean total carbon (gCO2eq, HW-scaled)")
+        else:
+            axes[0].set_ylabel("Mean total carbon (gCO2eq, no HW scaling)")
     else:
         # In grid mode: x-label on bottom row, y-label on left column only,
         # legend on first subplot only.
@@ -891,7 +914,10 @@ def write_plot(carbon_by_dir, pair_crossovers, directional_pairs,
         for row in range(nrows):
             left_ax_idx = row * ncols
             if ordered_pairs_for_plot[left_ax_idx] is not None:
-                axes[left_ax_idx].set_ylabel("Mean total carbon (gCO2eq)", fontsize=9)
+                if use_hw:
+                    axes[left_ax_idx].set_ylabel("Mean total carbon (gCO2eq)", fontsize=9)
+                else:
+                    axes[left_ax_idx].set_ylabel("Mean total carbon (gCO2eq, no HW scaling)", fontsize=9)
         # Legend only on the first non-empty subplot.
         for ax, pair in zip(axes, ordered_pairs_for_plot):
             if pair is not None:
@@ -903,9 +929,10 @@ def write_plot(carbon_by_dir, pair_crossovers, directional_pairs,
         f"carbon vs migration overhead ({pair_count} directional pair"
         f"{'s' if pair_count != 1 else ''}, linked knob)"
     )
+    hw_footer = "--use-hw" if use_hw else "--no-hw"
     fig.text(
         0.99, 0.02,
-        f"{len(timestamps)} starts; 48 h jobs; --use-hw",
+        f"{len(timestamps)} starts; 48 h jobs; {hw_footer}",
         ha="right", va="bottom", fontsize=8, color="dimgray",
     )
     fig.tight_layout(rect=[0, 0.01, 1, 0.97])
@@ -928,7 +955,7 @@ def _git_short_sha():
 def write_summary_md(
     path, pair_crossovers, carbon_by_dir, mig_count_by_dir,
     directional_pairs, baseline_total_min, anchor_grid, timestamps,
-    policies,
+    policies, use_hw=True, hw_weighting=True,
 ):
     """Render the per-direction pairwise crossover summary markdown.
 
@@ -985,8 +1012,16 @@ def write_summary_md(
         f"- Grid: {list(OVERHEAD_GRID_MIN)}",
         f"- Samples: {len(timestamps)} 2020 hourly starts per direction.",
         f"- Directions: {[f'{s}->{d}' for s, d in directional_pairs]}",
-        "- Settings: app_size_mb=64, expected_completion_min=2880 (48 h), "
-        "use_hw=True.",
+        # 260514-jp2: preserve the exact default-mode string for byte-stable
+        # SUMMARY output; emit a richer line only when --no-hw flips toggles.
+        (
+            "- Settings: app_size_mb=64, expected_completion_min=2880 (48 h), "
+            "use_hw=True."
+            if (use_hw and hw_weighting)
+            else
+            "- Settings: app_size_mb=64, expected_completion_min=2880 (48 h), "
+            f"use_hw={use_hw}, hw_weighting={hw_weighting}."
+        ),
         "",
     ]
 
@@ -1138,7 +1173,7 @@ def write_all_grids_aggregates(agg, policies, path):
 
 
 def write_all_grids_plot(carbon_by_policy, mig_by_policy, policies,
-                         timestamps, hw_grids, path):
+                         timestamps, hw_grids, path, use_hw=True):
     """Single-panel mean-carbon-vs-overhead plot for Sweep B (6 policy curves)."""
     fig, ax = plt.subplots(1, 1, figsize=(10, 6))
     for p in policies:
@@ -1150,16 +1185,21 @@ def write_all_grids_plot(carbon_by_policy, mig_by_policy, policies,
             label=f"Policy {p} ({name})",
         )
     ax.set_xlabel("Migration overhead (minutes)")
-    ax.set_ylabel("Mean total carbon (gCO2eq, HW-scaled, averaged across start_ts)")
+    # 260514-jp2: y-axis qualifier reflects use_hw.
+    if use_hw:
+        ax.set_ylabel("Mean total carbon (gCO2eq, HW-scaled, averaged across start_ts)")
+    else:
+        ax.set_ylabel("Mean total carbon (gCO2eq, no HW scaling, averaged across start_ts)")
     ax.set_title(
         f"All-grids sweep: {len(hw_grids)}-grid HW destination pool, "
         f"dynamic source per start_ts (260511-kqo)"
     )
     ax.grid(True, linestyle=":", linewidth=0.5, alpha=0.6)
     ax.legend(loc="upper left", fontsize=9)
+    hw_footer = "--use-hw" if use_hw else "--no-hw"
     fig.text(
         0.99, 0.02,
-        f"{len(timestamps)} starts; 48 h jobs; --use-hw; "
+        f"{len(timestamps)} starts; 48 h jobs; {hw_footer}; "
         f"argmin-of-{len(hw_grids)} source",
         ha="right", va="bottom", fontsize=8, color="dimgray",
     )
@@ -1171,6 +1211,7 @@ def write_all_grids_plot(carbon_by_policy, mig_by_policy, policies,
 def write_all_grids_summary_md(
     path, agg, rows, policies, baseline_total_min, anchor_grid, timestamps,
     hw_grids, sources_by_ts, carbon_by_policy, mig_by_policy,
+    use_hw=True, hw_weighting=True,
 ):
     """Render the Sweep B summary markdown.
 
@@ -1212,7 +1253,15 @@ def write_all_grids_summary_md(
         f"- Overhead grid: {list(OVERHEAD_GRID_MIN)}",
         f"- Samples: {len(timestamps)} sub-sampled 2020 hourly starts.",
         f"- Stdev reported is population stdev (`statistics.pstdev`).",
-        "- Settings: app_size_mb=64, expected_completion_min=2880 (48 h), use_hw=True.",
+        # 260514-jp2: preserve exact default-mode string; emit richer line
+        # only when --no-hw flips toggles.
+        (
+            "- Settings: app_size_mb=64, expected_completion_min=2880 (48 h), use_hw=True."
+            if (use_hw and hw_weighting)
+            else
+            f"- Settings: app_size_mb=64, expected_completion_min=2880 (48 h), "
+            f"use_hw={use_hw}, hw_weighting={hw_weighting}."
+        ),
         "",
     ]
 
@@ -1399,6 +1448,10 @@ def _parse_args(argv=None):
                    help="Smoke run with N=4 starts for <60 s sanity check")
     p.add_argument("--out-dir", default=None,
                    help="Override output directory")
+    p.add_argument("--no-hw", action="store_true",
+                   help="Disable HW scaling: use_hw=False and hw_weighting=False. "
+                        "Default output dir is suffixed with '-no-hw' so the "
+                        "HW-scaled default outputs are not overwritten.")
     p.add_argument("--self-check", action="store_true",
                    help="Run inline wiring assertions before completing")
     return p.parse_args(argv)
@@ -1406,6 +1459,7 @@ def _parse_args(argv=None):
 
 def _run_pairwise_mode(
     args, regions_root, out_dir, usable, policies, timestamps, t0,
+    use_hw=True, hw_weighting=True,
 ):
     """Sweep A: pairwise directional sweep across --pairs."""
     directional_pairs = _resolve_directional_pairs(usable, args.pairs)
@@ -1428,6 +1482,7 @@ def _run_pairwise_mode(
         f"(first={timestamps[0]}, last={timestamps[-1]})\n"
         f"[SWEEP] overhead_grid={list(OVERHEAD_GRID_MIN)} min\n"
         f"[SWEEP] policies={list(policies)}\n"
+        f"[SWEEP] use_hw={use_hw} hw_weighting={hw_weighting}\n"
         f"[SWEEP] out_dir={out_dir}"
     )
 
@@ -1438,6 +1493,7 @@ def _run_pairwise_mode(
 
     rows, baseline_total_min = run_sweep(
         lookup, directional_pairs, timestamps, anchor_grid, policies,
+        use_hw=use_hw, hw_weighting=hw_weighting,
     )
     print(
         f"[SWEEP] completed {len(rows)} simulated runs in "
@@ -1508,13 +1564,13 @@ def _run_pairwise_mode(
     print(f"[PLOT] wrote {csv_path}")
     write_plot(
         carbon_by_dir, pair_crossovers, directional_pairs,
-        timestamps, policies, png_path,
+        timestamps, policies, png_path, use_hw=use_hw,
     )
     print(f"[PLOT] wrote {png_path}")
     write_summary_md(
         md_path, pair_crossovers, carbon_by_dir, mig_count_by_dir,
         directional_pairs, baseline_total_min, anchor_grid, timestamps,
-        policies,
+        policies, use_hw=use_hw, hw_weighting=hw_weighting,
     )
     print(f"[PLOT] wrote {md_path}")
 
@@ -1540,6 +1596,7 @@ def _run_pairwise_mode(
 
 def _run_all_grids_mode(
     args, regions_root, out_dir, usable, policies, timestamps, t0,
+    use_hw=True, hw_weighting=True,
 ):
     """Sweep B: all-grids mode -- dynamic source + 26-grid HW destination pool."""
     if args.pairs:
@@ -1589,6 +1646,7 @@ def _run_all_grids_mode(
         f"(first={timestamps[0]}, last={timestamps[-1]})\n"
         f"[SWEEP] overhead_grid={list(OVERHEAD_GRID_MIN)} min\n"
         f"[SWEEP] policies={list(policies)}\n"
+        f"[SWEEP] use_hw={use_hw} hw_weighting={hw_weighting}\n"
         f"[SWEEP] out_dir={out_dir}"
     )
 
@@ -1598,7 +1656,8 @@ def _run_all_grids_mode(
     print(f"[SWEEP] intensity_lookup: {len(lookup)} (grid, ts) entries")
 
     rows, baseline_total_min, sources_by_ts = run_sweep_all_grids(
-        lookup, hw_pool, timestamps, anchor_grid, policies, use_hw=True,
+        lookup, hw_pool, timestamps, anchor_grid, policies, use_hw=use_hw,
+        hw_weighting=hw_weighting,
     )
     print(
         f"[SWEEP] completed {len(rows)} simulated runs in "
@@ -1659,11 +1718,13 @@ def _run_all_grids_mode(
     print(f"[PLOT] wrote {agg_path}")
     write_all_grids_plot(
         carbon_by_policy, mig_by_policy, policies, timestamps, hw_pool, png_path,
+        use_hw=use_hw,
     )
     print(f"[PLOT] wrote {png_path}")
     write_all_grids_summary_md(
         md_path, agg, rows, policies, baseline_total_min, anchor_grid,
         timestamps, hw_pool, sources_by_ts, carbon_by_policy, mig_by_policy,
+        use_hw=use_hw, hw_weighting=hw_weighting,
     )
     print(f"[PLOT] wrote {md_path}")
 
@@ -1693,11 +1754,25 @@ def main(argv=None) -> int:
     args = _parse_args(argv)
     t0 = time.time()
 
+    # 260514-jp2: --no-hw flips BOTH the sim-core HW scaling (use_hw) AND
+    # Policy 6's internal HW weighting (hw_weighting). They are coupled so a
+    # --no-hw run is a clean apples-to-apples "no HW" comparison; flipping
+    # them independently would mix scaling regimes and is not what the
+    # thesis comparison wants. Default (no flag) preserves the existing
+    # HW-scaled behavior: use_hw=True, hw_weighting=True.
+    use_hw = not args.no_hw
+    hw_weighting = not args.no_hw
+
     regions_root = Path(args.regions_dir) if args.regions_dir else DEFAULT_REGIONS_TREE_DIR
     if args.out_dir is not None:
         out_dir = Path(args.out_dir)
     else:
         out_dir = SWEEP_B_OUT_DIR if args.mode == "all-grids" else SWEEP_A_OUT_DIR
+        # When --no-hw is set without a user-provided --out-dir, suffix the
+        # default so we never overwrite the HW-scaled artifacts at
+        # data/quick/260511-kqo-*/.
+        if args.no_hw:
+            out_dir = out_dir.parent / (out_dir.name + "-no-hw")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Resolve usable grids = those present on disk AND in HW_TABLE.
@@ -1731,9 +1806,11 @@ def main(argv=None) -> int:
     if args.mode == "all-grids":
         return _run_all_grids_mode(
             args, regions_root, out_dir, usable, policies, timestamps, t0,
+            use_hw=use_hw, hw_weighting=hw_weighting,
         )
     return _run_pairwise_mode(
         args, regions_root, out_dir, usable, policies, timestamps, t0,
+        use_hw=use_hw, hw_weighting=hw_weighting,
     )
 
 
