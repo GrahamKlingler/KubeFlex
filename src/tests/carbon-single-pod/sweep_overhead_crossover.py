@@ -415,7 +415,7 @@ def _resolve_timestamps(all_ts, num):
 
 def run_sweep(
     full_lookup, directional_pairs, timestamps, anchor_grid, policies,
-    use_hw=True, hw_weighting=True,
+    use_hw=True, hw_weighting=True, use_empirical_runtime=False,
 ):
     """Execute the 13 x len(directional_pairs) x len(policies) x len(timestamps) cell sweep.
 
@@ -452,6 +452,8 @@ def run_sweep(
         # biasing aggregate curves downward via survivorship.
         max_wall_clock_multiplier=10.0,
         sweep_kind="overhead_crossover",
+        # 260515-jav: optional sysbench-backed empirical runtime for Policy 6.
+        use_empirical_runtime=use_empirical_runtime,
     )
 
     rows = []
@@ -519,7 +521,7 @@ def run_sweep(
 
 def run_sweep_all_grids(
     full_lookup, hw_grids, timestamps, anchor_grid, policies, use_hw=True,
-    hw_weighting=True,
+    hw_weighting=True, use_empirical_runtime=False,
 ):
     """Execute the all-grids sweep (Sweep B, 260511-kqo).
 
@@ -564,6 +566,8 @@ def run_sweep_all_grids(
         # biasing aggregate curves downward via survivorship.
         max_wall_clock_multiplier=10.0,
         sweep_kind="overhead_crossover",
+        # 260515-jav: optional sysbench-backed empirical runtime for Policy 6.
+        use_empirical_runtime=use_empirical_runtime,
     )
 
     # Build the full 26-grid lookup ONCE outside the overhead/policy loops --
@@ -1452,6 +1456,14 @@ def _parse_args(argv=None):
                    help="Disable HW scaling: use_hw=False and hw_weighting=False. "
                         "Default output dir is suffixed with '-no-hw' so the "
                         "HW-scaled default outputs are not overwritten.")
+    # 260515-jav: opt-in sysbench-backed empirical runtime for Policy 6.
+    p.add_argument("--use-empirical-runtime", action="store_true",
+                   help="Enable sysbench-backed empirical runtime estimation "
+                        "for Policy 6 (260515-jav). Default off preserves "
+                        "snapshot-baseline behavior. Cluster path is library-"
+                        "only; this flag exercises the sim opt-in. Default "
+                        "output dir is suffixed with '-empirical' so the "
+                        "clock-speed-default outputs are not overwritten.")
     p.add_argument("--self-check", action="store_true",
                    help="Run inline wiring assertions before completing")
     return p.parse_args(argv)
@@ -1459,7 +1471,7 @@ def _parse_args(argv=None):
 
 def _run_pairwise_mode(
     args, regions_root, out_dir, usable, policies, timestamps, t0,
-    use_hw=True, hw_weighting=True,
+    use_hw=True, hw_weighting=True, use_empirical_runtime=False,
 ):
     """Sweep A: pairwise directional sweep across --pairs."""
     directional_pairs = _resolve_directional_pairs(usable, args.pairs)
@@ -1494,6 +1506,7 @@ def _run_pairwise_mode(
     rows, baseline_total_min = run_sweep(
         lookup, directional_pairs, timestamps, anchor_grid, policies,
         use_hw=use_hw, hw_weighting=hw_weighting,
+        use_empirical_runtime=use_empirical_runtime,
     )
     print(
         f"[SWEEP] completed {len(rows)} simulated runs in "
@@ -1596,7 +1609,7 @@ def _run_pairwise_mode(
 
 def _run_all_grids_mode(
     args, regions_root, out_dir, usable, policies, timestamps, t0,
-    use_hw=True, hw_weighting=True,
+    use_hw=True, hw_weighting=True, use_empirical_runtime=False,
 ):
     """Sweep B: all-grids mode -- dynamic source + 26-grid HW destination pool."""
     if args.pairs:
@@ -1658,6 +1671,7 @@ def _run_all_grids_mode(
     rows, baseline_total_min, sources_by_ts = run_sweep_all_grids(
         lookup, hw_pool, timestamps, anchor_grid, policies, use_hw=use_hw,
         hw_weighting=hw_weighting,
+        use_empirical_runtime=use_empirical_runtime,
     )
     print(
         f"[SWEEP] completed {len(rows)} simulated runs in "
@@ -1762,6 +1776,8 @@ def main(argv=None) -> int:
     # HW-scaled behavior: use_hw=True, hw_weighting=True.
     use_hw = not args.no_hw
     hw_weighting = not args.no_hw
+    # 260515-jav: optional sysbench-backed empirical runtime for Policy 6.
+    use_empirical_runtime = bool(args.use_empirical_runtime)
 
     regions_root = Path(args.regions_dir) if args.regions_dir else DEFAULT_REGIONS_TREE_DIR
     if args.out_dir is not None:
@@ -1773,6 +1789,10 @@ def main(argv=None) -> int:
         # data/quick/260511-kqo-*/.
         if args.no_hw:
             out_dir = out_dir.parent / (out_dir.name + "-no-hw")
+        # 260515-jav: same idea for --use-empirical-runtime so the
+        # clock-speed-default and empirical-opt-in outputs don't overwrite.
+        if use_empirical_runtime:
+            out_dir = out_dir.parent / (out_dir.name + "-empirical")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Resolve usable grids = those present on disk AND in HW_TABLE.
@@ -1807,10 +1827,12 @@ def main(argv=None) -> int:
         return _run_all_grids_mode(
             args, regions_root, out_dir, usable, policies, timestamps, t0,
             use_hw=use_hw, hw_weighting=hw_weighting,
+            use_empirical_runtime=use_empirical_runtime,
         )
     return _run_pairwise_mode(
         args, regions_root, out_dir, usable, policies, timestamps, t0,
         use_hw=use_hw, hw_weighting=hw_weighting,
+        use_empirical_runtime=use_empirical_runtime,
     )
 
 
