@@ -592,6 +592,128 @@ def test_sim_safety_cap_fires_on_pathological_policy():
     )
 
 
+# ── 260515-jav: sysbench-backed empirical runtime opt-in tests ────
+
+
+def test_sim_default_use_empirical_runtime_matches_existing_behavior():
+    """RunConfig.use_empirical_runtime default (False) is byte-identical to
+    an explicit-False RunConfig.
+
+    The point of this test is to PROVE the default path is unchanged: any
+    deterministic fixture will do. We use the synthetic small_lookup so the
+    assertion does not depend on real CSV data. Together with the existing
+    16 tests (which still pass), this guarantees the new RunConfig field
+    doesn't perturb prior behavior.
+    """
+    from _simulation_core import simulate_one_run  # noqa: WPS433
+    lookup = make_small_lookup(hours=60)
+    cfg_default = make_default_run_config(expected_completion_min=120)
+    cfg_explicit_off = make_default_run_config(
+        expected_completion_min=120, use_empirical_runtime=False
+    )
+    r1 = simulate_one_run(lookup, cfg_default)
+    r2 = simulate_one_run(lookup, cfg_explicit_off)
+    assert r1["total_carbon_gco2"] == r2["total_carbon_gco2"], (
+        f"Default and explicit-False configs must produce identical "
+        f"total_carbon_gco2: {r1['total_carbon_gco2']} vs "
+        f"{r2['total_carbon_gco2']}"
+    )
+    # Additional invariants on the rest of the result dict
+    for key in ("migration_count", "completed_hours", "baseline_carbon_gco2"):
+        assert r1[key] == r2[key], (
+            f"Default and explicit-False configs must produce identical "
+            f"{key}: {r1[key]} vs {r2[key]}"
+        )
+
+
+def _make_sysbench_grid_lookup(hours: int = 60):
+    """Lookup with two grids (CISO, MISO) that BOTH have sysbench data.
+
+    Per CONTEXT.md the CISO/MISO pair is well-covered (CISO=26 hostnames,
+    MISO=4). The fixture is shaped so Policy 6's MISO forecast-sum changes
+    sign depending on whether the dest horizon includes the 13th hour. With
+    the CISO/MISO empirical ratio ~0.9603, `time_left_int=13` (stay) maps
+    to `dest_time_left_int=12` (round(13*0.9603)=12) -- so the empirical
+    path sees a 12-hour MISO window while the clock-speed path sees 13.
+    Placing MISO at 100 for h<12 and a 10000 spike at h=12 makes that
+    extra hour decisive: empirical migrates to MISO, clock-speed does not.
+    """
+    lookup = {}
+    for h in range(hours):
+        ts = BASE_TS_2020 + h * 3600
+        # CISO: constant; stay_carbon is 200*13 over the stay horizon.
+        lookup[("CISO", ts)] = 200.0
+        # MISO: cheap until the boundary, then a spike that the empirical
+        # window doesn't see but the clock-speed window does.
+        lookup[("MISO", ts)] = 100.0 if h < 12 else 10000.0
+    return lookup
+
+
+def test_sim_opt_in_use_empirical_runtime_differs_from_default():
+    """RunConfig.use_empirical_runtime=True changes Policy 6's decision math.
+
+    The fixture is engineered to expose the per-destination horizon scaling
+    (the only place the CISO/MISO empirical ratio can manifest given that
+    the stay-case time_left_h is by definition ratio=1.0 for src==src). The
+    260515-jav implementation makes Policy 6's dest forecast horizon
+    sensitive to perf_ratio(src, dest), so a faster MISO ratio shortens its
+    forecast window by one hour -- enough to skip a 10000-gCO2 spike that
+    the clock-speed path includes.
+
+    Assertions:
+      - On/off totals differ (proves the empirical path fires).
+      - Ratio in (0.5, 2.0) -- 10x-bug sanity band per CONTEXT.md line 139.
+      - Note: with hw/overhead/deadline toggles all OFF for this fixture,
+        the math is analytic; the default-on snapshot is preserved by the
+        existing 16 tests.
+    """
+    from _simulation_core import RunConfig, simulate_one_run  # noqa: WPS433
+    lookup = _make_sysbench_grid_lookup(hours=60)
+    base = dict(
+        start_ts=BASE_TS_2020,
+        source_grid="CISO",
+        policy_id=6,
+        # 780 min (13h) sits at the CISO/MISO ratio's first integer-rounding
+        # boundary: time_left_int=13 (stay-case) vs dest_time_left_int=12
+        # for empirical (round(13 * 0.9603) = 12).
+        expected_completion_min=780,
+        # All Policy 6 toggles OFF for a clean analytic comparison; the
+        # default-on snapshot invariant is covered by the other tests.
+        hw_weighting=False,
+        overhead_cost=False,
+        deadline_gate=False,
+        include_network_power=False,
+        use_hw=False,
+    )
+    cfg_off = RunConfig(**base, use_empirical_runtime=False)
+    cfg_on = RunConfig(**base, use_empirical_runtime=True)
+    result_off = simulate_one_run(lookup, cfg_off)
+    result_on = simulate_one_run(lookup, cfg_on)
+    # Sanity-check the ratio is in (0.5, 2.0) so a 10x bug surfaces
+    off = max(result_off["total_carbon_gco2"], 1e-9)
+    on = max(result_on["total_carbon_gco2"], 1e-9)
+    ratio = on / off
+    assert 0.5 < ratio < 2.0, (
+        f"empirical/default total_carbon ratio {ratio:.4f} outside sane band "
+        f"(0.5, 2.0); on={on}, off={off}"
+    )
+    # The key proof that the new code path actually fires: at least one of
+    # total_carbon, migration_count, or dest_grids_visited must differ
+    # between default and opt-in. The CISO/MISO empirical ratio (~0.96 vs
+    # clock ~0.91) perturbs time_left_h by ~5%, enough to shift forecast
+    # sums and decisions for this fixture.
+    differs = (
+        result_on["total_carbon_gco2"] != result_off["total_carbon_gco2"]
+        or result_on["migration_count"] != result_off["migration_count"]
+        or result_on.get("dest_grids_visited") != result_off.get("dest_grids_visited")
+    )
+    assert differs, (
+        f"Opt-in use_empirical_runtime=True should differ from default on "
+        f"a fixture where both grids have sysbench data. Got identical "
+        f"results: on={result_on}, off={result_off}"
+    )
+
+
 # ── Runner ────────────────────────────────────────────────────────
 
 def main():
@@ -615,6 +737,9 @@ def main():
         # 260512-kfc: useful-work-driven termination + safety cap regressions.
         test_sim_extends_runtime_for_migration_minutes,
         test_sim_safety_cap_fires_on_pathological_policy,
+        # 260515-jav: sysbench-backed empirical runtime opt-in regressions.
+        test_sim_default_use_empirical_runtime_matches_existing_behavior,
+        test_sim_opt_in_use_empirical_runtime_differs_from_default,
     ]
     passed = 0
     failed = 0

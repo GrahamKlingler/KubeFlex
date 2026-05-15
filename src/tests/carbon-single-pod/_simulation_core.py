@@ -79,6 +79,11 @@ class RunConfig:
     use_hw: bool = True                     # P1..P5 hardware scaling
     max_wall_clock_multiplier: float = 2.0  # 260513-dkb: safety-cap multiplier (sweeps override to 10.0)
     sweep_kind: str = "main"                # 'main' | 'ablation' | 'horizon'
+    # 260515-jav: opt-in sysbench-backed runtime (False preserves snapshot-
+    # baseline behavior; True swaps in estimate_remaining_hours_empirical for
+    # Policy 6's stay-case time_left_h calc with silent fallback to the
+    # clock-speed proxy when either grid is absent from the sysbench census).
+    use_empirical_runtime: bool = False
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -105,6 +110,9 @@ def _get_policy_for_config(cfg: RunConfig) -> BasePolicy:
             hw_weighting=cfg.hw_weighting,
             overhead_cost=cfg.overhead_cost,
             deadline_gate=cfg.deadline_gate,
+            # 260515-jav: opt-in sysbench-backed runtime; default False
+            # preserves byte-identical behavior with prior snapshots.
+            use_empirical_runtime=cfg.use_empirical_runtime,
         )
     cls_map = {1: Policy1, 2: Policy2, 3: Policy3, 4: Policy4, 5: Policy5}
     return cls_map[cfg.policy_id]()

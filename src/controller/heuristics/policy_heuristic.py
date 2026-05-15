@@ -56,6 +56,7 @@ class HeuristicPolicy(BasePolicy):
         hw_weighting: bool = True,
         overhead_cost: bool = True,
         deadline_gate: bool = True,
+        use_empirical_runtime: bool = False,
     ) -> None:
         """Initialize HeuristicPolicy.
 
@@ -90,6 +91,14 @@ class HeuristicPolicy(BasePolicy):
                 exceeds deadline_remaining (HEUR-08 default behavior). If
                 False, skip the deadline check entirely per HEUR-10 / D-09
                 ablation. Default True.
+            use_empirical_runtime: If True, use sysbench-backed empirical
+                runtime estimation (260515-jav). Falls back silently to the
+                clock-speed proxy when sysbench data is missing for either
+                grid endpoint. Default False (clock-speed proxy, byte-
+                identical to pre-260515-jav behavior). The decide() call
+                hardcodes by_grid=True because the sim path is grid-keyed; a
+                future cluster-path follow-up will need either a separate
+                kwarg or a hostname-keyed decide() variant.
         """
         self.app_size_mb = app_size_mb
         self.expected_total_minutes = expected_total_minutes
@@ -100,6 +109,7 @@ class HeuristicPolicy(BasePolicy):
         self.hw_weighting = hw_weighting
         self.overhead_cost = overhead_cost
         self.deadline_gate = deadline_gate
+        self.use_empirical_runtime = use_empirical_runtime
         self.last_skip_reason: Optional[str] = None
 
     def decide(
@@ -151,9 +161,23 @@ class HeuristicPolicy(BasePolicy):
                 overhead_h[g] = (ckpt_oh_s + send_oh_s + rest_oh_s) / 3600.0
 
         # Step 4: hardware-adjusted remaining time (stay-case: src->src)
-        time_left_h = estimate_remaining_hours(
-            self.expected_total_minutes, elapsed_hours, src_hw, src_hw
-        )
+        # 260515-jav: optional sysbench-backed empirical estimator. Falls back
+        # silently to the clock-speed proxy when either endpoint lacks
+        # sysbench data, so the default-False path is byte-identical to the
+        # pre-260515-jav behavior. by_grid=True because decide() only has
+        # grid names; the cluster-path follow-up will need hostnames.
+        if self.use_empirical_runtime:
+            from heuristics.runtime import estimate_remaining_hours_empirical
+            time_left_h = estimate_remaining_hours_empirical(
+                self.expected_total_minutes, elapsed_hours,
+                src_hw, src_hw,
+                source_key=current_grid, dest_key=current_grid,
+                by_grid=True,
+            )
+        else:
+            time_left_h = estimate_remaining_hours(
+                self.expected_total_minutes, elapsed_hours, src_hw, src_hw
+            )
         time_left_int = max(1, round(time_left_h))
 
         # Step 5: deadline remaining
@@ -225,9 +249,25 @@ class HeuristicPolicy(BasePolicy):
             # sample we'd want -- and keeping the offset hour-aligned avoids the
             # O(N) fuzzy-fallback scan in policies.lookup_intensity (quick task
             # 260505-fvu, ~107000x speedup on the Policy 6 hot path).
+            #
+            # 260515-jav: when use_empirical_runtime=True, scale the destination
+            # forecast horizon by perf_ratio(src, dest) so a faster destination
+            # uses a SHORTER horizon (fewer remaining hours on faster hardware)
+            # and a slower one uses a LONGER horizon. This is the per-destination
+            # hook the plan's must_haves require: the stay-case time_left_h
+            # (src->src) is by definition ratio=1.0 = no-op, so the empirical
+            # path must surface as a per-dest horizon adjustment. When
+            # use_empirical_runtime is False, dest_time_left_int == time_left_int
+            # and behavior is byte-identical to pre-260515-jav.
+            if self.use_empirical_runtime:
+                from heuristics.sysbench import perf_ratio as _perf_ratio
+                dest_ratio = _perf_ratio(current_grid, dest, by_grid=True)
+                dest_time_left_int = max(1, round(time_left_h * dest_ratio))
+            else:
+                dest_time_left_int = time_left_int
             dest_run_carbon = 0.0
             offset_s = int(round(mig_time_h)) * 3600
-            for h in range(min(time_left_int, self.lookahead_hours)):
+            for h in range(min(dest_time_left_int, self.lookahead_hours)):
                 ts = sim_timestamp + offset_s + h * 3600
                 val = lookup_intensity(intensity_lookup, dest, ts)
                 if val is not None:
