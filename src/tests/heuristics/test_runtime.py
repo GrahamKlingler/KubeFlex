@@ -1,36 +1,34 @@
 #!/usr/bin/env python3
 """Unit tests for hardware-adjusted runtime estimation.
 
-Tests estimate_remaining_hours() across same-hardware, faster/slower
-destination, elapsed time handling, power_per_core fallback, and real
-HW_TABLE data scenarios.
+Covers both the clock-speed proxy (``estimate_remaining_hours``) and the
+sysbench-backed empirical sibling (``estimate_remaining_hours_empirical``,
+260515-jav).
 
-QUARANTINED (260502-i16): The "real HW_TABLE data" scenarios use
-HW_TABLE["TEN"|"CENT"|"NE"] which no longer exist after the grid-keyed
-HW_TABLE migration. The estimate_remaining_hours() function itself is
-unchanged; only the test fixtures need rewriting against grid keys
-(e.g. ISNE / TVA / SWPP) in a follow-up plan.
+History note (260502-i16): the legacy NE/TEN/CENT-keyed tests were
+quarantined when HW_TABLE moved to grid keys (ISNE/CISO/TVA/SWPP/...). The
+tests below replace that quarantine — they target both the original
+clock-speed function (now exercised on synthetic HardwareSpec fixtures so
+they don't depend on the legacy region keys) and the new empirical
+estimator. No real-HW_TABLE tests are reintroduced here; that rewrite is
+still a follow-up plan.
 """
 
 import sys
 from pathlib import Path
 
-# Quarantine: exit cleanly so CI / runner scripts don't treat this as a failure.
-print(
-    "[QUARANTINE 260502-i16] test_runtime.py: legacy NE/TEN/CENT region tests "
-    "skipped after grid-keyed HW_TABLE migration. Rewrite against "
-    "data/hardware/hw_avg.csv grids in a follow-up plan."
-)
-sys.exit(0)
-
-# Add heuristics package to import path
+# Add controller package to import path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "controller"))
 
-from heuristics.runtime import estimate_remaining_hours
-from heuristics.hardware import HardwareSpec, HW_TABLE
+from heuristics.runtime import (  # noqa: E402
+    estimate_remaining_hours,
+    estimate_remaining_hours_empirical,
+)
+from heuristics.hardware import HardwareSpec, HW_TABLE  # noqa: E402
+import heuristics.sysbench as sysbench_mod  # noqa: E402
 
 
-# ── Test helper hardware specs ────────────────────────────────────
+# ── Test helper hardware specs (clock-speed proxy tests) ───────────
 
 HW_FAST = HardwareSpec(
     name="Fast",
@@ -69,81 +67,134 @@ HW_NO_CLOCK_HIGH = HardwareSpec(
 )
 
 
-# ── Test functions ────────────────────────────────────────────────
+# ── Clock-speed proxy tests (unchanged semantics) ──────────────────
+
 
 def test_same_hardware_no_scaling():
     """Same source and dest hardware returns unscaled remaining hours."""
-    # 600 min = 10h total, 5h elapsed -> 5h remaining, scaling=1.0
     result = estimate_remaining_hours(600, 5.0, HW_FAST, HW_FAST)
     assert result == 5.0, f"Expected 5.0, got {result}"
 
 
 def test_faster_dest_reduces_time():
     """Faster destination hardware reduces remaining time."""
-    # 600 min = 10h, 0h elapsed, slow(2.0GHz)->fast(4.0GHz): 10 * 2.0/4.0 = 5.0
     result = estimate_remaining_hours(600, 0.0, HW_SLOW, HW_FAST)
     assert result == 5.0, f"Expected 5.0, got {result}"
 
 
 def test_slower_dest_increases_time():
     """Slower destination hardware increases remaining time."""
-    # 600 min = 10h, 0h elapsed, fast(4.0GHz)->slow(2.0GHz): 10 * 4.0/2.0 = 20.0
     result = estimate_remaining_hours(600, 0.0, HW_FAST, HW_SLOW)
     assert result == 20.0, f"Expected 20.0, got {result}"
 
 
 def test_elapsed_reduces_remaining():
     """Elapsed time reduces remaining hours before scaling."""
-    # 600 min = 10h, 8h elapsed -> 2h remaining, same hw scaling=1.0
     result = estimate_remaining_hours(600, 8.0, HW_FAST, HW_FAST)
     assert result == 2.0, f"Expected 2.0, got {result}"
 
 
 def test_elapsed_exceeds_total_returns_zero():
-    """Elapsed time exceeding total returns zero (clamped by max)."""
-    # 600 min = 10h, 15h elapsed -> max(0, 10-15) = 0
+    """Elapsed time exceeding total returns zero (clamped)."""
     result = estimate_remaining_hours(600, 15.0, HW_FAST, HW_FAST)
     assert result == 0.0, f"Expected 0.0, got {result}"
 
 
 def test_fallback_to_power_per_core():
     """Falls back to power_per_core ratio when clock_speed_ghz is 0."""
-    # Same no-clock hw: scaling = 8.0/8.0 = 1.0, result = 10.0
     result = estimate_remaining_hours(600, 0.0, HW_NO_CLOCK, HW_NO_CLOCK)
     assert result == 10.0, f"Expected 10.0, got {result}"
-
-    # No-clock to high-power: scaling = 8.0/16.0 = 0.5, result = 5.0
     result = estimate_remaining_hours(600, 0.0, HW_NO_CLOCK, HW_NO_CLOCK_HIGH)
     assert result == 5.0, f"Expected 5.0, got {result}"
 
 
-def test_with_real_hw_table():
-    """Tests using actual HW_TABLE data from hardware.py."""
-    # TEN -> TEN: same hw, scaling=1.0, 10h remaining
-    result = estimate_remaining_hours(600, 0.0, HW_TABLE["TEN"], HW_TABLE["TEN"])
-    assert result == 10.0, f"Expected 10.0, got {result}"
+# ── Empirical sysbench-backed tests (260515-jav) ──────────────────
 
-    # CENT -> NE: both have real clock speeds, uses clock speed ratio
-    # scaling = 2.47 / 4.15 = 0.5952..., result = 10.0 * 0.5952... = 5.952...
-    result = estimate_remaining_hours(600, 0.0, HW_TABLE["CENT"], HW_TABLE["NE"])
-    expected = 10.0 * (HW_TABLE["CENT"].clock_speed_ghz / HW_TABLE["NE"].clock_speed_ghz)
-    assert abs(result - expected) < 0.01, f"Expected ~{expected:.4f}, got {result}"
+
+def test_empirical_differs_from_clock_speed_when_data_present():
+    """Empirical estimate differs from clock-speed proxy when both grids have data.
+
+    CISO and MISO both have sysbench data per CONTEXT.md (CISO has 26
+    hostnames, MISO 4). The clock-speed ratio (CISO=2.8872 GHz vs MISO=3.1717
+    GHz) gives a different value than the sysbench events/sec ratio, so the
+    two functions must return different remaining-hours estimates.
+    """
+    sysbench_mod._FALLBACK_WARNED.clear()
+    src_hw = HW_TABLE["CISO"]
+    dst_hw = HW_TABLE["MISO"]
+    a = estimate_remaining_hours(600, 0.0, src_hw, dst_hw)
+    b = estimate_remaining_hours_empirical(
+        600, 0.0, src_hw, dst_hw,
+        source_key="CISO", dest_key="MISO", by_grid=True,
+    )
+    assert abs(a - b) > 1e-6, (
+        f"Empirical and clock-speed estimates should differ when sysbench data "
+        f"is present for both grids; both returned {a}"
+    )
+
+
+def test_empirical_falls_back_when_data_missing():
+    """When either endpoint is absent from sysbench, empirical == clock-speed.
+
+    BANC is absent from the sysbench census per CONTEXT.md. The empirical
+    function must delegate to the clock-speed proxy and return the exact same
+    value (within float tolerance).
+    """
+    sysbench_mod._FALLBACK_WARNED.clear()
+    src_hw = HW_TABLE["BANC"]
+    dst_hw = HW_TABLE["CISO"]
+    a = estimate_remaining_hours(600, 0.0, src_hw, dst_hw)
+    b = estimate_remaining_hours_empirical(
+        600, 0.0, src_hw, dst_hw,
+        source_key="BANC", dest_key="CISO", by_grid=True,
+    )
+    assert abs(a - b) < 1e-9, (
+        f"Missing-data fallback must delegate to clock-speed proxy: "
+        f"clock={a}, empirical={b}"
+    )
+
+
+def test_empirical_ratio_sane_range_for_real_grids():
+    """For CISO->MISO, empirical remaining_hours is within (0.5x, 2x) of staying.
+
+    Guards the "10x bug" sanity check from CONTEXT.md line 139. An AMD EPYC
+    7252 (CISO) vs an Intel Xeon-style MISO box should produce a single-digit
+    ratio.
+    """
+    sysbench_mod._FALLBACK_WARNED.clear()
+    src_hw = HW_TABLE["CISO"]
+    dst_hw = HW_TABLE["MISO"]
+    staying = estimate_remaining_hours(600, 0.0, src_hw, src_hw)  # 10.0 h
+    migrating = estimate_remaining_hours_empirical(
+        600, 0.0, src_hw, dst_hw,
+        source_key="CISO", dest_key="MISO", by_grid=True,
+    )
+    assert 0.5 * staying < migrating < 2.0 * staying, (
+        f"CISO->MISO empirical remaining_hours={migrating} outside sane band "
+        f"(0.5x, 2x) of staying={staying}; possible 10x bug in sysbench data"
+    )
 
 
 # ── Runner ────────────────────────────────────────────────────────
 
+
 def main():
     tests = [
+        # Clock-speed proxy
         test_same_hardware_no_scaling,
         test_faster_dest_reduces_time,
         test_slower_dest_increases_time,
         test_elapsed_reduces_remaining,
         test_elapsed_exceeds_total_returns_zero,
         test_fallback_to_power_per_core,
-        test_with_real_hw_table,
+        # Empirical sibling (260515-jav)
+        test_empirical_differs_from_clock_speed_when_data_present,
+        test_empirical_falls_back_when_data_missing,
+        test_empirical_ratio_sane_range_for_real_grids,
     ]
     passed = 0
     failed = 0
+    print(f"Running {len(tests)} runtime tests...")
     for test in tests:
         try:
             test()
@@ -153,7 +204,9 @@ def main():
             print(f"  FAIL: {test.__name__}: {e}")
             failed += 1
         except Exception as e:
+            import traceback
             print(f"  ERROR: {test.__name__}: {e}")
+            traceback.print_exc()
             failed += 1
 
     print()
