@@ -421,6 +421,269 @@ def _pick_dynamic_source(intensity_lookup, hw_grids, start_ts, use_hw):
     return best_grid
 
 
+# ── 260519-fhe: iterative argmin-dominator filter ───────────────────
+
+def _filter_argmin_dominators(regions_root, hw_pool, timestamps, use_hw,
+                              pct_threshold, out_dir):
+    """Iteratively remove argmin-dominator grids; return the filtered pool.
+
+    For each ts in ``timestamps`` the window is [ts, ts+3600, ..., ts+47*3600]
+    (48 hourly snapshots). When ``--start-ts`` is set, ``timestamps`` is a
+    single-element list and the window is exactly 48 hours. When multiple
+    timestamps are provided, wins are counted across the union of all
+    per-ts windows.
+
+    Algorithm:
+      1. Build a lookup over the union of grids in the initial ``hw_pool``
+         (read CSVs ONCE; iterate in-memory).
+      2. For each hour in every per-ts window, compute argmin grid using
+         lookup_intensity * HW_TABLE[g].power_per_core (when ``use_hw``) and
+         the same zero/None-skip semantics as :func:`_pick_dynamic_source`.
+      3. Count wins per grid across all counted hours.
+      4. Identify the single grid with the highest win-fraction; tie-break
+         by (-win_count, mean_intensity, grid_name) so the cheaper dominator
+         is removed first (more informative; the more-expensive one would
+         keep losing argmin anyway).
+      5. If its win-fraction >= ``pct_threshold/100.0``:
+         - If removing it leaves >= 2 grids, mark DOMINATOR, remove, loop.
+         - Else if current pool == 2: halt at hard floor (do NOT remove).
+         - Else (would drop below 2): SystemExit with clear error.
+      6. Stop when no remaining grid has win-fraction >= threshold OR pool
+         size is 2 (one more removal would breach the floor).
+
+    Writes ``out_dir / "filter_report.md"`` documenting every iteration with
+    an ASCII histogram of "argmin wins per grid" and the final pool.
+
+    Returns: the filtered pool as a list (preserving the original ordering
+    within the pool, minus removed grids).
+    """
+    import math as _math
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    report_path = out_dir / "filter_report.md"
+    threshold_frac = pct_threshold / 100.0
+    initial_pool = list(hw_pool)
+    n_initial = len(initial_pool)
+
+    # Hard-floor sanity: starting pool must have at least 2 grids.
+    if n_initial < 2:
+        msg = (
+            f"[FILTER] ERROR: initial pool size {n_initial} (<2). "
+            f"Pool: {initial_pool}. Aborting — the experiment is meaningless "
+            f"with fewer than 2 candidates."
+        )
+        print(msg, file=sys.stderr)
+        raise SystemExit(msg)
+
+    print("=" * 80)
+    print(f"[FILTER] Iterative argmin-dominator filter (threshold {pct_threshold}%)")
+    print(f"[FILTER] Initial pool ({n_initial} grids): {initial_pool}")
+    print(f"[FILTER] Window starts: {timestamps}")
+    print(f"[FILTER] Window length per start: 48 hours")
+    print(f"[FILTER] use_hw: {use_hw}")
+    print("=" * 80)
+
+    # Build the union lookup ONCE; per-iteration filtering is in-memory.
+    union_lookup = build_intensity_lookup_from_regions_tree(
+        regions_root, allowed_grids=tuple(sorted(initial_pool)),
+    )
+
+    # Per-ts window hours.
+    window_hours = []
+    for ts in timestamps:
+        for h in range(48):
+            window_hours.append(ts + h * 3600)
+
+    md_lines = [
+        "# Argmin-Dominator Filter Report (260519-fhe)",
+        "",
+        f"**Threshold:** {pct_threshold}% (a grid winning >= this fraction of "
+        f"usable hours is removed)",
+        f"**Window starts:** {list(timestamps)}",
+        f"**Window length:** 48 hours per start",
+        f"**use_hw:** {use_hw}",
+        f"**Initial pool ({n_initial} grids):** {initial_pool}",
+        "",
+        "## Per-iteration history",
+        "",
+    ]
+
+    current_pool = list(initial_pool)
+    removed_in_order = []  # list of (grid, win_pct, mean_intensity)
+    iteration = 0
+    halted_at_floor = False
+
+    while True:
+        iteration += 1
+        # Compute argmin wins + mean intensities for current pool.
+        win_counts = {g: 0 for g in current_pool}
+        # Sum and count for mean intensity (HW-scaled if use_hw).
+        sum_intensity = {g: 0.0 for g in current_pool}
+        count_intensity = {g: 0 for g in current_pool}
+        total_counted_hours = 0
+        for ts in window_hours:
+            best_g = None
+            best_score = float("inf")
+            for g in current_pool:
+                v = union_lookup.get((g, ts))
+                if v is None or v <= 0.0:
+                    continue
+                score = v * HW_TABLE[g].power_per_core if use_hw else v
+                sum_intensity[g] += score
+                count_intensity[g] += 1
+                if score < best_score:
+                    best_score = score
+                    best_g = g
+            if best_g is not None:
+                win_counts[best_g] += 1
+                total_counted_hours += 1
+
+        if total_counted_hours == 0:
+            msg = (
+                f"[FILTER] ERROR: no usable hours found across "
+                f"{len(window_hours)} timestamps in pool {current_pool}. "
+                f"Aborting — cannot run filter without data."
+            )
+            print(msg, file=sys.stderr)
+            raise SystemExit(msg)
+
+        mean_intensity = {
+            g: (sum_intensity[g] / count_intensity[g])
+            if count_intensity[g] > 0 else float("inf")
+            for g in current_pool
+        }
+
+        # ASCII histogram (one line per grid, sorted by win count descending).
+        ordered = sorted(
+            current_pool,
+            key=lambda g: (-win_counts[g], mean_intensity[g], g),
+        )
+        hist_lines = []
+        for g in ordered:
+            count = win_counts[g]
+            frac = count / total_counted_hours
+            bar_len = int(round(30 * frac))
+            bar = "#" * bar_len
+            hist_lines.append(
+                f"  {g:6s} {bar:30s} {count:4d}/{total_counted_hours:4d} "
+                f"({frac * 100.0:.1f}%)"
+            )
+
+        print(f"[FILTER] === Iteration {iteration} (pool size {len(current_pool)}) ===")
+        for line in hist_lines:
+            print(line)
+
+        md_lines.extend([
+            f"### Iteration {iteration}",
+            "",
+            f"Pool size: {len(current_pool)}",
+            f"Total counted hours: {total_counted_hours} of "
+            f"{len(window_hours)} possible",
+            "",
+            "Argmin wins (HW-scaled iff use_hw):",
+            "",
+            "```",
+        ])
+        md_lines.extend(hist_lines)
+        md_lines.append("```")
+        md_lines.append("")
+
+        # Identify top candidate (sorted by -win_count, mean_intensity, name).
+        top = ordered[0]
+        top_count = win_counts[top]
+        top_frac = top_count / total_counted_hours
+
+        if top_frac < threshold_frac:
+            line = (
+                f"Action: no dominator (max win-fraction "
+                f"{top_frac * 100.0:.1f}% < threshold {pct_threshold}%). "
+                f"Halting filter."
+            )
+            print(f"[FILTER] {line}")
+            md_lines.append(line)
+            md_lines.append("")
+            break
+
+        # top_frac >= threshold; check hard floor.
+        if len(current_pool) <= 2:
+            line = (
+                f"Pool reached hard floor of 2 grids; halting filter (would "
+                f"otherwise remove {top} at {top_frac * 100.0:.1f}%). Final "
+                f"pool retained: {current_pool}."
+            )
+            print(f"[FILTER] {line}")
+            md_lines.append(line)
+            md_lines.append("")
+            halted_at_floor = True
+            break
+
+        # Safe to remove (removing leaves >= 2 grids).
+        removed_in_order.append((top, top_frac * 100.0, mean_intensity[top]))
+        # Identify next-cheapest mean intensity AFTER removing top, for the log.
+        next_cheapest_g = None
+        next_cheapest_mean = float("inf")
+        for g in current_pool:
+            if g == top:
+                continue
+            if mean_intensity[g] < next_cheapest_mean:
+                next_cheapest_mean = mean_intensity[g]
+                next_cheapest_g = g
+        line = (
+            f"Action: removed {top} (won {top_count}/{total_counted_hours} = "
+            f"{top_frac * 100.0:.1f}%); mean intensity over window = "
+            f"{mean_intensity[top]:.2f} gCO2eq"
+            + (" (HW-scaled)" if use_hw else "")
+            + ". "
+            + (
+                f"Next-cheapest grid: {next_cheapest_g} mean = "
+                f"{next_cheapest_mean:.2f}."
+                if next_cheapest_g is not None
+                else "No other grid remaining (should not happen)."
+            )
+        )
+        print(f"[FILTER] {line}")
+        md_lines.append(line)
+        md_lines.append("")
+
+        current_pool = [g for g in current_pool if g != top]
+
+    # Final summary.
+    md_lines.extend([
+        f"## Final pool ({len(current_pool)} grids):",
+        "",
+        f"{current_pool}",
+        "",
+        "## Removed in order:",
+        "",
+    ])
+    if not removed_in_order:
+        md_lines.append("- (none — no grid exceeded the threshold)")
+    else:
+        for i, (g, pct, mean) in enumerate(removed_in_order, start=1):
+            md_lines.append(
+                f"{i}. {g} (won {pct:.1f}%, mean intensity "
+                f"{mean:.2f}"
+                + (" HW-scaled" if use_hw else "")
+                + ")"
+            )
+    md_lines.append("")
+    if halted_at_floor:
+        md_lines.append(
+            "*Filter halted at hard floor (pool size 2). One additional grid "
+            "exceeded the threshold but was retained to keep the experiment "
+            "non-degenerate.*"
+        )
+        md_lines.append("")
+
+    report_path.write_text("\n".join(md_lines))
+    print(f"[FILTER] wrote {report_path}")
+    print(f"[FILTER] Final pool ({len(current_pool)} grids): {current_pool}")
+    print("=" * 80)
+
+    return current_pool
+
+
 def _resolve_timestamps(all_ts, num):
     """Sub-sample ``all_ts`` to roughly ``num`` evenly-spaced timestamps."""
     if num <= 0:
