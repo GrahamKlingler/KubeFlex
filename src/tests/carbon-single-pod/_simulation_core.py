@@ -22,7 +22,11 @@ The cluster-execution path still uses region-keyed lookups; this divergence
 is intentional (see quick task 260502-i16).
 
 Data discipline (D-22, D-23, RESEARCH.md Pitfall 5):
-  - check_split_access raises RuntimeError on any 2022 timestamp
+  - check_split_access raises RuntimeError on any 2022 timestamp by default.
+  - 260519-fhe: RunConfig.bypass_test_split=True is the explicit, recorded
+    opt-in for final-evaluation runs on the 2022 held-out test period. It is
+    forwarded to BOTH check_split_access calls (start-of-run guard and end-
+    of-year-wrap detection) so the entire simulation honors the opt-in.
   - end-of-year wrap into val (2021) sets wrapped_into_val=True (no print; orchestrator aggregates)
 """
 
@@ -84,6 +88,14 @@ class RunConfig:
     # Policy 6's stay-case time_left_h calc with silent fallback to the
     # clock-speed proxy when either grid is absent from the sysbench census).
     use_empirical_runtime: bool = False
+    # 260519-fhe: explicit final-eval opt-in for 2022 test data. Default False
+    # preserves D-23 hard-block discipline; setting True forwards bypass_test=True
+    # to BOTH check_split_access call sites in simulate_one_run (start-of-run
+    # guard at line ~170 and end-of-year-wrap detection at line ~366) so the
+    # whole run can legitimately read 2022 carbon intensity. This flag is set
+    # only by sweep_overhead_crossover.py --bypass-test-split, which prints a
+    # LOUD warning when active.
+    bypass_test_split: bool = False
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -166,9 +178,10 @@ def simulate_one_run(intensity_lookup, cfg):
         ValueError: If cfg.start_ts is outside all defined data ranges.
     """
     # Belt + suspenders 2022 guard (orchestrator filters first; trust nothing).
-    # Raises RuntimeError if cfg.start_ts is in the 2022 test period (D-23).
-    split_at_start = check_split_access(cfg.start_ts)
-    # split_at_start is "train" or "val"; we tolerate both as start points.
+    # Raises RuntimeError if cfg.start_ts is in the 2022 test period (D-23)
+    # UNLESS cfg.bypass_test_split=True (260519-fhe: explicit final-eval opt-in).
+    split_at_start = check_split_access(cfg.start_ts, bypass_test=cfg.bypass_test_split)
+    # split_at_start is "train", "val", or "test" when bypass is active.
 
     # 260512-kfc: useful-work-driven termination. The 260511-jce sim core used a
     # fixed-length `for hour in range(total_sim_hours)` loop where
@@ -363,12 +376,20 @@ def simulate_one_run(intensity_lookup, cfg):
         extra_hours = 0   # Policy 1 doesn't look ahead; Policy 2 only looks at current hour
     final_lookup_ts = cfg.start_ts + (total_sim_hours + extra_hours) * 3600
     try:
-        final_split = check_split_access(final_lookup_ts)
+        # 260519-fhe: forward the same bypass into the wrap-detection check.
+        # When bypass_test_split=True, a 2022 final_lookup_ts returns "test"
+        # without raising; wrapped_into_val stays False (we only flag 2020 ->
+        # 2021 wrap, not 2021/2022 -> later).
+        final_split = check_split_access(
+            final_lookup_ts, bypass_test=cfg.bypass_test_split
+        )
         wrapped_into_val = (final_split == "val") and (split_at_start == "train")
     except RuntimeError:
-        # final_lookup_ts fell into the 2022 test period -- should be impossible for
-        # 2020 starts within the supported lookahead range; re-raise so the orchestrator
-        # notices immediately rather than silently producing bad results.
+        # final_lookup_ts fell into the 2022 test period -- should be impossible
+        # for non-bypass runs (orchestrator filters first; 2020 starts within
+        # the supported lookahead range cannot reach 2022). For bypass_test_split
+        # =True the call returns 'test' instead of raising, so this branch is a
+        # genuine "should never fire" guard. Re-raise loudly.
         raise
 
     return {
