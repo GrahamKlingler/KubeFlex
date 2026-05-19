@@ -58,6 +58,24 @@ Default output directories (changed in 260511-kqo):
   - Sweep A (mode=pairwise): ``data/quick/260511-kqo-all-policies-6-pairs/``
   - Sweep B (mode=all-grids): ``data/quick/260511-kqo-all-policies-all-hw-grids/``
 
+260519-fhe additions (all-grids only, all default off):
+  - ``--bypass-test-split``      explicit final-eval opt-in for 2022 test data.
+                                  Prints a LOUD warning when active and threads
+                                  RunConfig.bypass_test_split=True into every
+                                  simulated run.
+  - ``--start-ts UNIX_TS``       pin the sweep to a single Unix timestamp
+                                  (per-cell n=1; aggregates report std=0).
+                                  Mutually exclusive with ``--smoke``.
+  - ``--pool GRID,GRID,...``      override HW_POOL_GRIDS for ``--mode all-grids``
+                                  (HW_TABLE + on-disk validation).
+  - ``--filter-dominators-argmin-pct PCT``
+                                  iterative argmin-dominator filter applied
+                                  BEFORE the sweep. Removes grids that win
+                                  argmin in >= PCT% of the window's hours;
+                                  stops at no-dominator or pool size 2; aborts
+                                  if filtering would drop the pool below 2.
+                                  Writes ``filter_report.md`` to the output dir.
+
 Sweep A artifacts (mode=pairwise):
   - ``curves.csv``           -- long-format per-run results (one row per
                                 (overhead, direction, policy, start_ts)).
@@ -416,6 +434,7 @@ def _resolve_timestamps(all_ts, num):
 def run_sweep(
     full_lookup, directional_pairs, timestamps, anchor_grid, policies,
     use_hw=True, hw_weighting=True, use_empirical_runtime=False,
+    bypass_test_split=False,
 ):
     """Execute the 13 x len(directional_pairs) x len(policies) x len(timestamps) cell sweep.
 
@@ -454,6 +473,8 @@ def run_sweep(
         sweep_kind="overhead_crossover",
         # 260515-jav: optional sysbench-backed empirical runtime for Policy 6.
         use_empirical_runtime=use_empirical_runtime,
+        # 260519-fhe: opt-in final-eval access to 2022 held-out test data.
+        bypass_test_split=bypass_test_split,
     )
 
     rows = []
@@ -522,6 +543,7 @@ def run_sweep(
 def run_sweep_all_grids(
     full_lookup, hw_grids, timestamps, anchor_grid, policies, use_hw=True,
     hw_weighting=True, use_empirical_runtime=False,
+    bypass_test_split=False,
 ):
     """Execute the all-grids sweep (Sweep B, 260511-kqo).
 
@@ -568,6 +590,8 @@ def run_sweep_all_grids(
         sweep_kind="overhead_crossover",
         # 260515-jav: optional sysbench-backed empirical runtime for Policy 6.
         use_empirical_runtime=use_empirical_runtime,
+        # 260519-fhe: opt-in final-eval access to 2022 held-out test data.
+        bypass_test_split=bypass_test_split,
     )
 
     # Build the full 26-grid lookup ONCE outside the overhead/policy loops --
@@ -1177,8 +1201,16 @@ def write_all_grids_aggregates(agg, policies, path):
 
 
 def write_all_grids_plot(carbon_by_policy, mig_by_policy, policies,
-                         timestamps, hw_grids, path, use_hw=True):
-    """Single-panel mean-carbon-vs-overhead plot for Sweep B (6 policy curves)."""
+                         timestamps, hw_grids, path, use_hw=True,
+                         bypass_test_split=False, filtered_out_grids=None):
+    """Single-panel mean-carbon-vs-overhead plot for Sweep B (6 policy curves).
+
+    260519-fhe: when ``bypass_test_split`` is True, the title is prefixed with a
+    LOUD "FINAL EVAL -- 2022 TEST DATA" tag so anyone looking at the PNG knows
+    what they're seeing. ``filtered_out_grids`` (optional list) is appended to
+    the footer when non-empty so the dominator-filter outcome is visible
+    without opening filter_report.md.
+    """
     fig, ax = plt.subplots(1, 1, figsize=(10, 6))
     for p in policies:
         color = POLICY_COLORS.get(p, "#000000")
@@ -1194,17 +1226,31 @@ def write_all_grids_plot(carbon_by_policy, mig_by_policy, policies,
         ax.set_ylabel("Mean total carbon (gCO2eq, HW-scaled, averaged across start_ts)")
     else:
         ax.set_ylabel("Mean total carbon (gCO2eq, no HW scaling, averaged across start_ts)")
-    ax.set_title(
+    title = (
         f"All-grids sweep: {len(hw_grids)}-grid HW destination pool, "
         f"dynamic source per start_ts (260511-kqo)"
     )
+    if bypass_test_split:
+        # 260519-fhe: LOUD tag for final-eval runs on 2022 held-out data.
+        title = "[FINAL EVAL -- 2022 TEST DATA] " + title
+    ax.set_title(title)
     ax.grid(True, linestyle=":", linewidth=0.5, alpha=0.6)
     ax.legend(loc="upper left", fontsize=9)
     hw_footer = "--use-hw" if use_hw else "--no-hw"
-    fig.text(
-        0.99, 0.02,
+    footer_parts = [
         f"{len(timestamps)} starts; 48 h jobs; {hw_footer}; "
         f"argmin-of-{len(hw_grids)} source",
+    ]
+    if filtered_out_grids:
+        # 260519-fhe: surface dominator-filter outcome on the plot itself.
+        footer_parts.append(
+            f"dominators removed: {', '.join(filtered_out_grids)}"
+        )
+    if bypass_test_split:
+        footer_parts.append("2022 test data (bypass-test-split active)")
+    fig.text(
+        0.99, 0.02,
+        "; ".join(footer_parts),
         ha="right", va="bottom", fontsize=8, color="dimgray",
     )
     fig.tight_layout(rect=[0, 0.02, 1, 0.96])
@@ -1464,6 +1510,31 @@ def _parse_args(argv=None):
                         "only; this flag exercises the sim opt-in. Default "
                         "output dir is suffixed with '-empirical' so the "
                         "clock-speed-default outputs are not overwritten.")
+    # 260519-fhe: explicit final-evaluation flags for the HW-heuristic test
+    # on the held-out 2022 windows.
+    p.add_argument("--bypass-test-split", action="store_true",
+                   help="260519-fhe: ALLOW access to the 2022 held-out test "
+                        "period. This is a deliberate final-evaluation opt-in. "
+                        "Default off preserves test discipline. Prints a LOUD "
+                        "warning when active.")
+    p.add_argument("--start-ts", type=int, default=None,
+                   help="260519-fhe: pin the sweep to a single Unix timestamp "
+                        "(skips the default 24-sample-across-2020 mechanism). "
+                        "Mutually exclusive with --smoke. Overrides "
+                        "--num-timestamps (warning emitted). Currently only "
+                        "supported in --mode all-grids.")
+    p.add_argument("--pool", default=None,
+                   help="260519-fhe: comma-separated grid IDs to use as the "
+                        "all-grids destination/source pool (overrides "
+                        "HW_POOL_GRIDS). Each must exist in HW_TABLE AND have "
+                        "regions data on disk. Only valid with --mode all-grids.")
+    p.add_argument("--filter-dominators-argmin-pct", type=float, default=None,
+                   help="260519-fhe: iteratively remove grids that win argmin "
+                        "in >=PCT%% of the run window's hours BEFORE running "
+                        "the sweep. Stops when no grid exceeds threshold OR "
+                        "pool size drops to 2. Aborts if filtering would leave "
+                        "<2 grids. Only valid with --mode all-grids. Writes "
+                        "filter_report.md to the output dir.")
     p.add_argument("--self-check", action="store_true",
                    help="Run inline wiring assertions before completing")
     return p.parse_args(argv)
@@ -1472,6 +1543,7 @@ def _parse_args(argv=None):
 def _run_pairwise_mode(
     args, regions_root, out_dir, usable, policies, timestamps, t0,
     use_hw=True, hw_weighting=True, use_empirical_runtime=False,
+    bypass_test_split=False,
 ):
     """Sweep A: pairwise directional sweep across --pairs."""
     directional_pairs = _resolve_directional_pairs(usable, args.pairs)
@@ -1507,6 +1579,7 @@ def _run_pairwise_mode(
         lookup, directional_pairs, timestamps, anchor_grid, policies,
         use_hw=use_hw, hw_weighting=hw_weighting,
         use_empirical_runtime=use_empirical_runtime,
+        bypass_test_split=bypass_test_split,
     )
     print(
         f"[SWEEP] completed {len(rows)} simulated runs in "
@@ -1531,6 +1604,11 @@ def _run_pairwise_mode(
                 policy_id=policies[0],
                 # 260513-dkb: match the sweep's 10x cap for consistency.
                 max_wall_clock_multiplier=10.0,
+                # 260519-fhe: thread the field for symmetry; the self-check
+                # uses 2020 timestamps so the value is functionally inert
+                # here but documents intent and keeps the construction
+                # parallel with the run_sweep templates.
+                bypass_test_split=bypass_test_split,
             ),
         )
         assert "dest_grids_visited" in sample, (
@@ -1610,6 +1688,7 @@ def _run_pairwise_mode(
 def _run_all_grids_mode(
     args, regions_root, out_dir, usable, policies, timestamps, t0,
     use_hw=True, hw_weighting=True, use_empirical_runtime=False,
+    bypass_test_split=False,
 ):
     """Sweep B: all-grids mode -- dynamic source + 26-grid HW destination pool."""
     if args.pairs:
@@ -1618,16 +1697,52 @@ def _run_all_grids_mode(
             f"--mode all-grids (destination pool is the full HW set)."
         )
 
-    # HW pool intersected with disk-available grids.
-    missing_hw = [g for g in HW_POOL_GRIDS if g not in usable]
-    if missing_hw:
+    # 260519-fhe: --pool override (custom destination/source pool).
+    if args.pool is not None:
+        parsed_pool = [tok.strip() for tok in args.pool.split(",") if tok.strip()]
+        if not parsed_pool:
+            print(
+                "[SWEEP] ERROR: --pool produced an empty grid list after "
+                "parsing/whitespace stripping.",
+                file=sys.stderr,
+            )
+            return 1
+        # Validate: HW_TABLE membership first, then regions-data-on-disk.
+        missing_hw_table = [g for g in parsed_pool if g not in HW_TABLE]
+        missing_on_disk = [
+            g for g in parsed_pool if g in HW_TABLE and g not in usable
+        ]
+        if missing_hw_table or missing_on_disk:
+            parts = []
+            if missing_hw_table:
+                parts.append(
+                    f"not in HW_TABLE: {missing_hw_table}"
+                )
+            if missing_on_disk:
+                parts.append(
+                    f"in HW_TABLE but missing regions data on disk: {missing_on_disk}"
+                )
+            print(
+                "[SWEEP] ERROR: --pool grids invalid: " + "; ".join(parts),
+                file=sys.stderr,
+            )
+            return 1
+        hw_pool = list(parsed_pool)
         print(
-            f"[SWEEP] ERROR: HW_POOL_GRIDS contains {len(missing_hw)} grids "
-            f"missing from disk: {missing_hw}",
-            file=sys.stderr,
+            f"[SWEEP] --pool override active: {hw_pool} "
+            f"(skipping HW_POOL_GRIDS default of {len(HW_POOL_GRIDS)} grids)"
         )
-        return 1
-    hw_pool = list(HW_POOL_GRIDS)
+    else:
+        # HW pool intersected with disk-available grids.
+        missing_hw = [g for g in HW_POOL_GRIDS if g not in usable]
+        if missing_hw:
+            print(
+                f"[SWEEP] ERROR: HW_POOL_GRIDS contains {len(missing_hw)} grids "
+                f"missing from disk: {missing_hw}",
+                file=sys.stderr,
+            )
+            return 1
+        hw_pool = list(HW_POOL_GRIDS)
     anchor_grid = _pick_anchor_grid(hw_pool, preferred=("BANC", "CISO", "ISNE"))
 
     # Rule 2 (auto-add critical functionality): filter HW grids whose carbon
@@ -1663,6 +1778,16 @@ def _run_all_grids_mode(
         f"[SWEEP] out_dir={out_dir}"
     )
 
+    # 260519-fhe: iterative argmin-dominator filter (must run BEFORE the
+    # final lookup is built so the lookup reflects the filtered pool). The
+    # helper writes filter_report.md to out_dir and may SystemExit if the
+    # filter would drop the pool below 2 grids.
+    if args.filter_dominators_argmin_pct is not None:
+        hw_pool = _filter_argmin_dominators(
+            regions_root, hw_pool, timestamps, use_hw,
+            args.filter_dominators_argmin_pct, out_dir,
+        )
+
     lookup = build_intensity_lookup_from_regions_tree(
         regions_root, allowed_grids=tuple(sorted(hw_pool)),
     )
@@ -1672,6 +1797,7 @@ def _run_all_grids_mode(
         lookup, hw_pool, timestamps, anchor_grid, policies, use_hw=use_hw,
         hw_weighting=hw_weighting,
         use_empirical_runtime=use_empirical_runtime,
+        bypass_test_split=bypass_test_split,
     )
     print(
         f"[SWEEP] completed {len(rows)} simulated runs in "
@@ -1730,9 +1856,23 @@ def _run_all_grids_mode(
     print(f"[PLOT] wrote {csv_path}")
     write_all_grids_aggregates(agg, policies, agg_path)
     print(f"[PLOT] wrote {agg_path}")
+    # 260519-fhe: compute filtered-out grids (only meaningful when the
+    # dominator filter ran). Re-derive by diffing against the initial pool;
+    # at this point hw_pool has already been mutated by the filter helper.
+    if args.pool is not None:
+        _initial_pool_for_plot = [
+            tok.strip() for tok in args.pool.split(",") if tok.strip()
+        ]
+    else:
+        _initial_pool_for_plot = list(HW_POOL_GRIDS)
+    filtered_out_for_plot = [
+        g for g in _initial_pool_for_plot if g not in set(hw_pool)
+    ]
     write_all_grids_plot(
         carbon_by_policy, mig_by_policy, policies, timestamps, hw_pool, png_path,
         use_hw=use_hw,
+        bypass_test_split=bypass_test_split,
+        filtered_out_grids=filtered_out_for_plot if filtered_out_for_plot else None,
     )
     print(f"[PLOT] wrote {png_path}")
     write_all_grids_summary_md(
@@ -1768,6 +1908,54 @@ def main(argv=None) -> int:
     args = _parse_args(argv)
     t0 = time.time()
 
+    # 260519-fhe: validate the new flag combinations before doing any work.
+    if args.start_ts is not None and args.smoke:
+        print(
+            "[SWEEP] ERROR: --start-ts and --smoke are mutually exclusive "
+            "(--smoke would override --start-ts via _resolve_timestamps).",
+            file=sys.stderr,
+        )
+        return 1
+    if args.start_ts is not None and args.num_timestamps != 24:
+        # 24 is the argparse default; non-default => user explicitly passed it.
+        print(
+            f"[SWEEP] WARNING: --num-timestamps={args.num_timestamps} is "
+            f"IGNORED because --start-ts={args.start_ts} is set."
+        )
+    if args.pool is not None and args.mode == "pairwise":
+        print(
+            "[SWEEP] ERROR: --pool is only valid with --mode all-grids; "
+            "use --pairs for pairwise mode.",
+            file=sys.stderr,
+        )
+        return 1
+    if (args.filter_dominators_argmin_pct is not None
+            and args.mode == "pairwise"):
+        print(
+            "[SWEEP] ERROR: --filter-dominators-argmin-pct is only valid "
+            "with --mode all-grids (filter is degenerate when the destination "
+            "pool is fixed to a single pair).",
+            file=sys.stderr,
+        )
+        return 1
+    if args.filter_dominators_argmin_pct is not None and not (
+        0.0 < args.filter_dominators_argmin_pct <= 100.0
+    ):
+        print(
+            f"[SWEEP] ERROR: --filter-dominators-argmin-pct must be in "
+            f"(0.0, 100.0]; got {args.filter_dominators_argmin_pct}.",
+            file=sys.stderr,
+        )
+        return 1
+
+    # 260519-fhe: LOUD warning when 2022 test data is accessed.
+    if args.bypass_test_split:
+        print("=" * 80)
+        print("[SWEEP] WARNING: --bypass-test-split is ACTIVE.")
+        print("[SWEEP] This run accesses 2022 held-out test data.")
+        print("[SWEEP] Recorded as a deliberate final-evaluation use.")
+        print("=" * 80)
+
     # 260514-jp2: --no-hw flips BOTH the sim-core HW scaling (use_hw) AND
     # Policy 6's internal HW weighting (hw_weighting). They are coupled so a
     # --no-hw run is a clean apples-to-apples "no HW" comparison; flipping
@@ -1778,6 +1966,8 @@ def main(argv=None) -> int:
     hw_weighting = not args.no_hw
     # 260515-jav: optional sysbench-backed empirical runtime for Policy 6.
     use_empirical_runtime = bool(args.use_empirical_runtime)
+    # 260519-fhe: opt-in final-eval access to 2022 held-out test data.
+    bypass_test_split = bool(args.bypass_test_split)
 
     regions_root = Path(args.regions_dir) if args.regions_dir else DEFAULT_REGIONS_TREE_DIR
     if args.out_dir is not None:
@@ -1814,9 +2004,15 @@ def main(argv=None) -> int:
 
     policies = _resolve_policies(args.policies)
 
-    all_ts = _main_sweep_timestamps(2020)
-    n = 4 if args.smoke else int(args.num_timestamps)
-    timestamps = _resolve_timestamps(all_ts, n)
+    # 260519-fhe: --start-ts pins the sweep to a single timestamp (per-cell
+    # n=1; aggregates report std=0). Skips the default 24-sample-across-2020
+    # selector entirely. When unset, fall back to the legacy behavior.
+    if args.start_ts is not None:
+        timestamps = [int(args.start_ts)]
+    else:
+        all_ts = _main_sweep_timestamps(2020)
+        n = 4 if args.smoke else int(args.num_timestamps)
+        timestamps = _resolve_timestamps(all_ts, n)
 
     print(
         f"[SWEEP] regions_root={regions_root}\n"
@@ -1828,11 +2024,13 @@ def main(argv=None) -> int:
             args, regions_root, out_dir, usable, policies, timestamps, t0,
             use_hw=use_hw, hw_weighting=hw_weighting,
             use_empirical_runtime=use_empirical_runtime,
+            bypass_test_split=bypass_test_split,
         )
     return _run_pairwise_mode(
         args, regions_root, out_dir, usable, policies, timestamps, t0,
         use_hw=use_hw, hw_weighting=hw_weighting,
         use_empirical_runtime=use_empirical_runtime,
+        bypass_test_split=bypass_test_split,
     )
 
 
