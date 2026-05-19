@@ -80,7 +80,9 @@ from heuristics.overhead import (  # noqa: E402
 from sweep_overhead_crossover import (  # noqa: E402
     ANCHOR_APP_SIZE_MB,
     DIRECTIONAL_PAIRS,
+    _build_filtered_lookup,
     _build_two_grid_lookup,
+    _pick_dynamic_source,
 )
 
 
@@ -372,6 +374,242 @@ def reconstruct_state_segments(
                 h += consumed_full_hours
 
     return segments
+
+
+def _build_grid_color_map(grids: Tuple[str, ...]) -> Dict[str, str]:
+    """Return ``{"grid_<NAME>": "#hex"}`` for each grid using ``matplotlib.cm.tab20``.
+
+    260519-g5u: in all-grids mode the pool size is configurable (up to ~20
+    candidate grids), so we generate the per-grid colors at plot time from the
+    ``tab20`` qualitative palette rather than the LOCKED 2-color BANC/CISO map.
+    Ordering of ``grids`` determines the color index; callers should pass a
+    stable ordering (e.g. sorted, or pool-declaration order) so the same input
+    produces the same colors run-to-run.
+    """
+    import matplotlib
+
+    cmap = matplotlib.colormaps["tab20"]
+    color_map: Dict[str, str] = {}
+    for i, g in enumerate(grids):
+        if i >= cmap.N:
+            # Hard fail before we silently wrap around the 20-color palette
+            # and start re-using colors. Plan caps at 20 grids; this is a guard.
+            raise ValueError(
+                f"[BREAKDOWN] grid pool size {len(grids)} exceeds tab20 palette "
+                f"size {cmap.N}; pick a smaller pool or extend the palette."
+            )
+        rgba = cmap(i)
+        color_map[f"grid_{g}"] = matplotlib.colors.to_hex(rgba)
+    return color_map
+
+
+def plot_one_cell_all_grids(
+    pool: Tuple[str, ...],
+    start_ts: int,
+    policies: Tuple[int, ...],
+    overhead_min: int,
+    full_lookup: Dict[Tuple[str, int], float],
+    out_dir: Path,
+    app_size_mb: float,
+    dpi: int,
+    bypass_test_split: bool,
+    total_sim_hours: Optional[int] = None,
+) -> Tuple[Path, List[Dict[str, Any]], str]:
+    """All-grids Gantt cell (260519-g5u): pinned timestamp, dynamic-argmin source.
+
+    Mirrors :func:`plot_one_cell` but the destination candidate pool is the
+    arbitrary ``pool`` (used by the sweep's all-grids mode), and the source is
+    chosen as the HW-scaled argmin over the pool at ``start_ts`` (matching
+    :func:`sweep_overhead_crossover._pick_dynamic_source` semantics).
+
+    Returns:
+        ``(png_path, rows, source_grid)`` — ``source_grid`` is reported so the
+        caller can log which grid the argmin selected.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Rectangle, Patch
+
+    # Restrict the lookup to the pool grids (same trick as Sweep B uses).
+    pool_lookup = _build_filtered_lookup(full_lookup, pool)
+    # Argmin source over the pool at start_ts (HW-scaled, mirrors Sweep B).
+    source_grid = _pick_dynamic_source(
+        pool_lookup, list(pool), start_ts, use_hw=True,
+    )
+
+    iso_date = datetime.fromtimestamp(start_ts, tz=timezone.utc).date().isoformat()
+
+    fig, ax = plt.subplots(figsize=(12, 9), dpi=dpi)
+
+    rows: List[Dict[str, Any]] = []
+
+    # Run all policy sims first so we can size the x-axis to the longest.
+    policy_outs: List[Dict[str, Any]] = []
+    for p in policies:
+        cfg = RunConfig(
+            start_ts=start_ts,
+            source_grid=source_grid,
+            policy_id=p,
+            app_size_mb=app_size_mb,
+            expected_migration_min=int(overhead_min),
+            use_hw=True,
+            max_wall_clock_multiplier=10.0,
+            sweep_kind="runtime_breakdown_allgrids",
+            bypass_test_split=bypass_test_split,
+        )
+        out = simulate_with_decisions(pool_lookup, cfg)
+        policy_outs.append(out)
+
+    observed_max = max(out["completed_hours"] for out in policy_outs)
+    if total_sim_hours is None:
+        plot_hours = int(observed_max)
+    else:
+        plot_hours = max(int(total_sim_hours), int(observed_max))
+
+    # Dynamic color map: every grid that *could* appear (the full pool) gets a
+    # color slot up front so the legend ordering is stable. Sorted for
+    # determinism. Then overlay phase colors from the LOCKED palette.
+    sorted_pool = tuple(sorted(set(pool)))
+    grid_color_map = _build_grid_color_map(sorted_pool)
+    local_color_map: Dict[str, str] = dict(grid_color_map)
+    local_color_map["ckpt"] = COLOR_MAP["ckpt"]
+    local_color_map["send"] = COLOR_MAP["send"]
+    local_color_map["restore"] = COLOR_MAP["restore"]
+
+    # Track which grids actually appear in ANY policy's swimlane (for legend
+    # pruning per plan must-have 6: "one entry per grid actually visited").
+    visited_grids: List[str] = []
+    visited_set: set = set()
+
+    def _note_visited(grid_name: str) -> None:
+        if grid_name not in visited_set:
+            visited_set.add(grid_name)
+            visited_grids.append(grid_name)
+
+    for p, out in zip(policies, policy_outs):
+        policy_hours = int(out["completed_hours"])
+        # 260519-g5u: reconstruct_state_segments emits "grid_<NAME>" keys; we
+        # need them all to be in our local color map. They will be by
+        # construction because reconstruct only walks (source_grid +
+        # event target_grids), all of which are in the pool.
+        segments = reconstruct_state_segments(
+            events=out["migration_events"],
+            total_hours=policy_hours,
+            source_grid=source_grid,
+            overhead_min=float(overhead_min),
+            hw_table=HW_TABLE,
+            app_size_mb=app_size_mb,
+        )
+
+        y_idx = policies.index(p)
+        for x0, x1, key in segments:
+            if key.startswith("grid_"):
+                _note_visited(key[len("grid_"):])
+            color = local_color_map.get(key)
+            if color is None:
+                raise KeyError(
+                    f"[BREAKDOWN] segment key {key!r} has no color mapping; "
+                    f"pool={sorted_pool}"
+                )
+            ax.add_patch(Rectangle(
+                (x0, y_idx - 0.4),
+                x1 - x0,
+                0.8,
+                facecolor=color,
+                edgecolor="none",
+            ))
+
+        ax.text(
+            plot_hours + 0.3,
+            y_idx,
+            f"{out['total_carbon_gco2']:.0f} gCO2 · "
+            f"{out['migration_count']} migr · "
+            f"{policy_hours}h",
+            va="center", ha="left", fontsize=9,
+        )
+
+        mig_hours = "|".join(str(e["hour"]) for e in out["migration_events"])
+        dest_grids = "|".join(out["dest_grids_visited"])
+        rows.append({
+            "direction": f"allgrids:{source_grid}->pool{len(sorted_pool)}",
+            "start_ts_iso": iso_date,
+            "start_ts_unix": start_ts,
+            "policy": p,
+            "overhead_min": overhead_min,
+            "app_size_mb": app_size_mb,
+            "total_carbon_gco2": out["total_carbon_gco2"],
+            "migration_count": out["migration_count"],
+            "migration_hours": mig_hours,
+            "dest_grids_visited": dest_grids,
+        })
+
+    ax.set_xlim(0, plot_hours + 6)
+    ax.set_xlabel(f"hour of {plot_hours}-hour simulation (wall-clock; "
+                  f"variable per policy under 260512-kfc useful-work termination)")
+    ax.set_yticks(list(range(len(policies))))
+    ax.set_yticklabels([f"P{p}" for p in policies])
+    ax.invert_yaxis()
+    ax.set_ylim(len(policies) - 0.5, -0.5)
+    ax.grid(True, axis="x", linestyle=":", alpha=0.35)
+    ax.set_axisbelow(True)
+
+    pool_list_str = ",".join(sorted_pool)
+    title_main = (
+        f"Runtime breakdown — all-grids, start {iso_date} UTC, "
+        f"overhead={overhead_min} min, app={app_size_mb} MB"
+    )
+    ax.set_title(title_main, fontsize=12, pad=12)
+    subtitle_parts: List[str] = []
+    subtitle_parts.append(SUBTITLE_LOCKED)
+    subtitle_parts.append(
+        f"All-grids mode, source={source_grid}, "
+        f"pool={len(sorted_pool)} grids: {pool_list_str}"
+    )
+    if bypass_test_split:
+        subtitle_parts.append("FINAL EVAL — 2022 TEST DATA")
+    fig.text(
+        0.5, 0.92,
+        " | ".join(subtitle_parts),
+        ha="center", va="bottom", fontsize=8, style="italic", color="#444",
+    )
+
+    # Dynamic legend: one entry per visited grid (in visit order), then the
+    # three migration phases.
+    legend_handles: List[Any] = []
+    for g in visited_grids:
+        legend_handles.append(
+            Patch(facecolor=grid_color_map[f"grid_{g}"], label=f"running on {g}")
+        )
+    legend_handles.extend([
+        Patch(facecolor=COLOR_MAP["ckpt"],    label="checkpoint"),
+        Patch(facecolor=COLOR_MAP["send"],    label="send"),
+        Patch(facecolor=COLOR_MAP["restore"], label="restore"),
+    ])
+    # Pick a sensible ncol so the legend doesn't get squashed.
+    ncol = min(len(legend_handles), 6)
+    fig.legend(
+        handles=legend_handles,
+        loc="lower center",
+        ncol=ncol,
+        frameon=False,
+        bbox_to_anchor=(0.5, 0.01),
+    )
+
+    fig.subplots_adjust(top=0.86, bottom=0.14)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    png_path = (
+        out_dir / f"{overhead_min}min_{iso_date}_allgrids_{len(sorted_pool)}g.png"
+    )
+    fig.savefig(
+        png_path,
+        dpi=dpi,
+        bbox_inches="tight",
+        metadata={"Software": "matplotlib"},
+    )
+    plt.close(fig)
+    return png_path, rows, source_grid
 
 
 def plot_one_cell(
@@ -694,7 +932,49 @@ def _build_argparser() -> argparse.ArgumentParser:
         "--smoke-only", action="store_true",
         help="Run the Task 1 smoke test only (no artifacts produced).",
     )
+    # 260519-g5u: all-grids mode flags (mirror sweep_overhead_crossover.py).
+    p.add_argument(
+        "--mode", choices=("pairwise", "all-grids"), default="pairwise",
+        help="260519-g5u: 'pairwise' (default; --pair-driven) or 'all-grids' "
+             "(custom --pool, dynamic argmin source).",
+    )
+    p.add_argument(
+        "--start-ts", type=int, default=None,
+        help="260519-g5u: pin to a single Unix timestamp (overrides --starts "
+             "and the seasonal default). Useful for final-eval cells.",
+    )
+    p.add_argument(
+        "--pool", default=None,
+        help="260519-g5u: comma-separated grid IDs to use as the all-grids "
+             "destination/source pool. REQUIRED when --mode all-grids; ERROR "
+             "if used with --mode pairwise.",
+    )
+    p.add_argument(
+        "--bypass-test-split", action="store_true",
+        help="260519-g5u: ALLOW access to the 2022 held-out test period. "
+             "Threads RunConfig.bypass_test_split=True. Prints a LOUD warning "
+             "banner when active. Default off preserves test discipline.",
+    )
     return p
+
+
+def _parse_pool(arg: Optional[str]) -> Tuple[str, ...]:
+    """Parse ``--pool GRID1,GRID2,...`` into a tuple of grid names.
+
+    260519-g5u. Strips whitespace and rejects empty results. Does NOT validate
+    grid membership against HW_TABLE — that happens later when the intensity
+    lookup is built / _pick_dynamic_source is called and the failure mode is
+    clearer there.
+    """
+    if arg is None:
+        return ()
+    toks = [t.strip() for t in arg.split(",") if t.strip()]
+    if not toks:
+        raise SystemExit(
+            "[BREAKDOWN] --pool parsed to an empty list; pass a "
+            "comma-separated set of grid IDs (e.g. PSCO,PNM,SWPP)."
+        )
+    return tuple(toks)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -703,13 +983,121 @@ def main(argv: Optional[List[str]] = None) -> int:
         _smoke_test()
         return 0
 
-    starts = _parse_starts(args.starts)
-    pairs = _parse_pairs(args.pair)
+    # 260519-g5u: validate the new flag combinations up front.
+    if args.pool is not None and args.mode != "all-grids":
+        print(
+            "[BREAKDOWN] ERROR: --pool is only valid with --mode all-grids; "
+            "use --pair for pairwise mode.",
+            file=sys.stderr,
+        )
+        return 2
+    if args.mode == "all-grids" and args.pool is None:
+        print(
+            "[BREAKDOWN] ERROR: --mode all-grids REQUIRES --pool "
+            "GRID1,GRID2,... (no default pool).",
+            file=sys.stderr,
+        )
+        return 2
+
+    # 260519-g5u: LOUD banner when 2022 test data is being accessed (mirrors
+    # sweep_overhead_crossover.py).
+    if args.bypass_test_split:
+        print("=" * 80)
+        print("[BREAKDOWN] WARNING: --bypass-test-split is ACTIVE.")
+        print("[BREAKDOWN] This run accesses 2022 held-out test data.")
+        print("[BREAKDOWN] Recorded as a deliberate final-evaluation use.")
+        print("=" * 80)
+
     policies = _parse_policies(args.policies)
     overhead_min = int(args.overhead)
     out_dir = Path(args.out_dir)
     app_size_mb = float(args.app_size_mb)
     dpi = int(args.dpi)
+    bypass_test_split = bool(args.bypass_test_split)
+
+    # ── all-grids mode (260519-g5u) ───────────────────────────────────
+    if args.mode == "all-grids":
+        if args.start_ts is None:
+            print(
+                "[BREAKDOWN] ERROR: --mode all-grids REQUIRES --start-ts "
+                "(pinned single-timestamp cell; no seasonal default in this mode).",
+                file=sys.stderr,
+            )
+            return 2
+        # Warn if --starts was passed but is being ignored.
+        if args.starts is not None:
+            print(
+                f"[BREAKDOWN] WARNING: --starts={args.starts!r} IGNORED in "
+                f"all-grids mode (use --start-ts for the pinned timestamp)."
+            )
+        pool = _parse_pool(args.pool)
+        start_ts = int(args.start_ts)
+        iso_date = datetime.fromtimestamp(
+            start_ts, tz=timezone.utc,
+        ).date().isoformat()
+        print(
+            f"[BREAKDOWN] mode=all-grids\n"
+            f"[BREAKDOWN] start_ts={start_ts} ({iso_date} UTC)\n"
+            f"[BREAKDOWN] pool({len(pool)})={list(pool)}\n"
+            f"[BREAKDOWN] policies={list(policies)}\n"
+            f"[BREAKDOWN] overhead_min={overhead_min}\n"
+            f"[BREAKDOWN] app_size_mb={app_size_mb}\n"
+            f"[BREAKDOWN] bypass_test_split={bypass_test_split}\n"
+            f"[BREAKDOWN] out_dir={out_dir}"
+        )
+
+        t0 = time.time()
+        # Load lookup ONCE for the full pool. Include 2022 iff bypass is set.
+        include_years = (
+            (2020, 2021, 2022) if bypass_test_split else (2020, 2021)
+        )
+        full_lookup = build_intensity_lookup_from_regions_tree(
+            Path(DEFAULT_REGIONS_TREE_DIR),
+            include_years=include_years,
+            allowed_grids=tuple(sorted(pool)),
+        )
+        print(
+            f"[BREAKDOWN] full_lookup loaded: {len(full_lookup)} (grid, ts) "
+            f"entries across {tuple(sorted(pool))} years={include_years}"
+        )
+
+        png_path, rows, source_grid = plot_one_cell_all_grids(
+            pool=pool,
+            start_ts=start_ts,
+            policies=policies,
+            overhead_min=overhead_min,
+            full_lookup=full_lookup,
+            out_dir=out_dir,
+            app_size_mb=app_size_mb,
+            dpi=dpi,
+            bypass_test_split=bypass_test_split,
+        )
+        print(
+            f"[BREAKDOWN] {iso_date} all-grids (source={source_grid}) → "
+            f"{png_path} ({len(rows)} sims)"
+        )
+
+        csv_path = out_dir / "runs_summary.csv"
+        write_runs_summary(rows, csv_path)
+        elapsed = time.time() - t0
+        print(
+            f"[BREAKDOWN] Done. 1 PNG + runs_summary.csv at {out_dir} "
+            f"(wall={elapsed:.2f}s, total sims={len(rows)})"
+        )
+        return 0
+
+    # ── pairwise mode (default; preserves all prior behavior) ─────────
+    # 260519-g5u: --start-ts also works in pairwise mode (overrides --starts).
+    if args.start_ts is not None:
+        if args.starts is not None:
+            print(
+                f"[BREAKDOWN] WARNING: --starts={args.starts!r} IGNORED "
+                f"because --start-ts={args.start_ts} is set."
+            )
+        starts = (int(args.start_ts),)
+    else:
+        starts = _parse_starts(args.starts)
+    pairs = _parse_pairs(args.pair)
 
     print(
         f"[BREAKDOWN] starts={[datetime.fromtimestamp(s, tz=timezone.utc).date().isoformat() for s in starts]}\n"
