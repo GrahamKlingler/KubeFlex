@@ -268,6 +268,69 @@ def test_2022_timestamp_hard_block():
     assert raised, f"Expected RuntimeError for 2022 timestamp {BASE_TS_2022}"
 
 
+def _make_2022_lookup(hours: int = 8):
+    """Build a 2022-anchored intensity lookup for the bypass-test regression.
+
+    Mirrors make_small_lookup() but anchored at BASE_TS_2022 so it exercises the
+    test-period bypass. Three grids (ISNE/TVA/SWPP) all have HW_TABLE entries
+    so the simulator can HW-cost them without KeyError.
+    """
+    lookup = {}
+    for h in range(hours):
+        ts = BASE_TS_2022 + h * 3600
+        lookup[("ISNE", ts)] = 200.0 + (h % 24) * 5.0
+        lookup[("TVA", ts)] = 300.0 - (h % 24) * 4.0
+        lookup[("SWPP", ts)] = 250.0 + (h % 12) * 3.0
+    return lookup
+
+
+def test_runconfig_bypass_test_split_allows_2022_timestamp():
+    """RunConfig.bypass_test_split=True must allow simulate_one_run on 2022 data.
+
+    260519-fhe: the new flag is the explicit, recorded opt-in for final-eval
+    runs on the held-out 2022 test period. Default (False) must still raise so
+    the existing test_2022_timestamp_hard_block invariant is preserved end-to-end.
+    """
+    from _simulation_core import RunConfig, simulate_one_run  # noqa: WPS433
+
+    lookup = _make_2022_lookup(hours=8)
+
+    # Positive: bypass_test_split=True allows the 2022 timestamp.
+    cfg_bypass = RunConfig(
+        start_ts=BASE_TS_2022,
+        source_grid=DEFAULT_SOURCE_GRID,
+        policy_id=6,
+        expected_completion_min=120,  # 2-hour useful job; fixture has 8 hours
+        bypass_test_split=True,
+    )
+    result = simulate_one_run(lookup, cfg_bypass)
+    assert isinstance(result, dict), (
+        f"simulate_one_run must return a dict; got {type(result).__name__}"
+    )
+    for key in ("total_carbon_gco2", "migration_count"):
+        assert key in result, (
+            f"bypass path result missing expected D-19 key {key!r}; "
+            f"keys={sorted(result.keys())}"
+        )
+
+    # Negative control: default (bypass_test_split=False) still raises RuntimeError.
+    cfg_default = RunConfig(
+        start_ts=BASE_TS_2022,
+        source_grid=DEFAULT_SOURCE_GRID,
+        policy_id=6,
+        expected_completion_min=120,
+    )
+    raised = False
+    try:
+        simulate_one_run(lookup, cfg_default)
+    except RuntimeError:
+        raised = True
+    assert raised, (
+        "RunConfig.bypass_test_split defaults to False; simulate_one_run with a "
+        "2022 start_ts and no bypass MUST raise RuntimeError (D-23 discipline)."
+    )
+
+
 def _write_fake_intensity_csv(path, rows):
     """Write a minimal regions-tree-style CSV with (datetime, timestamp, carbon_intensity_direct_avg)."""
     import csv as _csv
@@ -728,6 +791,8 @@ def main():
         test_main_sweep_smoke_overrides_completion_min,
         test_ablation_sweep_smoke_overrides_completion_min,
         test_2022_timestamp_hard_block,
+        # 260519-fhe: opt-in flag for 2022 final-eval access.
+        test_runconfig_bypass_test_split_allows_2022_timestamp,
         test_intensity_lookup_filters_2022,
         # 260511-jce: minute-granular migration carbon regressions.
         test_migration_carbon_minute_granular,
