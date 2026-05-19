@@ -424,7 +424,8 @@ def _pick_dynamic_source(intensity_lookup, hw_grids, start_ts, use_hw):
 # ── 260519-fhe: iterative argmin-dominator filter ───────────────────
 
 def _filter_argmin_dominators(regions_root, hw_pool, timestamps, use_hw,
-                              pct_threshold, out_dir):
+                              pct_threshold, out_dir,
+                              bypass_test_split=False):
     """Iteratively remove argmin-dominator grids; return the filtered pool.
 
     For each ts in ``timestamps`` the window is [ts, ts+3600, ..., ts+47*3600]
@@ -485,8 +486,13 @@ def _filter_argmin_dominators(regions_root, hw_pool, timestamps, use_hw,
     print("=" * 80)
 
     # Build the union lookup ONCE; per-iteration filtering is in-memory.
+    # 260519-fhe: when bypass_test_split is True, include 2022 in the loaded
+    # years so the filter can score the actual test-window timestamps. Default
+    # (2020, 2021) preserves D-23 discipline for non-bypass callers.
+    include_years = (2020, 2021, 2022) if bypass_test_split else (2020, 2021)
     union_lookup = build_intensity_lookup_from_regions_tree(
-        regions_root, allowed_grids=tuple(sorted(initial_pool)),
+        regions_root, include_years=include_years,
+        allowed_grids=tuple(sorted(initial_pool)),
     )
 
     # Per-ts window hours.
@@ -1833,8 +1839,12 @@ def _run_pairwise_mode(
         f"[SWEEP] out_dir={out_dir}"
     )
 
+    # 260519-fhe: include 2022 in the loaded years iff bypass-test-split is
+    # set. Default preserves D-23 discipline for non-bypass callers.
+    _pair_include_years = (2020, 2021, 2022) if bypass_test_split else (2020, 2021)
     lookup = build_intensity_lookup_from_regions_tree(
-        regions_root, allowed_grids=tuple(sorted(pair_grids)),
+        regions_root, include_years=_pair_include_years,
+        allowed_grids=tuple(sorted(pair_grids)),
     )
     print(f"[SWEEP] intensity_lookup: {len(lookup)} (grid, ts) entries")
 
@@ -2014,8 +2024,13 @@ def _run_all_grids_mode(
     # degenerate Sweep B because (a) the dynamic argmin source selector would
     # always pick it, and (b) every policy's get_min_grid_at would lock onto
     # it as destination. Pre-build a temporary lookup to detect this.
+    # 260519-fhe: bypass-test-split also opens 2022 to the empty-grid probe
+    # so a grid with data ONLY in 2022 (none today, but future-proof) doesn't
+    # get spuriously filtered.
+    _include_years = (2020, 2021, 2022) if bypass_test_split else (2020, 2021)
     _probe_lookup = build_intensity_lookup_from_regions_tree(
-        regions_root, allowed_grids=tuple(sorted(hw_pool)),
+        regions_root, include_years=_include_years,
+        allowed_grids=tuple(sorted(hw_pool)),
     )
     empty_grids = []
     for g in list(hw_pool):
@@ -2049,10 +2064,12 @@ def _run_all_grids_mode(
         hw_pool = _filter_argmin_dominators(
             regions_root, hw_pool, timestamps, use_hw,
             args.filter_dominators_argmin_pct, out_dir,
+            bypass_test_split=bypass_test_split,
         )
 
     lookup = build_intensity_lookup_from_regions_tree(
-        regions_root, allowed_grids=tuple(sorted(hw_pool)),
+        regions_root, include_years=_include_years,
+        allowed_grids=tuple(sorted(hw_pool)),
     )
     print(f"[SWEEP] intensity_lookup: {len(lookup)} (grid, ts) entries")
 
