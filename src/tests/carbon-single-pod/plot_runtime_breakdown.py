@@ -38,10 +38,22 @@ Design notes:
   - Phase split synthesis runs OUTSIDE the simulation. We use the *original*
     (unpatched) ``heuristics.overhead.{ckpt,send,restore}_overhead`` helpers
     and scale their (ckpt:send:restore) ratio proportionally to match the
-    simulated overhead (e.g. 30 min). We do NOT import / use
-    ``sweep_overhead_crossover.scaled_overhead`` because that patches Policy
-    6's *internal* estimator and we do not want to affect policy decisions
-    here — we're only visualizing.
+    simulated overhead (e.g. 30 min). This is independent of the
+    ``scaled_overhead`` patch below — phase visualization uses the original
+    ratios so the swimlane proportions remain semantically meaningful.
+
+  - 260525-ksw REVERSAL: Policy 6 sims are now wrapped in
+    ``sweep_overhead_crossover.scaled_overhead`` so the heuristic's internal
+    stay-vs-migrate cost estimate matches the sim's actual minute-granular
+    charge. Previously (260512-j87 original design) we deliberately skipped
+    this patch on the rationale that "it would alter decisions, which is
+    out of scope for visualization." The 260519-g5u Gantts showed this
+    decoupling caused P6 to over-migrate (5 migrations in the Oct 2022
+    window when 30-min cost vs ~5-min savings clearly favored staying put,
+    losing to P1's zero-migration baseline). Aligning the heuristic's cost
+    estimate with the sim's actual cost is now the desired behavior; the
+    plot now visualizes the heuristic in its corrected regime. The patch
+    is a no-op for Policies 1-5 (they don't import the overhead helpers).
 
   - Carbon-accounting note: for sub-60-min overhead (cooldown=0) the sim's
     minute-granular lump-sum source charge at the decision hour is consistent
@@ -83,6 +95,8 @@ from sweep_overhead_crossover import (  # noqa: E402
     _build_filtered_lookup,
     _build_two_grid_lookup,
     _pick_dynamic_source,
+    scaled_overhead,    # 260525-ksw: wrap single-run sims so P6's
+                        # internal estimate matches the sim's actual cost.
 )
 
 
@@ -115,10 +129,15 @@ COLOR_MAP: Dict[str, str] = {
     "restore":   "#37474f",   # dark charcoal
 }
 
-# Caption locked verbatim by must_haves entry 7.
+# 260525-ksw: caption now reflects that scaled_overhead ALSO patches Policy 6's
+# internal cost estimate (not just phase visualization). The "30-min" matches
+# OVERHEAD_MIN_DEFAULT; if --overhead is overridden, the visualization assumes
+# the user adjusts the phase durations via the synthesize_phase_durations
+# helper at plot time. Keep the constant 30-min wording since OVERHEAD_MIN_DEFAULT
+# is the locked default for this script's primary use case.
 SUBTITLE_LOCKED: str = (
-    "Phase durations synthesized from heuristics/overhead.py linear fits at "
-    "64 MB, scaled proportionally to match the 30-min sim overhead."
+    "Phase durations AND Policy 6's internal overhead estimate scaled "
+    "proportionally to match the 30-min sim overhead (260525-ksw)."
 )
 
 
@@ -444,6 +463,12 @@ def plot_one_cell_all_grids(
 
     rows: List[Dict[str, Any]] = []
 
+    # 260525-ksw: anchor grid for scaled_overhead = first sorted pool grid
+    # (deterministic; matches the sweep pattern). Computed ONCE before the
+    # per-policy loop.
+    sorted_pool_for_anchor = sorted(set(pool))
+    anchor_for_scaled_overhead = sorted_pool_for_anchor[0]
+
     # Run all policy sims first so we can size the x-axis to the longest.
     policy_outs: List[Dict[str, Any]] = []
     for p in policies:
@@ -458,7 +483,12 @@ def plot_one_cell_all_grids(
             sweep_kind="runtime_breakdown_allgrids",
             bypass_test_split=bypass_test_split,
         )
-        out = simulate_with_decisions(pool_lookup, cfg)
+        # 260525-ksw: same patch as pairwise mode; anchor = first sorted pool grid.
+        with scaled_overhead(
+            target_total_minutes=float(overhead_min),
+            anchor_grid=anchor_for_scaled_overhead,
+        ):
+            out = simulate_with_decisions(pool_lookup, cfg)
         policy_outs.append(out)
 
     observed_max = max(out["completed_hours"] for out in policy_outs)
@@ -673,7 +703,16 @@ def plot_one_cell(
             max_wall_clock_multiplier=10.0,
             sweep_kind="runtime_breakdown",
         )
-        out = simulate_with_decisions(pair_lookup, cfg)
+        # 260525-ksw: wrap with scaled_overhead so Policy 6's INTERNAL cost
+        # estimate (from heuristics.policy_heuristic bound overhead helpers)
+        # matches the sim's actual minute-granular charge. The patch is a no-op
+        # for P1-P5 (they don't import the overhead helpers). Anchor grid =
+        # src_grid (the first grid in the directional pair, deterministic).
+        with scaled_overhead(
+            target_total_minutes=float(overhead_min),
+            anchor_grid=src_grid,
+        ):
+            out = simulate_with_decisions(pair_lookup, cfg)
         policy_outs.append(out)
 
     # 260512-kfc: derive plot x-axis from longest policy. If caller passed an
