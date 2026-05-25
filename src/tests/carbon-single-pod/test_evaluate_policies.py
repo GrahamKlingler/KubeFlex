@@ -777,6 +777,56 @@ def test_sim_opt_in_use_empirical_runtime_differs_from_default():
     )
 
 
+# ── 260525-ksw: HW × CI invariant regression ─────────────────────
+
+
+def test_total_carbon_uses_hw_even_when_policy_ignores_hw():
+    """Regression for 260525-ksw HW × CI invariant.
+
+    Policy 3 is HW-blind in its destination scoring, but the simulation core's
+    total_carbon accounting MUST still include HW scaling when use_hw=True.
+    Construct a degenerate single-grid lookup so there is only one possible
+    destination and the policy can never migrate; assert that the resulting
+    total_carbon equals Σ(raw_intensity × power_per_core) over completed hours.
+    """
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "controller"))
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _simulation_core import RunConfig, simulate_one_run  # noqa: WPS433
+    from heuristics.hardware import HW_TABLE  # noqa: WPS433
+
+    # Single grid in HW_TABLE (use ISNE — matches FIXTURE_GRIDS convention).
+    grid = "ISNE"
+    raw_per_hour = 200.0
+    hours_to_cover = 3
+    minutes = hours_to_cover * 60  # 180 useful minutes, no migrations possible
+    lookup = {(grid, BASE_TS_2020 + h * 3600): raw_per_hour
+              for h in range(hours_to_cover + 2)}  # +2 slack for safety
+    cfg = RunConfig(
+        start_ts=BASE_TS_2020,
+        source_grid=grid,
+        policy_id=3,            # HW-BLIND in its decision logic
+        use_hw=True,            # but accounting MUST use HW
+        expected_completion_min=minutes,
+        expected_migration_min=5,
+        app_size_mb=64.0,
+    )
+    result = simulate_one_run(lookup, cfg)
+
+    expected = raw_per_hour * HW_TABLE[grid].power_per_core * hours_to_cover
+    got = result["total_carbon_gco2"]
+    assert abs(got - round(expected, 1)) < 0.6, (
+        f"HW × CI invariant violated: expected ≈ {expected:.1f} "
+        f"(raw {raw_per_hour} × power_per_core {HW_TABLE[grid].power_per_core} "
+        f"× {hours_to_cover}h), got total_carbon_gco2 = {got}"
+    )
+    assert result["migration_count"] == 0, (
+        "Single-grid lookup must yield zero migrations; "
+        f"got {result['migration_count']}"
+    )
+
+
 # ── Runner ────────────────────────────────────────────────────────
 
 def main():
@@ -805,6 +855,8 @@ def main():
         # 260515-jav: sysbench-backed empirical runtime opt-in regressions.
         test_sim_default_use_empirical_runtime_matches_existing_behavior,
         test_sim_opt_in_use_empirical_runtime_differs_from_default,
+        # 260525-ksw: HW × CI invariant regression.
+        test_total_carbon_uses_hw_even_when_policy_ignores_hw,
     ]
     passed = 0
     failed = 0

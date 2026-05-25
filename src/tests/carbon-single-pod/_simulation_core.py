@@ -176,6 +176,15 @@ def simulate_one_run(intensity_lookup, cfg):
     Raises:
         RuntimeError: If cfg.start_ts falls in the 2022 test period (D-23).
         ValueError: If cfg.start_ts is outside all defined data ranges.
+
+    HW × CI INVARIANT (260525-ksw):
+        total_carbon ALWAYS = Σ(HW × CI) per wall-clock hour when use_hw=True.
+        Policy decisions may be HW-blind (notably Policy 3, which ignores HW in
+        its forecast scoring), but the carbon ACCOUNTING is not. The loop body
+        multiplies raw_intensity by HW_TABLE[current_grid].power_per_core for
+        BOTH total_carbon (running cost) AND migration_carbon (decision-hour
+        charge) before accumulation. There is no path by which a policy can
+        bypass HW scaling for the total — only for its own decision logic.
     """
     # Belt + suspenders 2022 guard (orchestrator filters first; trust nothing).
     # Raises RuntimeError if cfg.start_ts is in the 2022 test period (D-23)
@@ -268,6 +277,11 @@ def simulate_one_run(intensity_lookup, cfg):
 
         # Apply hardware scaling when use_hw is set.
         # HW_TABLE is now grid-keyed (data/hardware/hw_avg.csv).
+        # HW × CI INVARIANT (260525-ksw): the multiplication below applies to
+        # ALL accumulation paths — `total_carbon` (line 281) AND `migration_carbon`
+        # (line 326) both consume the resulting `intensity`. A policy's decision
+        # logic may ignore HW (e.g. Policy 3), but its carbon TOTAL is still
+        # HW-scaled. Regression: test_total_carbon_uses_hw_even_when_policy_ignores_hw.
         if cfg.use_hw and raw_intensity is not None:
             intensity = raw_intensity * HW_TABLE[current_grid].power_per_core
         else:
@@ -321,6 +335,8 @@ def simulate_one_run(intensity_lookup, cfg):
                 # 260511-jce: minute-granular migration carbon (UNCHANGED).
                 # `intensity` is the source-grid intensity at the decision hour,
                 # already HW-scaled iff cfg.use_hw=True by the loop body above.
+                # 260525-ksw: `intensity` is already HW × raw_CI per the loop-body invariant
+                # above, so migration_carbon inherits HW scaling under use_hw=True.
                 if intensity is not None:
                     migration_carbon = migration_fraction_h * intensity
                     total_carbon += migration_carbon
