@@ -1069,9 +1069,11 @@ def aggregate_all_grids(rows, policies):
 # ── Artifact writers ──────────────────────────────────────────────────
 
 def write_csv(rows, path):
+    # 260525-ksw: convert g -> kg at the writer boundary; producers (run_sweep)
+    # still build rows in gCO2eq. Per-row shallow copy avoids caller mutation.
     fieldnames = [
         "overhead_min", "policy", "source_grid", "dest_grid", "start_ts",
-        "total_carbon_gco2", "baseline_carbon_gco2", "migration_count",
+        "total_carbon_kgco2eq", "baseline_carbon_kgco2eq", "migration_count",
     ]
     rows_sorted = sorted(
         rows,
@@ -1084,7 +1086,27 @@ def write_csv(rows, path):
         w = csv.DictWriter(f, fieldnames=fieldnames)
         w.writeheader()
         for r in rows_sorted:
-            w.writerow(r)
+            tc_g = r["total_carbon_gco2"]
+            bc_g = r["baseline_carbon_gco2"]
+            # NaN-safe conversion: NaN/None pass through as "" so CSV column
+            # remains parseable. Numeric values divided by 1000 and rounded.
+            def _to_kg(v):
+                if v is None:
+                    return ""
+                if isinstance(v, float) and v != v:  # NaN
+                    return ""
+                return round(v / 1000.0, 3)
+            out_row = {
+                "overhead_min": r["overhead_min"],
+                "policy": r["policy"],
+                "source_grid": r["source_grid"],
+                "dest_grid": r["dest_grid"],
+                "start_ts": r["start_ts"],
+                "total_carbon_kgco2eq": _to_kg(tc_g),
+                "baseline_carbon_kgco2eq": _to_kg(bc_g),
+                "migration_count": r["migration_count"],
+            }
+            w.writerow(out_row)
 
 
 def write_plot(carbon_by_dir, pair_crossovers, directional_pairs,
@@ -1150,7 +1172,13 @@ def write_plot(carbon_by_dir, pair_crossovers, directional_pairs,
             ax.axis("off")
             continue
         src, dst = pair
-        per_policy_means = {p: carbon_by_dir[pair][p] for p in policies}
+        # 260525-ksw: divide by 1000 INSIDE the plot loop so we don't mutate
+        # the caller's per_policy_means dict; y-axis labels updated below.
+        per_policy_means = {
+            p: [v / 1000.0 if (v is not None and v == v) else float("nan")
+                for v in carbon_by_dir[pair][p]]
+            for p in policies
+        }
         for p in policies:
             color = POLICY_COLORS.get(p, "#000000")
             name = POLICY_NAMES.get(p, f"policy {p}")
@@ -1197,10 +1225,11 @@ def write_plot(carbon_by_dir, pair_crossovers, directional_pairs,
         for ax in axes:
             ax.set_xlabel("Migration overhead (minutes)")
             ax.legend(loc="upper left", fontsize=8)
+        # 260525-ksw: y-axis units now kgCO2eq (divided by 1000 at plot time).
         if use_hw:
-            axes[0].set_ylabel("Mean total carbon (gCO2eq, HW-scaled)")
+            axes[0].set_ylabel("Mean total carbon (kgCO2eq, HW-scaled)")
         else:
-            axes[0].set_ylabel("Mean total carbon (gCO2eq, no HW scaling)")
+            axes[0].set_ylabel("Mean total carbon (kgCO2eq, no HW scaling)")
     else:
         # In grid mode: x-label on bottom row, y-label on left column only,
         # legend on first subplot only.
@@ -1211,10 +1240,11 @@ def write_plot(carbon_by_dir, pair_crossovers, directional_pairs,
         for row in range(nrows):
             left_ax_idx = row * ncols
             if ordered_pairs_for_plot[left_ax_idx] is not None:
+                # 260525-ksw: kgCO2eq labels.
                 if use_hw:
-                    axes[left_ax_idx].set_ylabel("Mean total carbon (gCO2eq)", fontsize=9)
+                    axes[left_ax_idx].set_ylabel("Mean total carbon (kgCO2eq)", fontsize=9)
                 else:
-                    axes[left_ax_idx].set_ylabel("Mean total carbon (gCO2eq, no HW scaling)", fontsize=9)
+                    axes[left_ax_idx].set_ylabel("Mean total carbon (kgCO2eq, no HW scaling)", fontsize=9)
         # Legend only on the first non-empty subplot.
         for ax, pair in zip(axes, ordered_pairs_for_plot):
             if pair is not None:
@@ -1293,6 +1323,8 @@ def write_summary_md(
         "",
         "## Methodology",
         "",
+        "- Carbon values in this report are kgCO2eq (sim core internally tracks "
+        "gCO2eq; converted at write time, 260525-ksw).",
         f"- Policies compared: {policies_label}.",
         "- Linked-knob sweep: `expected_migration_min` AND Policy 6's bound "
         "overhead helpers "
@@ -1366,8 +1398,9 @@ def write_summary_md(
         # mig-count column per swept policy; diff column omitted to keep
         # the table narrow (pairwise crossover statements above carry the
         # comparisons).
+        # 260525-ksw: header + values now in kgCO2eq (divide by 1000).
         header_cells = ["overhead_min"]
-        header_cells += [f"P{p} carbon" for p in policies]
+        header_cells += [f"P{p} kgCO2eq" for p in policies]
         header_cells += [f"P{p} mig_count" for p in policies]
         md.append("| " + " | ".join(header_cells) + " |")
         md.append("| " + " | ".join(["---"] * len(header_cells)) + " |")
@@ -1375,7 +1408,7 @@ def write_summary_md(
         mc = mig_count_by_dir[pair]
         for i, m in enumerate(OVERHEAD_GRID_MIN):
             row_cells = [str(m)]
-            row_cells += [f"{c[p][i]:.1f}" for p in policies]
+            row_cells += [f"{c[p][i] / 1000.0:.1f}" for p in policies]
             row_cells += [f"{mc[p][i]:.2f}" for p in policies]
             md.append("| " + " | ".join(row_cells) + " |")
         md.append("")
@@ -1413,7 +1446,8 @@ def write_summary_md(
         "## Files",
         "",
         "- `curves.csv` -- long-format per-run results (one row per "
-        "(overhead, direction, policy, start_ts)).",
+        "(overhead, direction, policy, start_ts)); kgCO2eq columns "
+        "(`total_carbon_kgco2eq`, `baseline_carbon_kgco2eq`) per 260525-ksw.",
         "- `curves.png` -- two-subplot multi-policy line plot with pairwise "
         "crossover annotations where present.",
         "",
@@ -1426,10 +1460,14 @@ def write_summary_md(
 # ── Sweep B (all-grids) writers ───────────────────────────────────────
 
 def write_all_grids_csv(rows, path):
-    """Write Sweep B per-run rows (LOCKED schema)."""
+    """Write Sweep B per-run rows (LOCKED schema).
+
+    260525-ksw: total_carbon column renamed total_carbon_kgco2eq with values
+    divided by 1000. Producers (run_sweep_all_grids) still build rows in g.
+    """
     fieldnames = [
         "overhead_min", "start_ts", "source_grid_chosen", "policy",
-        "total_carbon", "migration_count", "dest_grids_visited",
+        "total_carbon_kgco2eq", "migration_count", "dest_grids_visited",
     ]
     rows_sorted = sorted(
         rows,
@@ -1437,17 +1475,39 @@ def write_all_grids_csv(rows, path):
             r["overhead_min"], r["policy"], r["start_ts"],
         ),
     )
+
+    def _to_kg(v):
+        if v is None:
+            return ""
+        if isinstance(v, float) and v != v:  # NaN
+            return ""
+        return round(v / 1000.0, 3)
+
     with open(path, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)
         w.writeheader()
         for r in rows_sorted:
-            w.writerow(r)
+            out_row = {
+                "overhead_min": r["overhead_min"],
+                "start_ts": r["start_ts"],
+                "source_grid_chosen": r["source_grid_chosen"],
+                "policy": r["policy"],
+                "total_carbon_kgco2eq": _to_kg(r["total_carbon"]),
+                "migration_count": r["migration_count"],
+                "dest_grids_visited": r["dest_grids_visited"],
+            }
+            w.writerow(out_row)
 
 
 def write_all_grids_aggregates(agg, policies, path):
-    """Write Sweep B aggregates (per (overhead, policy)) CSV."""
+    """Write Sweep B aggregates (per (overhead, policy)) CSV.
+
+    260525-ksw: mean/std columns renamed to *_kgco2eq with values /1000 and
+    rounded to 3 decimals. agg dict still holds gCO2eq values internally.
+    """
     fieldnames = [
-        "overhead_min", "policy", "mean_total_carbon", "std_total_carbon",
+        "overhead_min", "policy",
+        "mean_total_carbon_kgco2eq", "std_total_carbon_kgco2eq",
         "mean_migration_count", "n_samples",
     ]
     with open(path, "w", newline="") as f:
@@ -1459,9 +1519,9 @@ def write_all_grids_aggregates(agg, policies, path):
                 w.writerow({
                     "overhead_min": m,
                     "policy": p,
-                    "mean_total_carbon": round(a["mean_total_carbon"], 1)
+                    "mean_total_carbon_kgco2eq": round(a["mean_total_carbon"] / 1000.0, 3)
                         if a["mean_total_carbon"] == a["mean_total_carbon"] else "",
-                    "std_total_carbon": round(a["std_total_carbon"], 1)
+                    "std_total_carbon_kgco2eq": round(a["std_total_carbon"] / 1000.0, 3)
                         if a["std_total_carbon"] == a["std_total_carbon"] else "",
                     "mean_migration_count": round(a["mean_migration_count"], 3)
                         if a["mean_migration_count"] == a["mean_migration_count"] else "",
@@ -1484,17 +1544,22 @@ def write_all_grids_plot(carbon_by_policy, mig_by_policy, policies,
     for p in policies:
         color = POLICY_COLORS.get(p, "#000000")
         name = POLICY_NAMES.get(p, f"policy {p}")
+        # 260525-ksw: divide by 1000 at plot time so caller's carbon_by_policy
+        # dict (which downstream summary/aggregates also read) is not mutated.
+        kg_vals = [v / 1000.0 if (v is not None and v == v) else float("nan")
+                   for v in carbon_by_policy[p]]
         ax.plot(
-            OVERHEAD_GRID_MIN, carbon_by_policy[p],
+            OVERHEAD_GRID_MIN, kg_vals,
             marker="o", linewidth=1.8, color=color,
             label=f"Policy {p} ({name})",
         )
     ax.set_xlabel("Migration overhead (minutes)")
     # 260514-jp2: y-axis qualifier reflects use_hw.
+    # 260525-ksw: kgCO2eq units.
     if use_hw:
-        ax.set_ylabel("Mean total carbon (gCO2eq, HW-scaled, averaged across start_ts)")
+        ax.set_ylabel("Mean total carbon (kgCO2eq, HW-scaled, averaged across start_ts)")
     else:
-        ax.set_ylabel("Mean total carbon (gCO2eq, no HW scaling, averaged across start_ts)")
+        ax.set_ylabel("Mean total carbon (kgCO2eq, no HW scaling, averaged across start_ts)")
     title = (
         f"All-grids sweep: {len(hw_grids)}-grid HW destination pool, "
         f"dynamic source per start_ts (260511-kqo)"
@@ -1559,6 +1624,8 @@ def write_all_grids_summary_md(
         "",
         "## Methodology",
         "",
+        "- Carbon values in this report are kgCO2eq (sim core internally tracks "
+        "gCO2eq; converted at write time, 260525-ksw).",
         f"- Destination candidate pool: all {len(hw_grids)} HW-pool grids "
         f"(from `data/hardware/hw_avg.csv`).",
         "- Source grid per `start_ts`: dynamic — "
@@ -1628,16 +1695,17 @@ def write_all_grids_summary_md(
     md.append("")
 
     # Per-overhead aggregate table.
+    # 260525-ksw: header and values now in kgCO2eq (divide by 1000).
     md.append("## Per-overhead aggregates")
     md.append("")
     header_cells = ["overhead_min"]
-    header_cells += [f"P{p} carbon" for p in policies]
+    header_cells += [f"P{p} kgCO2eq" for p in policies]
     header_cells += [f"P{p} mig_count" for p in policies]
     md.append("| " + " | ".join(header_cells) + " |")
     md.append("| " + " | ".join(["---"] * len(header_cells)) + " |")
     for i, m in enumerate(OVERHEAD_GRID_MIN):
         cells = [str(m)]
-        cells += [f"{carbon_by_policy[p][i]:.1f}" for p in policies]
+        cells += [f"{carbon_by_policy[p][i] / 1000.0:.1f}" for p in policies]
         cells += [f"{mig_by_policy[p][i]:.2f}" for p in policies]
         md.append("| " + " | ".join(cells) + " |")
     md.append("")
@@ -1719,11 +1787,12 @@ def write_all_grids_summary_md(
         "## Files",
         "",
         "- `curves.csv` -- per-run rows (overhead_min, start_ts, "
-        "source_grid_chosen, policy, total_carbon, migration_count, "
-        "dest_grids_visited).",
-        "- `aggregates.csv` -- per-(overhead, policy) means/stds across start_ts.",
+        "source_grid_chosen, policy, total_carbon_kgco2eq, migration_count, "
+        "dest_grids_visited); kgCO2eq column per 260525-ksw.",
+        "- `aggregates.csv` -- per-(overhead, policy) means/stds across start_ts "
+        "(mean/std columns: `mean_total_carbon_kgco2eq`, `std_total_carbon_kgco2eq`).",
         "- `curves.png` -- single-panel mean-carbon-vs-overhead plot with one "
-        "curve per policy.",
+        "curve per policy (kgCO2eq y-axis).",
         "",
     ])
 

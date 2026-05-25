@@ -520,10 +520,11 @@ def plot_one_cell_all_grids(
                 edgecolor="none",
             ))
 
+        # 260525-ksw: annotation now in kgCO2eq with 1 decimal place.
         ax.text(
             plot_hours + 0.3,
             y_idx,
-            f"{out['total_carbon_gco2']:.0f} gCO2 · "
+            f"{out['total_carbon_gco2'] / 1000.0:.1f} kgCO2eq · "
             f"{out['migration_count']} migr · "
             f"{policy_hours}h",
             va="center", ha="left", fontsize=9,
@@ -531,6 +532,8 @@ def plot_one_cell_all_grids(
 
         mig_hours = "|".join(str(e["hour"]) for e in out["migration_events"])
         dest_grids = "|".join(out["dest_grids_visited"])
+        # 260525-ksw: CSV row key renamed to *_kgco2eq with value divided by
+        # 1000 and rounded to 3 decimals (CSV-fidelity convention).
         rows.append({
             "direction": f"allgrids:{source_grid}->pool{len(sorted_pool)}",
             "start_ts_iso": iso_date,
@@ -538,7 +541,7 @@ def plot_one_cell_all_grids(
             "policy": p,
             "overhead_min": overhead_min,
             "app_size_mb": app_size_mb,
-            "total_carbon_gco2": out["total_carbon_gco2"],
+            "total_carbon_kgco2eq": round(out["total_carbon_gco2"] / 1000.0, 3),
             "migration_count": out["migration_count"],
             "migration_hours": mig_hours,
             "dest_grids_visited": dest_grids,
@@ -709,16 +712,18 @@ def plot_one_cell(
         # Right-edge annotation anchored to the SHARED plot edge so all
         # annotations line up vertically. Include hours_tracked so the
         # variable-end-time effect is also reported numerically.
+        # 260525-ksw: annotation now in kgCO2eq with 1 decimal place.
         ax.text(
             plot_hours + 0.3,
             y_idx,
-            f"{out['total_carbon_gco2']:.0f} gCO2 · "
+            f"{out['total_carbon_gco2'] / 1000.0:.1f} kgCO2eq · "
             f"{out['migration_count']} migr · "
             f"{policy_hours}h",
             va="center", ha="left", fontsize=9,
         )
 
         # CSV row for this run.
+        # 260525-ksw: CSV row key renamed to *_kgco2eq with value /1000.
         mig_hours = "|".join(str(e["hour"]) for e in out["migration_events"])
         dest_grids = "|".join(out["dest_grids_visited"])
         rows.append({
@@ -728,7 +733,7 @@ def plot_one_cell(
             "policy": p,
             "overhead_min": overhead_min,
             "app_size_mb": app_size_mb,
-            "total_carbon_gco2": out["total_carbon_gco2"],
+            "total_carbon_kgco2eq": round(out["total_carbon_gco2"] / 1000.0, 3),
             "migration_count": out["migration_count"],
             "migration_hours": mig_hours,
             "dest_grids_visited": dest_grids,
@@ -793,10 +798,14 @@ def plot_one_cell(
 
 
 def write_runs_summary(rows: List[Dict[str, Any]], csv_path: Path) -> None:
-    """Emit the locked-schema ``runs_summary.csv`` at ``csv_path``."""
+    """Emit the locked-schema ``runs_summary.csv`` at ``csv_path``.
+
+    260525-ksw: total_carbon column is `total_carbon_kgco2eq` (kg, divided by
+    1000 in plot_one_cell / plot_one_cell_all_grids).
+    """
     header = [
         "direction", "start_ts_iso", "start_ts_unix", "policy", "overhead_min",
-        "app_size_mb", "total_carbon_gco2", "migration_count",
+        "app_size_mb", "total_carbon_kgco2eq", "migration_count",
         "migration_hours", "dest_grids_visited",
     ]
     csv_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1210,7 +1219,8 @@ def _smoke_test() -> None:
     print(f"[SMOKE] migration_count = {out['migration_count']}")
     print(f"[SMOKE] migration_events = {out['migration_events']}")
     print(f"[SMOKE] dest_grids_visited = {out['dest_grids_visited']}")
-    print(f"[SMOKE] total_carbon_gco2 = {out['total_carbon_gco2']}")
+    # 260525-ksw: smoke print in kgCO2eq (out dict still carries the g key).
+    print(f"[SMOKE] total_carbon_kgco2eq = {out['total_carbon_gco2'] / 1000.0:.3f}")
     print(
         f"[SMOKE] phase_durations(CISO->BANC, 64MB, 30min): "
         f"ckpt={ck:.4f} min  send={sn:.4f} min  restore={rs:.4f} min  "
