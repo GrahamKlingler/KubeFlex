@@ -827,6 +827,126 @@ def test_total_carbon_uses_hw_even_when_policy_ignores_hw():
     )
 
 
+# ── 260526-gj6: policy_use_hw_override decouples decisions from accounting ───
+
+
+def test_policy_use_hw_override_decouples_decisions_from_accounting():
+    """When policy_use_hw_override=False but use_hw=True, total_carbon should be
+    HW-scaled (accumulation uses power_per_core) but policies' argmin picks
+    should be on raw intensity (so P2 may pick a different target than it would
+    with HW-scaled intensity).
+
+    Fixture construction: pick (ISNE, TVA) where power_per_core ratio ~2.5x:
+      ISNE.ppc = 6.2357,  TVA.ppc = 15.625
+    Choose CI such that raw argmin and HW-scaled argmin disagree:
+      raw:        TVA=200 < ISNE=300            -> raw argmin = TVA
+      HW-scaled:  TVA=200*15.625=3125
+                  ISNE=300*6.2357=1870.7        -> HW-scaled argmin = ISNE
+
+    Under policy_use_hw_override=False (HW-blind decisions):
+      P2 starting at ISNE sees raw argmin = TVA -> migrates to TVA in hour 0.
+      dest_grids_visited must include 'TVA'.
+    Under cfg.use_hw=True (accumulation always HW-on):
+      total_carbon includes HW x raw_CI for every hour the pod sits on each
+      grid (and the 0.5-h migration lump at hour 0 source-side ISNE intensity).
+      With expected_migration_min=0 (free migration) and source_grid=ISNE
+      migrating to TVA at hour 0, hour-0 useful minutes happen on the new grid.
+      Setting m=0 isolates accumulation to TVA's HW x CI = 200*15.625 per
+      useful hour, allowing a clean formula check.
+    """
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "controller"))
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _simulation_core import RunConfig, simulate_one_run  # noqa: WPS433
+    from heuristics.hardware import HW_TABLE  # noqa: WPS433
+
+    raw_isne = 300.0
+    raw_tva = 200.0
+    hours_to_cover = 3
+    minutes = hours_to_cover * 60
+    # +2 hours of slack so any lookahead/wrap probes don't fall off the lookup.
+    lookup = {}
+    for h in range(hours_to_cover + 2):
+        ts = BASE_TS_2020 + h * 3600
+        lookup[("ISNE", ts)] = raw_isne
+        lookup[("TVA", ts)] = raw_tva
+
+    # Sanity-check the fixture invariants before exercising the sim.
+    isne_ppc = HW_TABLE["ISNE"].power_per_core
+    tva_ppc = HW_TABLE["TVA"].power_per_core
+    assert raw_tva < raw_isne, "fixture: raw argmin must be TVA"
+    assert raw_tva * tva_ppc > raw_isne * isne_ppc, (
+        "fixture: HW-scaled argmin must be ISNE (i.e. argmins must disagree)"
+    )
+
+    cfg = RunConfig(
+        start_ts=BASE_TS_2020,
+        source_grid="ISNE",
+        policy_id=2,                            # always-min-CI policy
+        use_hw=True,                            # accumulation HW-on
+        policy_use_hw_override=False,           # decisions HW-blind
+        expected_completion_min=minutes,
+        expected_migration_min=0,               # free migration -> clean accounting
+        app_size_mb=64.0,
+    )
+    result = simulate_one_run(lookup, cfg)
+
+    # Assertion 1: Policy 2 chose the raw-CI argmin (TVA), not the HW-scaled
+    # argmin (ISNE). Migration at hour 0 means dest_grids_visited == ['TVA'].
+    assert result["dest_grids_visited"] == ["TVA"], (
+        "policy_use_hw_override=False should make P2 pick raw-CI argmin (TVA), "
+        f"got dest_grids_visited={result['dest_grids_visited']}"
+    )
+    assert result["migration_count"] == 1, (
+        f"Expected exactly one migration at hour 0; got "
+        f"{result['migration_count']}"
+    )
+
+    # Assertion 2: total_carbon is HW-scaled. The sim loop accumulates the
+    # current grid's HW x CI BEFORE applying the migration decision, so hour 0
+    # accumulates on ISNE (the source) and hours 1..N-1 accumulate on TVA.
+    # With m=0 (free migration) and hours_to_cover=3 useful hours:
+    #   hour 0: ISNE -> raw_isne * isne_ppc
+    #   hour 1..2: TVA -> raw_tva * tva_ppc each
+    expected = raw_isne * isne_ppc + raw_tva * tva_ppc * (hours_to_cover - 1)
+    got = result["total_carbon_gco2"]
+    assert abs(got - round(expected, 1)) < 1.0, (
+        f"total_carbon should be HW-scaled (HW x raw_CI), expected "
+        f"~{expected:.1f} (= 1h source ISNE {raw_isne}*{isne_ppc} "
+        f"+ {hours_to_cover - 1}h target TVA {raw_tva}*{tva_ppc}), got {got}"
+    )
+    # And it must NOT equal the raw-CI sum, which is the bug we are guarding
+    # against (the whole point of policy_use_hw_override). Raw sum would be
+    # raw_isne + raw_tva * (hours_to_cover - 1) = 300 + 200 + 200 = 700.
+    raw_sum_no_hw = raw_isne + raw_tva * (hours_to_cover - 1)
+    assert got > 5 * raw_sum_no_hw, (
+        f"total_carbon should be HW-scaled and much larger than the raw-CI "
+        f"sum {raw_sum_no_hw}; got {got} (ratio {got / raw_sum_no_hw:.2f}x)"
+    )
+
+    # Assertion 3 (cross-check): the same fixture with policy_use_hw_override
+    # unset (None) and use_hw=True must NOT migrate, because the HW-scaled
+    # argmin matches the source (ISNE). Confirms the override is what's
+    # changing the decision and not some other behavior.
+    cfg_hw_aware = RunConfig(
+        start_ts=BASE_TS_2020,
+        source_grid="ISNE",
+        policy_id=2,
+        use_hw=True,                            # accumulation HW-on
+        policy_use_hw_override=None,            # default: decisions see cfg.use_hw=True
+        expected_completion_min=minutes,
+        expected_migration_min=0,
+        app_size_mb=64.0,
+    )
+    result_hw = simulate_one_run(lookup, cfg_hw_aware)
+    assert result_hw["dest_grids_visited"] == [], (
+        "HW-aware decision should stay at ISNE (HW-scaled argmin); "
+        f"got dest_grids_visited={result_hw['dest_grids_visited']}"
+    )
+    assert result_hw["migration_count"] == 0
+
+
 # ── Runner ────────────────────────────────────────────────────────
 
 def main():
@@ -857,6 +977,8 @@ def main():
         test_sim_opt_in_use_empirical_runtime_differs_from_default,
         # 260525-ksw: HW × CI invariant regression.
         test_total_carbon_uses_hw_even_when_policy_ignores_hw,
+        # 260526-gj6: policy_use_hw_override decouples decisions from accounting.
+        test_policy_use_hw_override_decouples_decisions_from_accounting,
     ]
     passed = 0
     failed = 0
