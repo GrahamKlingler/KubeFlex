@@ -703,7 +703,7 @@ def _resolve_timestamps(all_ts, num):
 def run_sweep(
     full_lookup, directional_pairs, timestamps, anchor_grid, policies,
     use_hw=True, hw_weighting=True, use_empirical_runtime=False,
-    bypass_test_split=False,
+    bypass_test_split=False, policy_use_hw_override=None,
 ):
     """Execute the 13 x len(directional_pairs) x len(policies) x len(timestamps) cell sweep.
 
@@ -716,6 +716,9 @@ def run_sweep(
             ``HW_TABLE[grid].power_per_core`` (RunConfig.use_hw=False).
         hw_weighting: If False, Policy 6's internal heuristic does NOT
             HW-weight its scores (RunConfig.hw_weighting=False).
+        policy_use_hw_override: 260526-gj6. When not None, forwarded as
+            ``use_hw=`` kwarg to policy.decide() instead of cfg.use_hw,
+            decoupling decision HW from accumulation HW.
 
     Returns:
         Tuple[List[dict], float] of (per-run rows, baseline_total_min used
@@ -744,6 +747,8 @@ def run_sweep(
         use_empirical_runtime=use_empirical_runtime,
         # 260519-fhe: opt-in final-eval access to 2022 held-out test data.
         bypass_test_split=bypass_test_split,
+        # 260526-gj6: HW-blind decisions, HW-realistic accounting opt-in.
+        policy_use_hw_override=policy_use_hw_override,
     )
 
     rows = []
@@ -812,7 +817,7 @@ def run_sweep(
 def run_sweep_all_grids(
     full_lookup, hw_grids, timestamps, anchor_grid, policies, use_hw=True,
     hw_weighting=True, use_empirical_runtime=False,
-    bypass_test_split=False,
+    bypass_test_split=False, policy_use_hw_override=None,
 ):
     """Execute the all-grids sweep (Sweep B, 260511-kqo).
 
@@ -861,6 +866,8 @@ def run_sweep_all_grids(
         use_empirical_runtime=use_empirical_runtime,
         # 260519-fhe: opt-in final-eval access to 2022 held-out test data.
         bypass_test_split=bypass_test_split,
+        # 260526-gj6: HW-blind decisions, HW-realistic accounting opt-in.
+        policy_use_hw_override=policy_use_hw_override,
     )
 
     # Build the full 26-grid lookup ONCE outside the overhead/policy loops --
@@ -1283,6 +1290,7 @@ def write_summary_md(
     path, pair_crossovers, carbon_by_dir, mig_count_by_dir,
     directional_pairs, baseline_total_min, anchor_grid, timestamps,
     policies, use_hw=True, hw_weighting=True,
+    policy_use_hw_override=None,
 ):
     """Render the per-direction pairwise crossover summary markdown.
 
@@ -1346,10 +1354,20 @@ def write_summary_md(
         (
             "- Settings: app_size_mb=64, expected_completion_min=2880 (48 h), "
             "use_hw=True."
-            if (use_hw and hw_weighting)
+            if (use_hw and hw_weighting and policy_use_hw_override is None)
             else
             "- Settings: app_size_mb=64, expected_completion_min=2880 (48 h), "
-            f"use_hw={use_hw}, hw_weighting={hw_weighting}."
+            f"use_hw={use_hw}, hw_weighting={hw_weighting}, "
+            f"policy_use_hw_override={policy_use_hw_override}."
+        ),
+        # 260526-gj6: explicit regime label so future readers see which of the
+        # three regimes this sweep represents (HW-default / no-hw / no-hw-decisions).
+        (
+            "- **Regime:** HW-blind decisions, HW x CI accounting "
+            "(`--no-hw-decisions`, 260526-gj6)."
+            if (policy_use_hw_override is False and use_hw)
+            else
+            ""
         ),
         "",
     ]
@@ -1595,7 +1613,7 @@ def write_all_grids_plot(carbon_by_policy, mig_by_policy, policies,
 def write_all_grids_summary_md(
     path, agg, rows, policies, baseline_total_min, anchor_grid, timestamps,
     hw_grids, sources_by_ts, carbon_by_policy, mig_by_policy,
-    use_hw=True, hw_weighting=True,
+    use_hw=True, hw_weighting=True, policy_use_hw_override=None,
 ):
     """Render the Sweep B summary markdown.
 
@@ -1643,10 +1661,19 @@ def write_all_grids_summary_md(
         # only when --no-hw flips toggles.
         (
             "- Settings: app_size_mb=64, expected_completion_min=2880 (48 h), use_hw=True."
-            if (use_hw and hw_weighting)
+            if (use_hw and hw_weighting and policy_use_hw_override is None)
             else
             f"- Settings: app_size_mb=64, expected_completion_min=2880 (48 h), "
-            f"use_hw={use_hw}, hw_weighting={hw_weighting}."
+            f"use_hw={use_hw}, hw_weighting={hw_weighting}, "
+            f"policy_use_hw_override={policy_use_hw_override}."
+        ),
+        # 260526-gj6: explicit regime label.
+        (
+            "- **Regime:** HW-blind decisions, HW x CI accounting "
+            "(`--no-hw-decisions`, 260526-gj6)."
+            if (policy_use_hw_override is False and use_hw)
+            else
+            ""
         ),
         "",
     ]
@@ -1840,6 +1867,12 @@ def _parse_args(argv=None):
                    help="Disable HW scaling: use_hw=False and hw_weighting=False. "
                         "Default output dir is suffixed with '-no-hw' so the "
                         "HW-scaled default outputs are not overwritten.")
+    # 260526-gj6: decouple decision HW from accounting HW.
+    p.add_argument("--no-hw-decisions", action="store_true",
+                   help="Policies decide HW-blind, but total_carbon still uses "
+                        "HW x CI (use_hw=True, policy_use_hw_override=False, "
+                        "hw_weighting=False). Default output dir is suffixed "
+                        "with '-no-hw-decisions'. MUTEX with --no-hw.")
     # 260515-jav: opt-in sysbench-backed empirical runtime for Policy 6.
     p.add_argument("--use-empirical-runtime", action="store_true",
                    help="Enable sysbench-backed empirical runtime estimation "
@@ -1881,7 +1914,7 @@ def _parse_args(argv=None):
 def _run_pairwise_mode(
     args, regions_root, out_dir, usable, policies, timestamps, t0,
     use_hw=True, hw_weighting=True, use_empirical_runtime=False,
-    bypass_test_split=False,
+    bypass_test_split=False, policy_use_hw_override=None,
 ):
     """Sweep A: pairwise directional sweep across --pairs."""
     directional_pairs = _resolve_directional_pairs(usable, args.pairs)
@@ -1922,6 +1955,7 @@ def _run_pairwise_mode(
         use_hw=use_hw, hw_weighting=hw_weighting,
         use_empirical_runtime=use_empirical_runtime,
         bypass_test_split=bypass_test_split,
+        policy_use_hw_override=policy_use_hw_override,
     )
     print(
         f"[SWEEP] completed {len(rows)} simulated runs in "
@@ -1951,6 +1985,8 @@ def _run_pairwise_mode(
                 # here but documents intent and keeps the construction
                 # parallel with the run_sweep templates.
                 bypass_test_split=bypass_test_split,
+                # 260526-gj6: thread for symmetry with the run_sweep template.
+                policy_use_hw_override=policy_use_hw_override,
             ),
         )
         assert "dest_grids_visited" in sample, (
@@ -2004,6 +2040,7 @@ def _run_pairwise_mode(
         md_path, pair_crossovers, carbon_by_dir, mig_count_by_dir,
         directional_pairs, baseline_total_min, anchor_grid, timestamps,
         policies, use_hw=use_hw, hw_weighting=hw_weighting,
+        policy_use_hw_override=policy_use_hw_override,
     )
     print(f"[PLOT] wrote {md_path}")
 
@@ -2030,7 +2067,7 @@ def _run_pairwise_mode(
 def _run_all_grids_mode(
     args, regions_root, out_dir, usable, policies, timestamps, t0,
     use_hw=True, hw_weighting=True, use_empirical_runtime=False,
-    bypass_test_split=False,
+    bypass_test_split=False, policy_use_hw_override=None,
 ):
     """Sweep B: all-grids mode -- dynamic source + 26-grid HW destination pool."""
     if args.pairs:
@@ -2147,6 +2184,7 @@ def _run_all_grids_mode(
         hw_weighting=hw_weighting,
         use_empirical_runtime=use_empirical_runtime,
         bypass_test_split=bypass_test_split,
+        policy_use_hw_override=policy_use_hw_override,
     )
     print(
         f"[SWEEP] completed {len(rows)} simulated runs in "
@@ -2228,6 +2266,7 @@ def _run_all_grids_mode(
         md_path, agg, rows, policies, baseline_total_min, anchor_grid,
         timestamps, hw_pool, sources_by_ts, carbon_by_policy, mig_by_policy,
         use_hw=use_hw, hw_weighting=hw_weighting,
+        policy_use_hw_override=policy_use_hw_override,
     )
     print(f"[PLOT] wrote {md_path}")
 
@@ -2305,6 +2344,20 @@ def main(argv=None) -> int:
         print("[SWEEP] Recorded as a deliberate final-evaluation use.")
         print("=" * 80)
 
+    # 260526-gj6: --no-hw and --no-hw-decisions are mutually exclusive. The
+    # former zeroes HW everywhere (decisions AND accounting); the latter keeps
+    # HW in accounting and zeroes it only for decisions. Allowing both would
+    # force one to silently win and silently invalidate the resulting curves.
+    if args.no_hw and args.no_hw_decisions:
+        print(
+            "[SWEEP] ERROR: --no-hw and --no-hw-decisions are mutually "
+            "exclusive. --no-hw zeroes HW in both decisions and accounting; "
+            "--no-hw-decisions zeroes HW only in policy decisions while "
+            "keeping HW x CI accounting. Pick one.",
+            file=sys.stderr,
+        )
+        return 1
+
     # 260514-jp2: --no-hw flips BOTH the sim-core HW scaling (use_hw) AND
     # Policy 6's internal HW weighting (hw_weighting). They are coupled so a
     # --no-hw run is a clean apples-to-apples "no HW" comparison; flipping
@@ -2313,6 +2366,16 @@ def main(argv=None) -> int:
     # HW-scaled behavior: use_hw=True, hw_weighting=True.
     use_hw = not args.no_hw
     hw_weighting = not args.no_hw
+    # 260526-gj6: --no-hw-decisions keeps use_hw=True (HW x CI accumulation
+    # invariant preserved) but routes use_hw=False to policy.decide() via
+    # RunConfig.policy_use_hw_override, and also turns off P6's hw_weighting
+    # so its internal heuristic stops HW-weighting scores. Net effect: every
+    # policy decides on raw CI; total_carbon is still HW-real.
+    policy_use_hw_override = None
+    if args.no_hw_decisions:
+        # use_hw stays True (preserves HW x CI accumulation invariant).
+        hw_weighting = False
+        policy_use_hw_override = False
     # 260515-jav: optional sysbench-backed empirical runtime for Policy 6.
     use_empirical_runtime = bool(args.use_empirical_runtime)
     # 260519-fhe: opt-in final-eval access to 2022 held-out test data.
@@ -2328,6 +2391,16 @@ def main(argv=None) -> int:
         # data/quick/260511-kqo-*/.
         if args.no_hw:
             out_dir = out_dir.parent / (out_dir.name + "-no-hw")
+        # 260526-gj6: same protection for --no-hw-decisions; suffix the
+        # default so we never overwrite either the HW-default (260511-kqo)
+        # or --no-hw (260514-jp2) artifacts. Mutex with --no-hw above
+        # guarantees these two clauses never both fire.
+        if args.no_hw_decisions:
+            out_dir = out_dir.parent / (
+                out_dir.name.replace(
+                    "260511-kqo", "260526-gj6"
+                ) + "-no-hw-decisions"
+            )
         # 260515-jav: same idea for --use-empirical-runtime so the
         # clock-speed-default and empirical-opt-in outputs don't overwrite.
         if use_empirical_runtime:
@@ -2374,12 +2447,14 @@ def main(argv=None) -> int:
             use_hw=use_hw, hw_weighting=hw_weighting,
             use_empirical_runtime=use_empirical_runtime,
             bypass_test_split=bypass_test_split,
+            policy_use_hw_override=policy_use_hw_override,
         )
     return _run_pairwise_mode(
         args, regions_root, out_dir, usable, policies, timestamps, t0,
         use_hw=use_hw, hw_weighting=hw_weighting,
         use_empirical_runtime=use_empirical_runtime,
         bypass_test_split=bypass_test_split,
+        policy_use_hw_override=policy_use_hw_override,
     )
 
 
