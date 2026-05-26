@@ -96,6 +96,15 @@ class RunConfig:
     # only by sweep_overhead_crossover.py --bypass-test-split, which prints a
     # LOUD warning when active.
     bypass_test_split: bool = False
+    # 260526-gj6: decouple policy-decision HW awareness from sim accumulation.
+    # When None (DEFAULT), policies receive `use_hw=cfg.use_hw` in their decide()
+    # kwargs — existing behavior preserved byte-identically. When set to a bool,
+    # this value is forwarded as the `use_hw` kwarg to the policy instead, while
+    # the loop body's HW × CI accumulation still keys off cfg.use_hw. Intended
+    # use: cfg.use_hw=True + policy_use_hw_override=False → HW-realistic
+    # accounting with HW-blind policy decisions. Set only by
+    # sweep_overhead_crossover.py --no-hw-decisions (mutex with --no-hw).
+    policy_use_hw_override: Optional[bool] = None
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -317,6 +326,16 @@ def simulate_one_run(intensity_lookup, cfg):
                     (useful_minutes_target - useful_minutes_completed) / 60.0
                 )),
             )
+            # 260526-gj6: policy_use_hw_override decouples policy-decision HW
+            # awareness from sim accumulation. None preserves existing behavior
+            # (policy sees cfg.use_hw). When set, the policy sees that value
+            # instead. The loop body's HW × CI accumulation above continues to
+            # key off cfg.use_hw exclusively (HW × CI invariant, 260525-ksw).
+            policy_use_hw = (
+                cfg.use_hw
+                if cfg.policy_use_hw_override is None
+                else cfg.policy_use_hw_override
+            )
             should_migrate, target_grid = _simulate_policy_decision(
                 policy_obj,
                 intensity_lookup,
@@ -328,7 +347,7 @@ def simulate_one_run(intensity_lookup, cfg):
                 forecast_window=24,
                 cost_multiplier=3.0,
                 migration_seconds=migration_seconds_real,
-                use_hw=cfg.use_hw,
+                use_hw=policy_use_hw,
             )
             if should_migrate and target_grid:
                 migration_count += 1
