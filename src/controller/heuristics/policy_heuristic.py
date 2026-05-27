@@ -115,7 +115,7 @@ class HeuristicPolicy(BasePolicy):
         deadline_multiplier: float = 1.5,
         include_network_power: bool = True,
         network_power_watts: float = NETWORK_POWER_WATTS,
-        lookahead_hours: int = 48,
+        lookahead_hours: Optional[int] = None,
         hw_weighting: bool = True,
         overhead_cost: bool = True,
         deadline_gate: bool = True,
@@ -141,7 +141,15 @@ class HeuristicPolicy(BasePolicy):
                 (15.0 W).
             lookahead_hours: Maximum hours to sum in stay/migrate carbon loops.
                 Caps O(n) inner loop length to prevent quadratic blowup on long
-                jobs. Default 48.
+                jobs. When None (DEFAULT, 260527-fbb), the cap is derived from
+                the deadline as ``int(expected_total_minutes/60 *
+                deadline_multiplier)``, floored at 1 hour. This makes the
+                lookahead cover the entire deadline window — anything past the
+                deadline would miss the deadline gate anyway, so there's no
+                value in looking further but every value in looking that far.
+                For the canonical 48 h × 1.5 job, this resolves to 72 h.
+                Explicit integer values are honored verbatim (existing callers
+                and ablation studies are unaffected).
             hw_weighting: If True, weight stay/migrate carbon sums by
                 hw[r].power_per_core (HEUR-05 default behavior). If False,
                 sums use raw forecast intensity per HEUR-10 / D-09 ablation
@@ -168,7 +176,17 @@ class HeuristicPolicy(BasePolicy):
         self.deadline_multiplier = deadline_multiplier
         self.include_network_power = include_network_power
         self.network_power_watts = network_power_watts
-        self.lookahead_hours = lookahead_hours
+        # 260527-fbb: derive lookahead from deadline when caller passes None
+        # (sentinel for "derive"). Anything past the deadline would miss the
+        # deadline gate anyway, so the deadline IS the effective horizon. For
+        # the canonical 48 h × 1.5 job this resolves to 72 h. Explicit integer
+        # values flow through unchanged (existing callers, ablation studies,
+        # and the horizon sweep continue to honor their explicit N).
+        if lookahead_hours is None:
+            derived = int(self.expected_total_minutes / 60.0 * self.deadline_multiplier)
+            self.lookahead_hours = max(1, derived)
+        else:
+            self.lookahead_hours = lookahead_hours
         self.hw_weighting = hw_weighting
         self.overhead_cost = overhead_cost
         self.deadline_gate = deadline_gate

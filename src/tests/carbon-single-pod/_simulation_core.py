@@ -74,7 +74,12 @@ class RunConfig:
     expected_completion_min: int = 2880     # 48 h canonical
     expected_migration_min: int = 5
     deadline_multiplier: float = 1.5
-    lookahead_hours: int = 48
+    # 260527-fbb: None (DEFAULT) is the sentinel for "derive from deadline" —
+    # HeuristicPolicy.__init__ resolves None to
+    # int(expected_completion_min/60 * deadline_multiplier). Explicit integer
+    # values are honored verbatim (horizon sweep and any caller passing an
+    # explicit N are unaffected).
+    lookahead_hours: Optional[int] = None
     hw_weighting: bool = True               # HEUR-10 toggle
     overhead_cost: bool = True              # HEUR-10 toggle
     deadline_gate: bool = True              # HEUR-10 toggle
@@ -402,7 +407,13 @@ def simulate_one_run(intensity_lookup, cfg):
     # don't get spuriously flagged as "wrapped into val" because of the unused
     # cfg.lookahead_hours default (WR-05).
     if cfg.policy_id == 6:
-        extra_hours = cfg.lookahead_hours
+        # 260527-fbb: cfg.lookahead_hours == None is the sentinel for
+        # "derive from deadline"; mirror HeuristicPolicy.__init__ so the
+        # wrap detection uses the same effective horizon the policy used.
+        if cfg.lookahead_hours is not None:
+            extra_hours = cfg.lookahead_hours
+        else:
+            extra_hours = max(1, int(cfg.expected_completion_min / 60.0 * cfg.deadline_multiplier))
     elif cfg.policy_id in (3, 4):
         extra_hours = 24  # forecast_window for forecast-based policies
     elif cfg.policy_id == 5:
@@ -436,7 +447,14 @@ def simulate_one_run(intensity_lookup, cfg):
         "overhead_cost": cfg.overhead_cost if cfg.policy_id == 6 else "",
         "deadline_gate": cfg.deadline_gate if cfg.policy_id == 6 else "",
         "ablation_id": _ablation_id(cfg) if cfg.policy_id == 6 else "n/a",
-        "lookahead_hours": cfg.lookahead_hours if cfg.policy_id == 6 else "",
+        # 260527-fbb: emit the effective integer lookahead the policy actually
+        # used, not the None sentinel — so downstream CSVs stay typed as int
+        # for Policy 6 rows.
+        "lookahead_hours": (
+            (cfg.lookahead_hours if cfg.lookahead_hours is not None
+             else max(1, int(cfg.expected_completion_min / 60.0 * cfg.deadline_multiplier)))
+            if cfg.policy_id == 6 else ""
+        ),
         "app_size_mb": cfg.app_size_mb,
         "expected_completion_min": cfg.expected_completion_min,
         "deadline_multiplier": cfg.deadline_multiplier,
