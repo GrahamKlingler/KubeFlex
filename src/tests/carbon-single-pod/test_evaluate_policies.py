@@ -694,21 +694,30 @@ def _make_sysbench_grid_lookup(hours: int = 60):
 
     Per CONTEXT.md the CISO/MISO pair is well-covered (CISO=26 hostnames,
     MISO=4). The fixture is shaped so Policy 6's MISO forecast-sum changes
-    sign depending on whether the dest horizon includes the 13th hour. With
-    the CISO/MISO empirical ratio ~0.9603, `time_left_int=13` (stay) maps
-    to `dest_time_left_int=12` (round(13*0.9603)=12) -- so the empirical
-    path sees a 12-hour MISO window while the clock-speed path sees 13.
-    Placing MISO at 100 for h<12 and a 10000 spike at h=12 makes that
-    extra hour decisive: empirical migrates to MISO, clock-speed does not.
+    sign depending on whether the dest horizon weights the spike at hour 12
+    fully or fractionally. With the CISO/MISO empirical ratio ~0.9603 and a
+    13-hour job, the default dest window is [0, 13.0) (full hour 12 = full
+    spike); the empirical dest window is [0, 12.484) (only ~0.484 of the
+    spike at hour 12, the rest of the partial last hour). Sizing the spike
+    at 2000 makes that fractional weight decisive: default (full spike)
+    keeps MISO above CISO's stay cost (no migrate); empirical (partial
+    spike) brings MISO below it (migrate).
+
+    260526-lgv: prior fixture used a 10000-spike at hour 12 against the
+    integer-rounded `dest_time_left_int=12` boundary. The piecewise-constant
+    fractional-window fix eliminates that integer quantization, so the
+    fixture is now built around a fractional-spike-weight flip instead.
     """
     lookup = {}
     for h in range(hours):
         ts = BASE_TS_2020 + h * 3600
-        # CISO: constant; stay_carbon is 200*13 over the stay horizon.
+        # CISO: constant; stay_carbon is 200*13 = 2600 over the stay horizon.
         lookup[("CISO", ts)] = 200.0
-        # MISO: cheap until the boundary, then a spike that the empirical
-        # window doesn't see but the clock-speed window does.
-        lookup[("MISO", ts)] = 100.0 if h < 12 else 10000.0
+        # MISO: cheap until hour 12, then a moderate spike. Spike size 2000
+        # chosen so default (full weight 1.0) gives MISO=1200+2000=3200 > 2600
+        # (no migrate), but empirical (weight 0.484) gives MISO=1200+968=2168
+        # < 2600 (migrate).
+        lookup[("MISO", ts)] = 100.0 if h < 12 else 2000.0
     return lookup
 
 
@@ -720,8 +729,10 @@ def test_sim_opt_in_use_empirical_runtime_differs_from_default():
     the stay-case time_left_h is by definition ratio=1.0 for src==src). The
     260515-jav implementation makes Policy 6's dest forecast horizon
     sensitive to perf_ratio(src, dest), so a faster MISO ratio shortens its
-    forecast window by one hour -- enough to skip a 10000-gCO2 spike that
-    the clock-speed path includes.
+    forecast window fractionally -- under the piecewise-constant fractional
+    weighting (260526-lgv), the hour-12 spike is weighted 1.0 by the default
+    13.0-hour window but only ~0.484 by the empirical 12.484-hour window,
+    flipping the migration decision.
 
     Assertions:
       - On/off totals differ (proves the empirical path fires).
@@ -736,9 +747,9 @@ def test_sim_opt_in_use_empirical_runtime_differs_from_default():
         start_ts=BASE_TS_2020,
         source_grid="CISO",
         policy_id=6,
-        # 780 min (13h) sits at the CISO/MISO ratio's first integer-rounding
-        # boundary: time_left_int=13 (stay-case) vs dest_time_left_int=12
-        # for empirical (round(13 * 0.9603) = 12).
+        # 780 min (13h) puts the spike at hour 12 inside the partial-last-hour
+        # of the empirical dest window [0, 12.484) -- weighted 0.484 rather
+        # than 1.0 by the default window [0, 13.0).
         expected_completion_min=780,
         # All Policy 6 toggles OFF for a clean analytic comparison; the
         # default-on snapshot invariant is covered by the other tests.

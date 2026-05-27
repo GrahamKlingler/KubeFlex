@@ -22,6 +22,7 @@ of the migrate_decision() pseudocode from heuristic.txt. Key features:
 Reference: heuristic.txt -- migrate_decision() pseudocode.
 """
 
+import math
 from typing import Dict, List, Optional, Tuple
 
 from heuristics.base import BasePolicy
@@ -34,6 +35,68 @@ from heuristics.overhead import (
 )
 from heuristics.runtime import estimate_remaining_hours
 from heuristics.policies import lookup_intensity
+
+
+def _accumulate_carbon_window(
+    intensity_lookup,
+    grid: str,
+    decision_ts: int,
+    window_start_h: float,
+    window_length_h: float,
+    weight: float,
+    lookahead_cap_h: int,
+) -> float:
+    """Sum HW-weighted carbon over [window_start_h, window_start_h + window_length_h)
+    relative to decision_ts. Reads hourly published data with piecewise-constant
+    interpretation: hour x's value applies to [x, x+1). Fractional weights at
+    the first and last hours; full weight for interior hours. All lookups land
+    on integer-hour boundaries to preserve the lookup_intensity fast path
+    (quick task 260505-fvu, ~107000x speedup).
+
+    Args:
+        intensity_lookup: Mapping from (grid, unix_timestamp) -> intensity.
+        grid: Grid identifier to look up.
+        decision_ts: Unix timestamp at the decision moment (decision_hour).
+        window_start_h: Hours after decision_ts where the window begins.
+        window_length_h: Length of the window in hours (may be fractional).
+        weight: Multiplicative weight (e.g., HW power_per_core, or 1.0).
+        lookahead_cap_h: Cap on window length to prevent O(n) blowup.
+
+    Returns:
+        Sum of weight x hourly_intensity x hours_in_each_hour-segment.
+    """
+    end_h = window_start_h + min(window_length_h, lookahead_cap_h)
+    if window_start_h >= end_h:
+        return 0.0
+
+    first_full = math.ceil(window_start_h)
+    last_full = math.floor(end_h)
+    carbon = 0.0
+
+    # Partial first hour: [window_start_h, first_full) reads hour (first_full - 1)
+    if window_start_h < first_full:
+        partial = min(first_full, end_h) - window_start_h
+        ts = decision_ts + (first_full - 1) * 3600
+        val = lookup_intensity(intensity_lookup, grid, ts)
+        if val is not None:
+            carbon += weight * val * partial
+
+    # Full interior hours: [first_full, last_full) each contribute 1.0 x hour h
+    for h in range(first_full, last_full):
+        ts = decision_ts + h * 3600
+        val = lookup_intensity(intensity_lookup, grid, ts)
+        if val is not None:
+            carbon += weight * val
+
+    # Partial last hour: [last_full, end_h) reads hour last_full
+    if last_full < end_h and last_full >= first_full:
+        partial = end_h - last_full
+        ts = decision_ts + last_full * 3600
+        val = lookup_intensity(intensity_lookup, grid, ts)
+        if val is not None:
+            carbon += weight * val * partial
+
+    return carbon
 
 
 class HeuristicPolicy(BasePolicy):
@@ -178,24 +241,26 @@ class HeuristicPolicy(BasePolicy):
             time_left_h = estimate_remaining_hours(
                 self.expected_total_minutes, elapsed_hours, src_hw, src_hw
             )
-        time_left_int = max(1, round(time_left_h))
 
         # Step 5: deadline remaining
         total_hours = self.expected_total_minutes / 60.0
         deadline_hours = total_hours * self.deadline_multiplier
         deadline_remaining_h = max(0.0, deadline_hours - elapsed_hours)
 
-        # Step 6: stay_carbon -- weighted by hardware power_per_core (HEUR-05)
-        # capped to self.lookahead_hours to prevent O(n) blowup on long jobs.
-        # hw_weighting toggle (HEUR-10, D-09): when False, drop the
-        # power_per_core multiplier and sum raw forecast intensity.
-        stay_carbon = 0.0
-        for h in range(min(time_left_int, self.lookahead_hours)):
-            ts = sim_timestamp + h * 3600
-            val = lookup_intensity(intensity_lookup, current_grid, ts)
-            if val is not None:
-                weight = hw[current_grid].power_per_core if self.hw_weighting else 1.0
-                stay_carbon += weight * val
+        # Step 6: stay_carbon via fractional-window accumulator (260526-lgv).
+        # Piecewise-constant interpretation: hour x's published intensity
+        # applies to the entire [x, x+1) interval. Fractional weights at
+        # window boundaries; integer-hour timestamps preserve the
+        # lookup_intensity fast path (260505-fvu). hw_weighting toggle
+        # (HEUR-10, D-09): when False, weight is 1.0 (raw intensity).
+        stay_weight = hw[current_grid].power_per_core if self.hw_weighting else 1.0
+        stay_carbon = _accumulate_carbon_window(
+            intensity_lookup, current_grid, sim_timestamp,
+            window_start_h=0.0,
+            window_length_h=time_left_h,
+            weight=stay_weight,
+            lookahead_cap_h=self.lookahead_hours,
+        )
 
         # Step 7: initialize best as stay
         decision_grid = current_grid
@@ -240,39 +305,38 @@ class HeuristicPolicy(BasePolicy):
                 migration_carbon = 0.0
                 # network_power becomes irrelevant when overhead_cost is off (D-09)
 
-            # Destination running carbon over remaining time (offset by migration duration)
-            # capped to self.lookahead_hours (same cap as stay_carbon for consistency).
-            # hw_weighting toggle (HEUR-10, D-09): mirror the stay-loop semantics.
-            # offset_s is rounded to the nearest whole hour so every (grid, ts) passed
-            # to lookup_intensity hits the dict's exact-key fast path. The carbon
-            # forecast is hourly anyway, so a sub-hour offset has no effect on which
-            # sample we'd want -- and keeping the offset hour-aligned avoids the
-            # O(N) fuzzy-fallback scan in policies.lookup_intensity (quick task
-            # 260505-fvu, ~107000x speedup on the Policy 6 hot path).
+            # Destination running carbon via fractional-window accumulator
+            # (260526-lgv). Window starts at fractional offset mig_time_h
+            # (no rounding) and has fractional length dest_window_h.
+            # Piecewise-constant: hour x's intensity applies to [x, x+1),
+            # so a 30-min migration consumes 0.5h of hour 0 + 0.5h of hour 1
+            # (instead of the prior bug which collapsed to hours 0..N-1).
+            # Integer-hour timestamps inside the helper preserve the
+            # lookup_intensity fast path (260505-fvu). hw_weighting toggle
+            # (HEUR-10, D-09) mirrors stay-loop semantics.
             #
-            # 260515-jav: when use_empirical_runtime=True, scale the destination
-            # forecast horizon by perf_ratio(src, dest) so a faster destination
-            # uses a SHORTER horizon (fewer remaining hours on faster hardware)
-            # and a slower one uses a LONGER horizon. This is the per-destination
-            # hook the plan's must_haves require: the stay-case time_left_h
-            # (src->src) is by definition ratio=1.0 = no-op, so the empirical
-            # path must surface as a per-dest horizon adjustment. When
-            # use_empirical_runtime is False, dest_time_left_int == time_left_int
+            # 260515-jav: when use_empirical_runtime=True, scale the
+            # destination horizon by perf_ratio(src, dest) so a faster
+            # destination uses a SHORTER horizon and a slower one uses a
+            # LONGER horizon. The stay-case (src->src) is ratio=1.0 by
+            # definition, so the empirical path surfaces only here. When
+            # use_empirical_runtime is False, dest_window_h == time_left_h
             # and behavior is byte-identical to pre-260515-jav.
             if self.use_empirical_runtime:
                 from heuristics.sysbench import perf_ratio as _perf_ratio
                 dest_ratio = _perf_ratio(current_grid, dest, by_grid=True)
-                dest_time_left_int = max(1, round(time_left_h * dest_ratio))
+                dest_window_h = max(0.0, time_left_h * dest_ratio)
             else:
-                dest_time_left_int = time_left_int
-            dest_run_carbon = 0.0
-            offset_s = int(round(mig_time_h)) * 3600
-            for h in range(min(dest_time_left_int, self.lookahead_hours)):
-                ts = sim_timestamp + offset_s + h * 3600
-                val = lookup_intensity(intensity_lookup, dest, ts)
-                if val is not None:
-                    dest_weight = hw[dest].power_per_core if self.hw_weighting else 1.0
-                    dest_run_carbon += dest_weight * val
+                dest_window_h = time_left_h
+
+            dest_weight = hw[dest].power_per_core if self.hw_weighting else 1.0
+            dest_run_carbon = _accumulate_carbon_window(
+                intensity_lookup, dest, sim_timestamp,
+                window_start_h=mig_time_h,
+                window_length_h=dest_window_h,
+                weight=dest_weight,
+                lookahead_cap_h=self.lookahead_hours,
+            )
 
             total_carbon = migration_carbon + dest_run_carbon
 
