@@ -1018,6 +1018,48 @@ def test_policy6_uses_fractional_weights_at_window_boundaries():
     assert abs(result3 - 450.0) < 1e-6, f"expected 450.0, got {result3}"
 
 
+# ── 260527-fbb: lookahead derives from deadline when unset ────────────
+
+
+def test_policy6_lookahead_derives_from_deadline_when_unset():
+    """260527-fbb: When lookahead_hours is None (default), Policy 6 derives it
+    from expected_total_minutes / 60 * deadline_multiplier. Explicit integer
+    values are honored verbatim, so the horizon sweep and any caller passing
+    an explicit N remain byte-identical to pre-260527-fbb behavior.
+    """
+    from heuristics.policy_heuristic import HeuristicPolicy
+
+    # Default (canonical 48h × 1.5 = 72h)
+    p = HeuristicPolicy(app_size_mb=64.0, expected_total_minutes=2880)
+    assert p.lookahead_hours == 72, (
+        f"canonical default should derive 72 h from 2880 min × 1.5; got {p.lookahead_hours}"
+    )
+
+    # Explicit override still works
+    p2 = HeuristicPolicy(
+        app_size_mb=64.0, expected_total_minutes=2880, lookahead_hours=24
+    )
+    assert p2.lookahead_hours == 24, (
+        f"explicit lookahead_hours=24 must be honored verbatim; got {p2.lookahead_hours}"
+    )
+
+    # Non-canonical job: 120 min × 2.0 = 4 h
+    p3 = HeuristicPolicy(
+        app_size_mb=64.0, expected_total_minutes=120, deadline_multiplier=2.0
+    )
+    assert p3.lookahead_hours == 4, (
+        f"120 min × 2.0 should derive 4 h; got {p3.lookahead_hours}"
+    )
+
+    # Floor at 1 hour for very short jobs (30 min × 1.0 = 0.5 h → 0 → floored to 1)
+    p4 = HeuristicPolicy(
+        app_size_mb=64.0, expected_total_minutes=30, deadline_multiplier=1.0
+    )
+    assert p4.lookahead_hours == 1, (
+        f"short-job floor should clamp to 1 h; got {p4.lookahead_hours}"
+    )
+
+
 # ── Runner ────────────────────────────────────────────────────────
 
 def main():
@@ -1052,6 +1094,8 @@ def main():
         test_policy_use_hw_override_decouples_decisions_from_accounting,
         # 260526-lgv: piecewise-constant fractional-window accumulator regression.
         test_policy6_uses_fractional_weights_at_window_boundaries,
+        # 260527-fbb: lookahead derives from deadline when unset.
+        test_policy6_lookahead_derives_from_deadline_when_unset,
     ]
     passed = 0
     failed = 0
