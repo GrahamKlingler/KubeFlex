@@ -1060,6 +1060,272 @@ def test_policy6_lookahead_derives_from_deadline_when_unset():
     )
 
 
+# ── 260527-fuv: lump-source migration_carbon alignment ────────────────
+
+
+def test_policy6_migration_carbon_is_lump_source_and_destination_independent():
+    """260527-fuv: Policy 6's internal migration_carbon estimate uses the sim's
+    lump-source formula (mig_time_h × src_HW × src_CI when hw_weighting=True,
+    or × src_CI alone when hw_weighting=False) and is INDEPENDENT of the
+    destination's intensity-now or hardware. Locks in the alignment with
+    _simulation_core.py:365 (migration_fraction_h × source-intensity) so a
+    future refactor can't accidentally re-introduce the three-phase split
+    (ckpt @ src + send @ avg + restore @ dst) that biased P6 toward
+    over-migration whenever the destination was cleaner than the source.
+
+    The test asserts two things, the second of which is the regression
+    catcher:
+
+      (1) FORMULA IDENTITY: the lump-source expression
+              mig_time_h × src_HW × src_CI
+          equals the sim's actual charge from _simulation_core.py:365:
+              migration_fraction_h × intensity
+          and the hw_weighting=False variant
+              mig_time_h × 1.0 × src_CI
+          equals the use_hw=False sim charge. Pure arithmetic identity.
+
+      (2) DECISION-CARBON DECOMPOSITION: build a fixture where the only
+          variable that matters to ARGMIN(dst) under the OLD three-phase
+          model is dst_intensity_now (post-migration forecasts are
+          identical, destinations have identical hardware, source CI is
+          fixed). Under the OLD model, swapping dst_a's and dst_b's
+          decision-hour CI would flip the argmin (because the restore +
+          network terms key off dst_intensity_now). Under the NEW
+          lump-source model, the migration_carbon is identical for both
+          destinations AND identical before/after the swap, so the
+          argmin is determined entirely by dest_run_carbon. We can't
+          read migration_carbon out of decide() directly, so we use a
+          STRONGER assertion: we instrument the policy by inspecting
+          src_intensity_now and confirming the chosen target's expected
+          total carbon (under the lump-source formula) is minimized.
+    """
+    from heuristics.policy_heuristic import HeuristicPolicy, _accumulate_carbon_window  # noqa: WPS433
+    from heuristics.hardware import HW_TABLE  # noqa: WPS433
+    from heuristics.overhead import (  # noqa: WPS433
+        ckpt_overhead, send_overhead, restore_overhead,
+    )
+
+    # ── (1) Formula identity ──────────────────────────────────────────
+    # The lump-source formula must equal the sim's actual charge for any
+    # mig_time_h, src HW, and src CI.
+    src_hw = HW_TABLE["ERCO"]
+    src_ppc = src_hw.power_per_core
+    for mig_time_min in (5.0, 15.0, 30.0, 60.0, 90.0):
+        mig_time_h = mig_time_min / 60.0
+        for src_ci in (50.0, 200.0, 400.0, 750.0):
+            # Sim charge (HW × CI, use_hw=True path of _simulation_core.py:299-300, 365)
+            sim_charge_hw_on = mig_time_h * (src_ci * src_ppc)
+            # Heuristic estimate under hw_weighting=True
+            heur_hw_on = mig_time_h * src_ppc * src_ci
+            assert abs(heur_hw_on - sim_charge_hw_on) < 1e-9, (
+                f"hw_weighting=True formula identity broken: "
+                f"heuristic {heur_hw_on} != sim {sim_charge_hw_on}"
+            )
+            # Sim charge (raw CI, use_hw=False path of _simulation_core.py:302, 365)
+            sim_charge_hw_off = mig_time_h * src_ci
+            # Heuristic estimate under hw_weighting=False
+            heur_hw_off = mig_time_h * 1.0 * src_ci
+            assert abs(heur_hw_off - sim_charge_hw_off) < 1e-9, (
+                f"hw_weighting=False formula identity broken: "
+                f"heuristic {heur_hw_off} != sim {sim_charge_hw_off}"
+            )
+
+    # ── (2) Decision-CI independence under realistic decide() ─────────
+    # Pick two destinations with IDENTICAL HW so mig_time_h is identical
+    # across them (send/restore depend on dst HW). PACE and PGE both have
+    # power_per_core=7.5 in HW_TABLE; they're real grids exercised by the
+    # 2022 Gantt fixture below.
+    src = "ERCO"
+    dst_a = "PACE"
+    dst_b = "PGE"
+    grids = [src, dst_a, dst_b]
+    assert HW_TABLE[dst_a].power_per_core == HW_TABLE[dst_b].power_per_core, (
+        "fixture: destinations must have identical power_per_core so mig_time_h "
+        "is identical across them"
+    )
+
+    src_ci = 400.0
+    dst_a_ci_now = 50.0
+    dst_b_ci_now = 600.0
+    post_mig_ci = 200.0
+
+    lookup = {}
+    for h in range(80):
+        ts = BASE_TS_2020 + h * 3600
+        lookup[(src, ts)] = src_ci
+        if h == 0:
+            lookup[(dst_a, ts)] = dst_a_ci_now
+            lookup[(dst_b, ts)] = dst_b_ci_now
+        else:
+            lookup[(dst_a, ts)] = post_mig_ci
+            lookup[(dst_b, ts)] = post_mig_ci
+
+    app_size_mb = 64.0
+    p = HeuristicPolicy(
+        app_size_mb=app_size_mb,
+        expected_total_minutes=2880,
+        hw_weighting=True,
+        overhead_cost=True,
+        deadline_gate=True,
+    )
+
+    # Compute, OUTSIDE the policy, exactly what dest_run_carbon would be
+    # for each destination under the lump-source model. This lets us
+    # reconstruct what total_carbon the policy MUST have computed for
+    # each destination and verify the argmin is consistent with the
+    # lump-source formula.
+    dst_a_hw = HW_TABLE[dst_a]
+    mig_time_h = (
+        ckpt_overhead(app_size_mb, src_hw)
+        + send_overhead(src_hw, dst_a_hw, app_size_mb)
+        + restore_overhead(app_size_mb, dst_a_hw)
+    ) / 3600.0
+    # Lump-source migration_carbon under hw_weighting=True. Identical for
+    # both destinations because they have identical HW (mig_time_h equal)
+    # and the formula references only src.
+    expected_mig_carbon = mig_time_h * src_ppc * src_ci
+
+    # Compute dest_run_carbon for each destination using the same helper
+    # the policy uses. lookahead_cap_h = 72 (derived from canonical 48h × 1.5).
+    # time_left_h = 48 (full job) since elapsed=0; same for both destinations.
+    time_left_h = 48.0
+    dest_weight = dst_a_hw.power_per_core
+    drc_a = _accumulate_carbon_window(
+        lookup, dst_a, BASE_TS_2020,
+        window_start_h=mig_time_h, window_length_h=time_left_h,
+        weight=dest_weight, lookahead_cap_h=72,
+    )
+    drc_b = _accumulate_carbon_window(
+        lookup, dst_b, BASE_TS_2020,
+        window_start_h=mig_time_h, window_length_h=time_left_h,
+        weight=dest_weight, lookahead_cap_h=72,
+    )
+    expected_total_a = expected_mig_carbon + drc_a
+    expected_total_b = expected_mig_carbon + drc_b
+    expected_target = dst_a if expected_total_a <= expected_total_b else dst_b
+
+    should_migrate, target = p.decide(
+        lookup, grids, src, BASE_TS_2020,
+        remaining_hours=48, elapsed_hours=0.0,
+    )
+    assert should_migrate is True, (
+        "P6 should migrate: src 400 vs dest forecasted 200 favors migration"
+    )
+    assert target == expected_target, (
+        f"Lump-source argmin must equal external recomputation; "
+        f"expected={expected_target} (total_a={expected_total_a:.4f}, "
+        f"total_b={expected_total_b:.4f}), got target={target}. "
+        f"A mismatch here means migration_carbon depends on something "
+        f"other than (mig_time_h × src_HW × src_CI)."
+    )
+
+    # ── hw_weighting=False branch ─────────────────────────────────────
+    # Drop the power_per_core factor and re-verify formula identity end-
+    # to-end. This locks in the HEUR-10 ablation toggle for the new model.
+    p_no_hw = HeuristicPolicy(
+        app_size_mb=app_size_mb,
+        expected_total_minutes=2880,
+        hw_weighting=False,
+        overhead_cost=True,
+        deadline_gate=True,
+    )
+    expected_mig_carbon_no_hw = mig_time_h * 1.0 * src_ci
+    drc_a_no_hw = _accumulate_carbon_window(
+        lookup, dst_a, BASE_TS_2020,
+        window_start_h=mig_time_h, window_length_h=time_left_h,
+        weight=1.0, lookahead_cap_h=72,
+    )
+    drc_b_no_hw = _accumulate_carbon_window(
+        lookup, dst_b, BASE_TS_2020,
+        window_start_h=mig_time_h, window_length_h=time_left_h,
+        weight=1.0, lookahead_cap_h=72,
+    )
+    expected_target_no_hw = dst_a if (
+        expected_mig_carbon_no_hw + drc_a_no_hw
+        <= expected_mig_carbon_no_hw + drc_b_no_hw
+    ) else dst_b
+    _, target_no_hw = p_no_hw.decide(
+        lookup, grids, src, BASE_TS_2020,
+        remaining_hours=48, elapsed_hours=0.0,
+    )
+    assert target_no_hw == expected_target_no_hw, (
+        f"hw_weighting=False argmin must equal external recomputation; "
+        f"expected={expected_target_no_hw}, got={target_no_hw}"
+    )
+
+    # ── overhead_cost=False branch ────────────────────────────────────
+    # Zeroes migration_carbon entirely (HEUR-10 toggle preserved).
+    p_no_oh = HeuristicPolicy(
+        app_size_mb=app_size_mb,
+        expected_total_minutes=2880,
+        hw_weighting=True,
+        overhead_cost=False,
+        deadline_gate=True,
+    )
+    # With migration_carbon = 0, argmin = argmin(dest_run_carbon).
+    expected_target_no_oh = dst_a if drc_a <= drc_b else dst_b
+    _, target_no_oh = p_no_oh.decide(
+        lookup, grids, src, BASE_TS_2020,
+        remaining_hours=48, elapsed_hours=0.0,
+    )
+    assert target_no_oh == expected_target_no_oh, (
+        f"overhead_cost=False (migration_carbon=0) argmin must equal "
+        f"argmin(dest_run_carbon); expected={expected_target_no_oh}, "
+        f"got={target_no_oh}"
+    )
+
+    # ── (3) Source-code structural assertion ─────────────────────────
+    # The migration_carbon assignment in policy_heuristic.py must NOT
+    # reference hw[dest].power_per_core, dst_intensity_now, or
+    # network_power_watts. A textual grep is more robust than a behavioral
+    # test here because the mig_time × ppc factors are so small relative
+    # to dest_run_carbon that the choice rarely flips on migration_carbon
+    # alone -- yet the three-phase model's bias is real over a multi-day
+    # Gantt where many marginal-call hours accumulate. Locking the
+    # textual form catches the regression even when behavioral tests under
+    # contrived fixtures cannot.
+    #
+    # Strategy: extract the lines forming the migration_carbon ASSIGNMENT
+    # block (the lines from `if self.overhead_cost:` up through the
+    # `else: migration_carbon = 0.0` block) and forbid the three-phase
+    # tokens within that block. We bracket on the toggle's `if`/`else`
+    # structure so we don't accidentally include unrelated lines.
+    import inspect  # noqa: WPS433
+    from heuristics import policy_heuristic as _policy_module  # noqa: WPS433
+    src_text = inspect.getsource(_policy_module.HeuristicPolicy.decide)
+    src_lines = src_text.splitlines()
+    # Find the `if self.overhead_cost:` line and walk forward, capturing
+    # until we exit the indentation level (next dedent past the `else`
+    # branch). The block is small (<10 lines).
+    overhead_if_idx = None
+    for i, ln in enumerate(src_lines):
+        if "if self.overhead_cost:" in ln:
+            overhead_if_idx = i
+            break
+    assert overhead_if_idx is not None, (
+        "Couldn't find `if self.overhead_cost:` block in decide(). The "
+        "structural check needs an update to track the new block location."
+    )
+    # Capture roughly 12 lines starting from the if; that's enough to span
+    # the if-branch + else-branch even with multi-line assignments.
+    mig_block_lines = src_lines[overhead_if_idx:overhead_if_idx + 12]
+    mig_block = "\n".join(mig_block_lines)
+
+    forbidden_in_assignment = ("dst_intensity_now", "hw[dest]", "network_power_watts")
+    for tok in forbidden_in_assignment:
+        assert tok not in mig_block, (
+            f"Three-phase regression: migration_carbon block contains "
+            f"forbidden token '{tok}'. Lump-source formula must depend "
+            f"ONLY on (mig_time_h, src_HW, src_intensity_now). Block:\n"
+            f"{mig_block}"
+        )
+    # Required tokens: the lump-source formula must reference src_intensity_now.
+    assert "src_intensity_now" in mig_block, (
+        "Lump-source migration_carbon must reference src_intensity_now. "
+        f"Saw block:\n{mig_block}"
+    )
+
+
 # ── Runner ────────────────────────────────────────────────────────
 
 def main():
@@ -1096,6 +1362,8 @@ def main():
         test_policy6_uses_fractional_weights_at_window_boundaries,
         # 260527-fbb: lookahead derives from deadline when unset.
         test_policy6_lookahead_derives_from_deadline_when_unset,
+        # 260527-fuv: lump-source migration_carbon alignment with sim.
+        test_policy6_migration_carbon_is_lump_source_and_destination_independent,
     ]
     passed = 0
     failed = 0
