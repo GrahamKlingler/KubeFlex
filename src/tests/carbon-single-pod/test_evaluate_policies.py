@@ -958,6 +958,66 @@ def test_policy_use_hw_override_decouples_decisions_from_accounting():
     assert result_hw["migration_count"] == 0
 
 
+# ── 260526-lgv: piecewise-constant fractional-window accumulator regression ───
+
+
+def test_policy6_uses_fractional_weights_at_window_boundaries():
+    """260526-lgv: Policy 6's stay/migrate carbon projection uses fractional
+    weights at window boundaries, not int-rounded integer-hour summation.
+
+    The piecewise-constant interpretation: hour x's published intensity
+    applies to the entire interval [x, x+1). A window [a, b) splits into
+    three parts:
+      - Partial first hour: weight = (ceil(a) - a) * intensity(floor(a))
+      - Full interior hours: weight = 1.0 * intensity(h) for each h
+      - Partial last hour: weight = (b - floor(b)) * intensity(floor(b))
+
+    All lookups land on integer-hour boundaries to preserve the
+    lookup_intensity fast-path (260505-fvu).
+
+    This test calls _accumulate_carbon_window directly with three carefully
+    chosen windows that exercise: (1) both partial-first and partial-last
+    (sub-hour migration), (2) integer-aligned window (whole-hour migration,
+    byte-identical to pre-fix behavior), (3) zero-offset fractional-length
+    window (stay loop semantics).
+    """
+    from heuristics.policy_heuristic import _accumulate_carbon_window  # noqa: WPS433
+
+    # 2-hour lookup: hour 0 = intensity 100, hour 1 = 200, hour 2 = 300.
+    lookup = {("A", 0): 100.0, ("A", 3600): 200.0, ("A", 7200): 300.0}
+
+    # Case 1 (sub-hour migration): window [0.5, 1.5).
+    # Partial first hour [0.5, 1.0) -> 0.5 * 100 = 50.
+    # Partial last hour [1.0, 1.5) -> 0.5 * 200 = 100.
+    # No interior full hours.
+    result = _accumulate_carbon_window(
+        lookup, "A", decision_ts=0,
+        window_start_h=0.5, window_length_h=1.0,
+        weight=1.0, lookahead_cap_h=48,
+    )
+    assert abs(result - 150.0) < 1e-6, f"expected 150.0, got {result}"
+
+    # Case 2 (whole-hour migration): window [1.0, 2.0).
+    # No partial first hour. One full interior hour at h=1 -> 1.0 * 200 = 200.
+    # No partial last hour (last_full = 2, end_h = 2.0, so 2 < 2.0 is False).
+    result2 = _accumulate_carbon_window(
+        lookup, "A", decision_ts=0,
+        window_start_h=1.0, window_length_h=1.0,
+        weight=1.0, lookahead_cap_h=48,
+    )
+    assert abs(result2 - 200.0) < 1e-6, f"expected 200.0, got {result2}"
+
+    # Case 3 (stay loop, fractional length): window [0.0, 2.5).
+    # No partial first hour. Full interior hours h=0,1 -> 100 + 200 = 300.
+    # Partial last hour [2.0, 2.5) -> 0.5 * 300 = 150.
+    result3 = _accumulate_carbon_window(
+        lookup, "A", decision_ts=0,
+        window_start_h=0.0, window_length_h=2.5,
+        weight=1.0, lookahead_cap_h=48,
+    )
+    assert abs(result3 - 450.0) < 1e-6, f"expected 450.0, got {result3}"
+
+
 # ── Runner ────────────────────────────────────────────────────────
 
 def main():
@@ -990,6 +1050,8 @@ def main():
         test_total_carbon_uses_hw_even_when_policy_ignores_hw,
         # 260526-gj6: policy_use_hw_override decouples decisions from accounting.
         test_policy_use_hw_override_decouples_decisions_from_accounting,
+        # 260526-lgv: piecewise-constant fractional-window accumulator regression.
+        test_policy6_uses_fractional_weights_at_window_boundaries,
     ]
     passed = 0
     failed = 0
