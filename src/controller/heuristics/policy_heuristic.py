@@ -11,13 +11,19 @@ of the migrate_decision() pseudocode from heuristic.txt. Key features:
   - Forecast stay-vs-migrate comparison: sums forecasted carbon intensity (weighted
     by hardware power_per_core) over remaining simulated hours for the current
     region (stay cost) and each candidate destination (migrate cost).
-  - Migration carbon accounting: checkpoint carbon (source HW, source intensity),
-    transfer carbon (network power, avg intensity), restore carbon (dest HW, dest
-    intensity) are included in the migrate cost.
+  - Migration carbon accounting (260527-fuv, lump-source): the heuristic
+    estimates migration carbon with the same formula the sim uses to ACTUALLY
+    charge it — mig_time_h × src_HW × src_CI (or × src_CI alone when
+    hw_weighting=False). This replaces the prior three-phase model
+    (ckpt @ src + send @ avg + restore @ dst) which decoupled the heuristic's
+    cost model from the sim's accounting and biased P6 toward over-migration
+    whenever the destination was much cleaner than the source.
   - Deadline gate: migration is blocked if time_left + mig_time > deadline_remaining,
     preventing migrations that could not complete before the job deadline.
-  - Togglable network power: include_network_power flag enables clean ablation
-    studies (Phase 4, HEUR-10) by excluding the network transfer carbon component.
+  - Togglable network power: include_network_power / network_power_watts are
+    DEPRECATED no-ops as of 260527-fuv (the lump-source formula has no network
+    term). They are retained for API compat with existing CSV emitters and
+    ablation harnesses; see __init__ docstring.
 
 Reference: heuristic.txt -- migrate_decision() pseudocode.
 """
@@ -133,12 +139,21 @@ class HeuristicPolicy(BasePolicy):
             deadline_multiplier: Multiplier applied to expected_total_minutes
                 to derive the job deadline in hours (D-16). Default 1.5x.
                 E.g., 48h expected * 1.5 = 72h deadline.
-            include_network_power: If True, include the network transfer carbon
-                component in migration_carbon (D-08). Set False for ablation
-                studies. Default True.
-            network_power_watts: Network switch/NIC power in watts for the
-                transfer carbon calculation (D-09). Defaults to NETWORK_POWER_WATTS
-                (15.0 W).
+            include_network_power: DEPRECATED (260527-fuv). Originally toggled
+                the network transfer carbon term in the three-phase migration
+                cost model (D-08). The lump-source formula introduced in
+                260527-fuv folds the entire migration cost into a single
+                source-side charge (mig_time_h × src_HW × src_CI) to match
+                the sim's actual accounting (_simulation_core.py:365). This
+                flag is now a no-op for migration_carbon but is retained for
+                API compat and so existing CSV emitters / ablation harnesses
+                that reference it (e.g. _simulation_core.py:438) keep working.
+                Default True.
+            network_power_watts: DEPRECATED (260527-fuv). Network switch/NIC
+                power in watts originally used by the three-phase transfer-
+                carbon term. Now a no-op after the lump-source alignment; see
+                the include_network_power docstring above. Default
+                NETWORK_POWER_WATTS (15.0 W).
             lookahead_hours: Maximum hours to sum in stay/migrate carbon loops.
                 Caps O(n) inner loop length to prevent quadratic blowup on long
                 jobs. When None (DEFAULT, 260527-fbb), the cap is derived from
@@ -300,28 +315,40 @@ class HeuristicPolicy(BasePolicy):
                 self.last_skip_reason = "deadline_gate"
                 continue
 
-            # Migration carbon components (D-06, D-07)
+            # Migration carbon components (D-06, D-07).
+            # 260527-fuv: dst_intensity_now / send_oh_h / rest_oh_h were the
+            # destination-side and network-side terms of the OLD three-phase
+            # migration carbon model (ckpt @ src + send @ avg + restore @ dst).
+            # They are unused by the lump-source formula below but kept here
+            # so the three-phase model can be reconstructed quickly for follow-
+            # up ablation studies without re-deriving the linear-fit calls.
             dst_intensity_now = lookup_intensity(intensity_lookup, dest, sim_timestamp) or 0.0
             send_oh_h = send_overhead(src_hw, hw[dest], self.app_size_mb) / 3600.0
             rest_oh_h = restore_overhead(self.app_size_mb, hw[dest]) / 3600.0
 
-            # overhead_cost toggle (HEUR-10, D-09): when False, zero out the
-            # migration carbon entirely; network_power becomes irrelevant.
+            # 260527-fuv: lump-source migration_carbon, matching the sim's
+            # actual charge (_simulation_core.py line ~365):
+            #     migration_carbon = migration_fraction_h * intensity
+            # where intensity = raw_CI × power_per_core when use_hw=True or
+            # raw_CI when use_hw=False. Aligning P6's ESTIMATE with the sim's
+            # ACCOUNTING eliminates the over-migration bias that occurred
+            # when the destination was significantly cleaner than the source
+            # (the three-phase model under-charged migrations into cleaner
+            # destinations, producing marginal-call flips like the Oct 2022
+            # P6 h=29 → PNM over-migration). The three-phase split was
+            # physically more realistic but decoupled the heuristic's cost
+            # model from the sim's, so the heuristic was optimizing against
+            # a counterfactual cost. include_network_power /
+            # network_power_watts are deprecated under this model (see
+            # __init__ docstring). overhead_cost toggle (HEUR-10, D-09): when
+            # False, zero out migration_carbon entirely. hw_weighting toggle
+            # (HEUR-10, D-09) mirrors the sim's use_hw flag — drop the
+            # power_per_core factor when False.
             if self.overhead_cost:
-                migration_carbon = (
-                    ckpt_oh_h * src_hw.power_per_core * src_intensity_now
-                    + rest_oh_h * hw[dest].power_per_core * dst_intensity_now
-                )
-                if self.include_network_power:
-                    migration_carbon += (
-                        send_oh_h
-                        * self.network_power_watts
-                        * (src_intensity_now + dst_intensity_now)
-                        / 2.0
-                    )
+                src_weight = src_hw.power_per_core if self.hw_weighting else 1.0
+                migration_carbon = mig_time_h * src_weight * src_intensity_now
             else:
                 migration_carbon = 0.0
-                # network_power becomes irrelevant when overhead_cost is off (D-09)
 
             # Destination running carbon via fractional-window accumulator
             # (260526-lgv). Window starts at fractional offset mig_time_h
