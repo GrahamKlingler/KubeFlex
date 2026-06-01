@@ -351,14 +351,35 @@ class HeuristicPolicy(BasePolicy):
                 migration_carbon = 0.0
 
             # Destination running carbon via fractional-window accumulator
-            # (260526-lgv). Window starts at fractional offset mig_time_h
-            # (no rounding) and has fractional length dest_window_h.
-            # Piecewise-constant: hour x's intensity applies to [x, x+1),
-            # so a 30-min migration consumes 0.5h of hour 0 + 0.5h of hour 1
-            # (instead of the prior bug which collapsed to hours 0..N-1).
-            # Integer-hour timestamps inside the helper preserve the
-            # lookup_intensity fast path (260505-fvu). hw_weighting toggle
-            # (HEUR-10, D-09) mirrors stay-loop semantics.
+            # (260526-lgv). Window starts at the *discrete-hour* offset
+            # ceil(mig_time_h) (260601-gyw) and has fractional length
+            # dest_window_h. The helper itself is unchanged and still
+            # applies fractional weights at first/last hours when needed
+            # (e.g., empirical-runtime perf_ratio produces a fractional
+            # dest_window_h).
+            #
+            # 260601-gyw: the offset switched from the fractional
+            # mig_time_h to float(math.ceil(mig_time_h)) to align with the
+            # sim's discrete-hour loop body. The sim charges full source
+            # intensity at the decision hour, then charges migration
+            # carbon as an additive overhead (lump-source, 260527-fuv),
+            # then switches current_grid only at the end of that hour —
+            # so the destination first accumulates at hour
+            # ceil(mig_time_h), not at the fractional fraction-of-hour
+            # boundary. Aligning the projection with the sim eliminates
+            # the ~1×src miss that drove the Oct 2022 P6 marginal
+            # over-migration (ERCO→PNM at h=28, 109.603 kg vs P1 108.079
+            # kg; observed after 260527-fuv).
+            #
+            # Integer-hour migrations (60, 120, 180, 360 min) are
+            # byte-identical to the pre-260526-lgv path: ceil(1.0)=1.0,
+            # ceil(2.0)=2.0, etc., and the partial-first-hour branch in
+            # the helper is skipped when window_start_h is integer.
+            #
+            # Sub-hour migrations (5, 10, 15, 20, 30, 45 min) intentionally
+            # start the dest window at hour 1 (ceil(<1)=1), excluding the
+            # migration hour from dest accumulation — matching the sim,
+            # which still pays full source intensity for that hour.
             #
             # 260515-jav: when use_empirical_runtime=True, scale the
             # destination horizon by perf_ratio(src, dest) so a faster
@@ -377,7 +398,7 @@ class HeuristicPolicy(BasePolicy):
             dest_weight = hw[dest].power_per_core if self.hw_weighting else 1.0
             dest_run_carbon = _accumulate_carbon_window(
                 intensity_lookup, dest, sim_timestamp,
-                window_start_h=mig_time_h,
+                window_start_h=float(math.ceil(mig_time_h)),
                 window_length_h=dest_window_h,
                 weight=dest_weight,
                 lookahead_cap_h=self.lookahead_hours,

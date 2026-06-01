@@ -694,30 +694,40 @@ def _make_sysbench_grid_lookup(hours: int = 60):
 
     Per CONTEXT.md the CISO/MISO pair is well-covered (CISO=26 hostnames,
     MISO=4). The fixture is shaped so Policy 6's MISO forecast-sum changes
-    sign depending on whether the dest horizon weights the spike at hour 12
-    fully or fractionally. With the CISO/MISO empirical ratio ~0.9603 and a
-    13-hour job, the default dest window is [0, 13.0) (full hour 12 = full
-    spike); the empirical dest window is [0, 12.484) (only ~0.484 of the
-    spike at hour 12, the rest of the partial last hour). Sizing the spike
-    at 2000 makes that fractional weight decisive: default (full spike)
-    keeps MISO above CISO's stay cost (no migrate); empirical (partial
-    spike) brings MISO below it (migrate).
+    sign depending on whether the dest horizon weights the spike fully or
+    fractionally. With the CISO/MISO empirical ratio ~0.9603, mig_time_h
+    ~0.0008 h (ceil=1) and a 13-hour job:
+      - default dest window  = [1.0, 14.0)  (full hour 13 = full spike)
+      - empirical dest window = [1.0, 13.484) (only ~0.484 of hour 13,
+        the rest of the partial last hour)
+    Sizing the spike at hour 13 to 2000 makes that fractional weight
+    decisive: default (full spike) gives MISO=1200+2000=3200 > 2600 stay
+    cost (no migrate); empirical (partial spike) gives MISO=1200+968=2168
+    < 2600 (migrate).
 
     260526-lgv: prior fixture used a 10000-spike at hour 12 against the
     integer-rounded `dest_time_left_int=12` boundary. The piecewise-constant
-    fractional-window fix eliminates that integer quantization, so the
-    fixture is now built around a fractional-spike-weight flip instead.
+    fractional-window fix eliminated that integer quantization, so the
+    fixture was rebuilt around a fractional-spike-weight flip at hour 12.
+
+    260601-gyw: discrete-hour dest window offset (ceil(mig_time_h) instead
+    of fractional mig_time_h) shifts the spike-discriminating hour from 12
+    to 13. With ceil(mig_time_h)=1, the default window is [1, 14) (interior
+    h=1..13) and the empirical window is [1, 13.484) (interior h=1..12 with
+    partial-last-hour at h=13 weighted 0.484). The spike was moved from
+    hour 12 to hour 13 to remain at the discriminating boundary.
     """
     lookup = {}
     for h in range(hours):
         ts = BASE_TS_2020 + h * 3600
         # CISO: constant; stay_carbon is 200*13 = 2600 over the stay horizon.
         lookup[("CISO", ts)] = 200.0
-        # MISO: cheap until hour 12, then a moderate spike. Spike size 2000
+        # MISO: cheap until hour 13, then a moderate spike. Spike size 2000
         # chosen so default (full weight 1.0) gives MISO=1200+2000=3200 > 2600
         # (no migrate), but empirical (weight 0.484) gives MISO=1200+968=2168
-        # < 2600 (migrate).
-        lookup[("MISO", ts)] = 100.0 if h < 12 else 2000.0
+        # < 2600 (migrate). The discriminating hour is the partial-last-hour
+        # of the empirical dest window [1.0, 13.484), i.e. hour 13.
+        lookup[("MISO", ts)] = 100.0 if h < 13 else 2000.0
     return lookup
 
 
