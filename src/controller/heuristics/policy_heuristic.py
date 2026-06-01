@@ -344,8 +344,14 @@ class HeuristicPolicy(BasePolicy):
             # False, zero out migration_carbon entirely. hw_weighting toggle
             # (HEUR-10, D-09) mirrors the sim's use_hw flag — drop the
             # power_per_core factor when False.
+            #
+            # 260601-hu5: src_weight is hoisted out of the `if self.overhead_cost:`
+            # branch because it is also needed below for the source-side
+            # presence cost at the decision hour (src_running_at_decision).
+            # Convention matches the lump-source mig_carbon: power_per_core
+            # when hw_weighting=True, 1.0 otherwise.
+            src_weight = src_hw.power_per_core if self.hw_weighting else 1.0
             if self.overhead_cost:
-                src_weight = src_hw.power_per_core if self.hw_weighting else 1.0
                 migration_carbon = mig_time_h * src_weight * src_intensity_now
             else:
                 migration_carbon = 0.0
@@ -404,7 +410,35 @@ class HeuristicPolicy(BasePolicy):
                 lookahead_cap_h=self.lookahead_hours,
             )
 
-            total_carbon = migration_carbon + dest_run_carbon
+            # 260601-hu5: include the source-side running cost at the
+            # decision hour. The sim's loop body (_simulation_core.py)
+            # adds full src_intensity for the decision hour BEFORE the
+            # migration check fires (the migration decision is evaluated
+            # AT the end of the hour, after current_grid has already
+            # contributed a full hour of source intensity), then charges
+            # migration_carbon as an additive overhead. P6's migrate
+            # projection must match this accounting: presence cost
+            # (1.0 × src_HW × src_CI at decision hour) + migration overhead
+            # (mig_time_h × src_HW × src_CI) + dest_run_carbon. Without this
+            # term, P6 systematically under-counts migration cost by
+            # 1.0 × src_HW × src_CI and over-migrates in marginal cases
+            # where the destination is only slightly cleaner than the source
+            # (e.g., the Oct 2022 ERCO→PNM h=28 case: PNM was only ~5%
+            # cleaner than ERCO, below the true break-even of ~7.5% but
+            # above P6's apparent break-even of ~2.5%, so P6 flipped to
+            # migrate at 109.603 kg vs the no-mig 108.079 kg).
+            #
+            # Note the stay-case ALREADY pays this 1.0 × src term: its
+            # window starts at window_start_h=0.0 covering hours
+            # [0, time_left_h), so hour 0 (the decision hour) is included
+            # with full weight. After 260601-hu5 the comparison is finally
+            # apples-to-apples:
+            #   stay     : 1.0 × src(h=0) + (time_left_h-1) × src(h>0)
+            #   migrate  : 1.0 × src(h=0)            [src_running_at_decision]
+            #            + mig_time_h × src(h=0)    [migration_carbon overhead]
+            #            + dest_run_carbon          [from ceil(mig_time_h)]
+            src_running_at_decision = src_weight * src_intensity_now
+            total_carbon = src_running_at_decision + migration_carbon + dest_run_carbon
 
             if total_carbon < best_carbon:
                 best_carbon = total_carbon
