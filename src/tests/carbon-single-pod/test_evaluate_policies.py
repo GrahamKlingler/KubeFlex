@@ -1415,6 +1415,98 @@ def test_policy6_dest_window_integer_hour_migration_unchanged():
     assert abs(result - 500.0) < 1e-6, f"expected 500.0, got {result}"
 
 
+def test_policy6_migrate_includes_source_running_at_decision_hour():
+    """Policy 6's migrate-case projection must include the source-side
+    running cost at the decision hour. The sim's loop body (_simulation_core.py)
+    adds full src_intensity for that hour BEFORE charging migration_carbon
+    as an additive overhead, so P6's projection must do the same -- otherwise
+    it under-counts migration cost by 1.0 × src_HW × src_CI and over-migrates
+    in marginal cases (e.g., the Oct 2022 ERCO→PNM h=28 case that drove
+    P6 to 109.603 kg vs P1's no-mig 108.079 kg).
+
+    Constructs a fixture engineered to flip the decision precisely at this
+    fix boundary: a 30-min ERCO→PACE migration on a 48-hour job with a
+    destination CI of 390 (vs source 400). Both grids have identical
+    power_per_core (7.5), so the HW factor cancels out and the arithmetic
+    is clean:
+
+      stay_carbon                  = 48 × 7.5 × 400 = 144000
+      pre-fix migrate total:
+        migration_carbon           ≈ 0.508 × 7.5 × 400 ≈ 1525
+        dest_run_carbon            = 48 × 7.5 × 390 = 140400
+        total                      ≈ 141925   < 144000 → migrate (BUG)
+      post-fix migrate total:
+        src_running_at_decision    = 1.0 × 7.5 × 400 = 3000
+        migration_carbon           ≈ 1525
+        dest_run_carbon            = 140400
+        total                      ≈ 144925   > 144000 → stay (CORRECT)
+
+    Locks in the 260601-hu5 fix; protects against accidental regression.
+    Pre-fix P6 WOULD migrate (incorrectly); post-fix P6 must NOT migrate.
+    """
+    from heuristics.policy_heuristic import HeuristicPolicy  # noqa: WPS433
+    from heuristics.hardware import HW_TABLE  # noqa: WPS433
+
+    # Same power_per_core means the HW factor disappears from the cross-grid
+    # comparison and the test math reduces to pure-CI arithmetic.
+    src = "ERCO"
+    dst = "PACE"
+    assert HW_TABLE[src].power_per_core == HW_TABLE[dst].power_per_core, (
+        "fixture: src and dst must have identical power_per_core so the "
+        "HW factor cancels and the break-even math is pure-CI"
+    )
+
+    # 48 h job; src @ 400 constant, dst @ 390 constant (only 2.5% cleaner --
+    # well inside the band where the missing source-running-at-decision-hour
+    # term flips the decision). 72 h of lookup so the deadline window
+    # (48 × 1.5 = 72 h) is fully covered without fuzzy-match interpolation.
+    src_ci = 400.0
+    dst_ci = 390.0
+    intensity_lookup = {}
+    for h in range(72):
+        ts = BASE_TS_2020 + h * 3600
+        intensity_lookup[(src, ts)] = src_ci
+        intensity_lookup[(dst, ts)] = dst_ci
+
+    # app_size_mb=150000 produces mig_time_h ≈ 0.508 (~30 min) for ERCO→PACE
+    # given the calibrated overhead.py linear fits. This is the bug regime:
+    # ceil(0.508)=1, so dest_window starts at hour 1; without the new term
+    # the migrate-projection misses a full hour of source intensity at h=0.
+    policy = HeuristicPolicy(
+        app_size_mb=150000.0,
+        expected_total_minutes=2880,  # 48 h job
+        deadline_multiplier=1.5,
+        hw_weighting=True,
+        overhead_cost=True,
+        deadline_gate=True,
+    )
+
+    should_migrate, target = policy.decide(
+        intensity_lookup=intensity_lookup,
+        grids=[src, dst],
+        current_grid=src,
+        sim_timestamp=BASE_TS_2020,
+        remaining_hours=48,
+        elapsed_hours=0.0,
+    )
+
+    # With the fix, P6 should NOT migrate: dst is only 2.5% cleaner, below
+    # the true break-even after accounting for source running at the
+    # decision hour. Without the fix, P6 would migrate (the missing
+    # ~1.0 × src_HW × src_CI ≈ 3000 g term tips the decision the wrong way).
+    assert should_migrate is False, (
+        f"P6 incorrectly migrated to {target!r} when the migrate-case total "
+        f"carbon exceeds stay (after accounting for src running at decision "
+        f"hour). Expected: stay. This means the migrate projection is "
+        f"still missing the source-side running cost at the decision hour "
+        f"(260601-hu5 regression)."
+    )
+    assert target is None, (
+        f"P6 returned target={target!r} alongside should_migrate=False; "
+        f"target must be None for stay decisions."
+    )
+
+
 # ── Runner ────────────────────────────────────────────────────────
 
 def main():
@@ -1456,6 +1548,8 @@ def main():
         # 260601-gyw: discrete-hour dest window offset (ceil(mig_time_h)).
         test_policy6_dest_window_uses_discrete_hour_offset,
         test_policy6_dest_window_integer_hour_migration_unchanged,
+        # 260601-hu5: source-running-at-decision-hour term in migrate projection.
+        test_policy6_migrate_includes_source_running_at_decision_hour,
     ]
     passed = 0
     failed = 0
