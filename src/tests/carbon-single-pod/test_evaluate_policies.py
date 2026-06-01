@@ -1336,6 +1336,85 @@ def test_policy6_migration_carbon_is_lump_source_and_destination_independent():
     )
 
 
+# ── 260601-gyw: discrete-hour dest window offset ─────────────────
+
+
+def test_policy6_dest_window_uses_discrete_hour_offset():
+    """Policy 6's dest_run_carbon window must start at ceil(mig_time_h), not
+    at fractional mig_time_h. Matches the sim's discrete-hour loop body
+    (full source intensity at the decision hour, grid switch at end-of-hour).
+
+    Locks in the 260601-gyw fix; protects against accidental regression to
+    260526-lgv's fractional offset.
+    """
+    from heuristics.policy_heuristic import _accumulate_carbon_window  # noqa: WPS433
+    import math
+
+    # 4-hour lookup: hour 0=100, hour 1=200, hour 2=300, hour 3=400.
+    # Use Unix-timestamp keying (decision_ts=0 + h*3600) so the helper's
+    # exact-match path is exercised (no fuzzy-match collisions).
+    lookup = {
+        ("A", 0): 100.0,
+        ("A", 3600): 200.0,
+        ("A", 7200): 300.0,
+        ("A", 10800): 400.0,
+    }
+
+    # For 30-min mig (mig_time_h=0.5), dest window should start at ceil(0.5)=1.
+    # Window: [1, 1+2) = hours 1 and 2 (full). NOT hours 0.5..2.5.
+    offset = float(math.ceil(0.5))
+    result = _accumulate_carbon_window(
+        lookup, "A", decision_ts=0,
+        window_start_h=offset, window_length_h=2.0,
+        weight=1.0, lookahead_cap_h=48,
+    )
+    # Expected (discrete): 1.0*200 + 1.0*300 = 500.0
+    assert abs(result - 500.0) < 1e-6, f"discrete expected 500.0, got {result}"
+
+    # Counter-check: the fractional offset (mig_time_h=0.5) would give a
+    # DIFFERENT result. Window [0.5, 2.5):
+    #   partial first hour [0.5, 1.0) -> 0.5 * 100 = 50
+    #   full interior h=1            -> 1.0 * 200 = 200
+    #   partial last hour [2.0, 2.5) -> 0.5 * 300 = 150
+    #   total = 400.0
+    result_fractional = _accumulate_carbon_window(
+        lookup, "A", decision_ts=0,
+        window_start_h=0.5, window_length_h=2.0,
+        weight=1.0, lookahead_cap_h=48,
+    )
+    assert abs(result_fractional - 400.0) < 1e-6, (
+        f"fractional expected 400.0, got {result_fractional}"
+    )
+    assert result != result_fractional, (
+        "discrete and fractional models must differ for sub-hour mig"
+    )
+
+
+def test_policy6_dest_window_integer_hour_migration_unchanged():
+    """For migrations that are exact integer hours (60, 120, ...), ceil(N)=N,
+    so the discrete-hour fix is a no-op. Behavior matches pre-260526-lgv
+    integer-hour path (and pre-260601-gyw fractional path, since they
+    coincide at integer offsets)."""
+    from heuristics.policy_heuristic import _accumulate_carbon_window  # noqa: WPS433
+    import math
+
+    lookup = {
+        ("A", 0): 100.0,
+        ("A", 3600): 200.0,
+        ("A", 7200): 300.0,
+    }
+
+    # For 60-min mig (mig_time_h=1.0), dest starts at ceil(1.0)=1.0.
+    # Window: [1, 3) -> full interior hours 1 and 2 -> 200 + 300 = 500.
+    offset = float(math.ceil(1.0))
+    result = _accumulate_carbon_window(
+        lookup, "A", decision_ts=0,
+        window_start_h=offset, window_length_h=2.0,
+        weight=1.0, lookahead_cap_h=48,
+    )
+    assert abs(result - 500.0) < 1e-6, f"expected 500.0, got {result}"
+
+
 # ── Runner ────────────────────────────────────────────────────────
 
 def main():
@@ -1374,6 +1453,9 @@ def main():
         test_policy6_lookahead_derives_from_deadline_when_unset,
         # 260527-fuv: lump-source migration_carbon alignment with sim.
         test_policy6_migration_carbon_is_lump_source_and_destination_independent,
+        # 260601-gyw: discrete-hour dest window offset (ceil(mig_time_h)).
+        test_policy6_dest_window_uses_discrete_hour_offset,
+        test_policy6_dest_window_integer_hour_migration_unchanged,
     ]
     passed = 0
     failed = 0
