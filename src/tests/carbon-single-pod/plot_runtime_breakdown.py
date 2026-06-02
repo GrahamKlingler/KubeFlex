@@ -433,6 +433,7 @@ def plot_one_cell_all_grids(
     dpi: int,
     bypass_test_split: bool,
     total_sim_hours: Optional[int] = None,
+    deadline_multiplier: float = 1.5,
 ) -> Tuple[Path, List[Dict[str, Any]], str]:
     """All-grids Gantt cell (260519-g5u): pinned timestamp, dynamic-argmin source.
 
@@ -482,6 +483,9 @@ def plot_one_cell_all_grids(
             max_wall_clock_multiplier=10.0,
             sweep_kind="runtime_breakdown_allgrids",
             bypass_test_split=bypass_test_split,
+            # 260602-hf3: thread the CLI knob into RunConfig (default 1.5
+            # preserves prior Gantts byte-identically).
+            deadline_multiplier=deadline_multiplier,
         )
         # 260525-ksw: same patch as pairwise mode; anchor = first sorted pool grid.
         with scaled_overhead(
@@ -599,6 +603,10 @@ def plot_one_cell_all_grids(
         f"All-grids mode, source={source_grid}, "
         f"pool={len(sorted_pool)} grids: {pool_list_str}"
     )
+    # 260602-hf3: surface non-default deadline_multiplier in subtitle so
+    # tight-deadline validation runs are identifiable from the PNG alone.
+    if abs(deadline_multiplier - 1.5) > 1e-9:
+        subtitle_parts.append(f"(deadline = {deadline_multiplier:g}×)")
     if bypass_test_split:
         subtitle_parts.append("FINAL EVAL — 2022 TEST DATA")
     fig.text(
@@ -655,6 +663,7 @@ def plot_one_cell(
     app_size_mb: float,
     dpi: int,
     total_sim_hours: Optional[int] = None,
+    deadline_multiplier: float = 1.5,
 ) -> Tuple[Path, List[Dict[str, Any]]]:
     """Run the per-policy sims for one (direction, start_ts) cell, render PNG.
 
@@ -702,6 +711,9 @@ def plot_one_cell(
             # 2x cap (96h).
             max_wall_clock_multiplier=10.0,
             sweep_kind="runtime_breakdown",
+            # 260602-hf3: thread the CLI knob into RunConfig (default 1.5
+            # preserves prior Gantts byte-identically).
+            deadline_multiplier=deadline_multiplier,
         )
         # 260525-ksw: wrap with scaled_overhead so Policy 6's INTERNAL cost
         # estimate (from heuristics.policy_heuristic bound overhead helpers)
@@ -795,10 +807,15 @@ def plot_one_cell(
         f"overhead={overhead_min} min, app={app_size_mb} MB"
     )
     ax.set_title(title_main, fontsize=12, pad=12)
+    # 260602-hf3: append "(deadline = N×)" when non-default so tight-deadline
+    # validation runs are identifiable from the PNG alone.
+    subtitle_text = SUBTITLE_LOCKED
+    if abs(deadline_multiplier - 1.5) > 1e-9:
+        subtitle_text = f"{SUBTITLE_LOCKED} | (deadline = {deadline_multiplier:g}×)"
     # Subtitle as a fig.text just below the axes title (anchored to fig).
     fig.text(
         0.5, 0.92,
-        SUBTITLE_LOCKED,
+        subtitle_text,
         ha="center", va="bottom", fontsize=9, style="italic", color="#444",
     )
 
@@ -953,6 +970,17 @@ def _build_argparser() -> argparse.ArgumentParser:
         help=f"Migration overhead in minutes (default: "
              f"{OVERHEAD_MIN_DEFAULT}).",
     )
+    # 260602-hf3: deadline_multiplier CLI knob. Default 1.5 preserves all
+    # prior Gantt outputs byte-identically (matches RunConfig dataclass default
+    # in _simulation_core.RunConfig). Setting 1.0 forces a zero-slack deadline
+    # (e.g. 48h deadline on a 48h job); under this regime the heuristic's
+    # deadline_gate should refuse all migrations and P6 should match P1.
+    p.add_argument(
+        "--deadline-multiplier", type=float, default=1.5,
+        help="Job deadline as multiple of expected_total_minutes. Default 1.5 "
+             "(72h deadline on 48h job). Set 1.0 to force zero-slack deadline "
+             "(deadline_gate should block all migrations).",
+    )
     p.add_argument(
         "--pair", default=None,
         help="Comma-separated SRC:DST directional pairs "
@@ -1062,6 +1090,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     app_size_mb = float(args.app_size_mb)
     dpi = int(args.dpi)
     bypass_test_split = bool(args.bypass_test_split)
+    # 260602-hf3: CLI knob (default 1.5 matches RunConfig dataclass default
+    # → existing Gantts byte-identical when flag is omitted).
+    deadline_multiplier = float(args.deadline_multiplier)
 
     # ── all-grids mode (260519-g5u) ───────────────────────────────────
     if args.mode == "all-grids":
@@ -1091,6 +1122,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             f"[BREAKDOWN] overhead_min={overhead_min}\n"
             f"[BREAKDOWN] app_size_mb={app_size_mb}\n"
             f"[BREAKDOWN] bypass_test_split={bypass_test_split}\n"
+            f"[BREAKDOWN] deadline_multiplier={deadline_multiplier}\n"
             f"[BREAKDOWN] out_dir={out_dir}"
         )
 
@@ -1119,6 +1151,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             app_size_mb=app_size_mb,
             dpi=dpi,
             bypass_test_split=bypass_test_split,
+            deadline_multiplier=deadline_multiplier,
         )
         print(
             f"[BREAKDOWN] {iso_date} all-grids (source={source_grid}) → "
@@ -1153,6 +1186,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         f"[BREAKDOWN] policies={list(policies)}\n"
         f"[BREAKDOWN] overhead_min={overhead_min}\n"
         f"[BREAKDOWN] app_size_mb={app_size_mb}\n"
+        f"[BREAKDOWN] deadline_multiplier={deadline_multiplier}\n"
         f"[BREAKDOWN] out_dir={out_dir}"
     )
 
@@ -1182,6 +1216,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 out_dir=out_dir,
                 app_size_mb=app_size_mb,
                 dpi=dpi,
+                deadline_multiplier=deadline_multiplier,
             )
             all_rows.extend(rows)
             n_pngs += 1
