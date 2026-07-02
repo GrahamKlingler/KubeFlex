@@ -25,4 +25,5 @@ package-lock.json
 report_prompt.txt
 short_notes.txt
 kubeadm-macs
+config
 config/
