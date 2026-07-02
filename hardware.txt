@@ -1,0 +1,17 @@
+CENT:
+AMD EPYC 64 Core
+average overall power: 225W
+average per core: 3.5W
+total cores available: 8192
+
+NE:
+AMD EPYC 24 Core
+average overall power: 200W
+average per core: 8.3W
+total cores available: 1152
+
+TEN:
+Intel(R) Xeon(R) Silver 4215R CPU @ 3.20GHz
+average overall power: 130W
+average per core: 16.25W
+total cores available: 128

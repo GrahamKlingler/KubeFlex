@@ -1,0 +1,61 @@
+prospective_regions(time) -> List[Tuple], (region, carbon intensity)
+forecast_intensity(region, time) -> carbon intensity at a future time
+get_hardware(region) -> hardware (.wattage gives wattage)
+send_overhead(src, dest, app_size) -> est time for sending program
+ckpt_overhead(app_size, src_hw) -> est checkpoint time on current hardware
+restore_overhead(app_size, dst_hw) -> est restoration time
+prog_time_left(program) -> time left in program
+
+migrate_decision(program, curr_region, deadline, migrations_left: opt) -> region:
+    app_size = program.size()
+    time_left = prog_time_left(program)
+    regions = prospective_regions(time.now)
+    hw = {region[0]: get_hardware(region[0]) for region in regions}
+
+    # migration overhead per candidate destination
+    ckpt_oh = ckpt_overhead(app_size, hw[curr_region])
+    overhead = {region[0]: ckpt_oh + send_overhead(curr_region, region[0], app_size) + restore_overhead(app_size, hw[region[0]]) for region in regions}
+    overhead[curr_region] = 0
+
+    # forecast-aware carbon: sum intensity over remaining program time for each region
+    forecast_carbon = {}
+    for region in regions:
+        total = 0
+        for h in range(time_left):
+            total += hw[region[0]].wattage * forecast_intensity(region[0], time.now + h)
+        forecast_carbon[region[0]] = total
+
+    # carbon cost of staying in the current region (no migration)
+    stay_carbon = forecast_carbon[curr_region]
+    decision = curr_region
+    best_carbon = stay_carbon
+
+    for region in regions:
+        dest = region[0]
+        if dest == curr_region:
+            continue
+
+        mig_time = overhead[dest]
+
+        # deadline check: program time + migration downtime must fit within deadline
+        if time_left + mig_time > deadline:
+            continue
+
+        # carbon cost of the migration itself (energy used during ckpt/send/restore)
+        # not sure if this is necessary, plus it uses network_power which I am not sure we know
+        migration_carbon = ckpt_oh * hw[curr_region].wattage * forecast_intensity(curr_region, time.now)
+                         + send_overhead(curr_region, dest, app_size) * network_power * avg(forecast_intensity(curr_region, time.now), forecast_intensity(dest, time.now))
+                         + restore_overhead(app_size, hw[dest]) * hw[dest].wattage * forecast_intensity(dest, time.now)
+
+        # total carbon = migration cost + running at destination for remaining time
+        # (program doesn't make progress during migration, so it runs time_left hours after arriving)
+        dest_run_carbon = 0
+        for h in range(time_left):
+            dest_run_carbon += hw[dest].wattage * forecast_intensity(dest, time.now + mig_time + h)
+        total_carbon = migration_carbon + dest_run_carbon
+
+        if total_carbon < best_carbon:
+            best_carbon = total_carbon
+            decision = dest
+
+    return decision

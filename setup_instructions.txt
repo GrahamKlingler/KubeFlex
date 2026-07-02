@@ -1,0 +1,73 @@
+Here's a step-by-step guide for setting up an Ubuntu machine to run
+  KubeFlex:
+
+  ---
+  1. System basics
+
+  sudo apt update && sudo apt upgrade -y
+  sudo apt install -y git curl wget jq build-essential
+
+  2. Docker
+
+  sudo apt install -y ca-certificates gnupg lsb-release
+  apt-transport-https
+  curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg
+  --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+  echo "deb [arch=$(dpkg --print-architecture)
+  signed-by=/usr/share/keyrings/docker-archive-keyring.gpg]
+  https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" |
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+  sudo apt update
+  sudo apt install -y docker-ce docker-ce-cli containerd.io
+  sudo usermod -aG docker $USER
+  # Log out and back in for the group change to take effect
+
+  3. kubectl
+
+  curl -LO "https://dl.k8s.io/release/$(curl -sL
+  https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+  chmod +x kubectl
+  sudo mv kubectl /usr/local/bin/
+
+  4. KIND (Kubernetes in Docker)
+
+  curl -Lo kind https://kind.sigs.k8s.io/dl/v0.27.0/kind-linux-amd64
+  chmod +x kind
+  sudo mv kind /usr/local/bin/
+
+  5. Python 3.9+
+
+  sudo apt install -y python3 python3-pip python3-venv
+
+  6. GitHub CLI (optional, for the fork workflow)
+
+  sudo apt install -y gh
+  # or: https://github.com/cli/cli/blob/trunk/docs/install_linux.md
+
+  7. Python dependencies (if running anything locally outside containers)
+
+  pip3 install requests psycopg2-binary kubernetes prettytable apscheduler
+   pytz numpy matplotlib pydantic fastapi uvicorn paramiko psutil grpcio
+  grpcio-tools plotly pandas tqdm
+
+  ---
+  Running the simulation
+
+  The repo also has an install script you can reference or run directly:
+
+  bash install-requirements.sh
+
+  Then to deploy:
+
+  cd src
+  bash run.sh
+
+  run.sh creates the KIND cluster (1 control-plane + 3 workers), deploys
+  PostgreSQL, uploads carbon data, deploys the controller/migrator/test
+  pods, and starts the simulation.
+
+  Note: CRIU-based live migration requires a Linux kernel — it won't work
+  inside Docker on macOS. Since you're targeting Ubuntu, you're good. The
+  CRIU dependencies are handled inside the Docker container images (the
+  Dockerfiles build CRIU from source), so you don't need to install CRIU
+  on the host.
