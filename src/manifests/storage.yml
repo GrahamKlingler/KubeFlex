@@ -48,7 +48,8 @@ spec:
         - name: PGDATA
           value: "/var/lib/postgresql/data/pgdata"
       - name: metadata-container
-        image: salamander1223/python-metadata:latest
+        # image: salamander1223/python-metadata:latest
+        image: grahamklingler26/python-metadata:latest
         imagePullPolicy: IfNotPresent
         command: ["python3", "metadata.py"]
         securityContext:
@@ -111,7 +112,8 @@ spec:
         command: ['sh', '-c', 'until nc -z db-service 5432; do echo waiting for db-service; sleep 2; done;']
       containers:
       - name: db-upload-container
-        image: salamander1223/python-db-upload:latest
+        # image: salamander1223/python-db-upload:latest
+        image: grahamklingler26/python-db-upload:latest
         command: ["python", "upload_data.py", "test_data", "table"]
         args:
         - --host=db-service

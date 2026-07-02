@@ -12,7 +12,7 @@ spec:
   hostPID: true
   containers:
   - name: migrator
-    image: salamander1223/migrator:latest
+    image: grahamklingler26/migrator:latest
     imagePullPolicy: Always
     securityContext:
       privileged: true

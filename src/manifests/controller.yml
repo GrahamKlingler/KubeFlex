@@ -43,7 +43,7 @@ spec:
       containers:
       - name: python-controller
         # image: salamander1223/python-controller:latest
-        image: python-controller:v4
+        image: grahamklingler26/python-controller:latest
         imagePullPolicy: IfNotPresent
         securityContext:
           privileged: true

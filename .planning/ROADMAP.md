@@ -84,9 +84,9 @@ Plans:
 Plans:
 - [x] 04-00-PLAN.md — Wave 0 test scaffolding: pre-refactor baseline snapshot + RED tests for ablation toggles + RED tests for evaluate_policies
 - [x] 04-01-PLAN.md — HEUR-10 ablation toggles in policy_heuristic.py + 3 new --no-X CLI flags
-- [ ] 04-02-PLAN.md — Refactor run_expected_simulation() into pure simulate_one_run(intensity_lookup, cfg) -> dict in _simulation_core.py
-- [ ] 04-03-PLAN.md — evaluate_policies.py orchestrator with multiprocessing.Pool + tqdm + unified CSV writer (D-19)
-- [ ] 04-04-PLAN.md — evaluation_plots.py: comparison boxplot + 8-cell ablation heatmap + horizon line plot (INFR-05)
+- [x] 04-02-PLAN.md — Refactor run_expected_simulation() into pure simulate_one_run(intensity_lookup, cfg) -> dict in _simulation_core.py
+- [x] 04-03-PLAN.md — evaluate_policies.py orchestrator with multiprocessing.Pool + tqdm + unified CSV writer (D-19)
+- [x] 04-04-PLAN.md — evaluation_plots.py: comparison boxplot + 8-cell ablation heatmap + horizon line plot (INFR-05)
 
 ### Phase 5: Controller Integration & Cluster Validation
 **Goal**: Policy 6 runs in the live KubeFlex controller on the KIND cluster and cluster results validate or challenge simulation findings

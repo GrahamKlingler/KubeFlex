@@ -130,25 +130,25 @@ fi
 
 # Clean up old images to force fresh builds
 log_info "Cleaning up old migration controller images..."
-docker rmi python-migrate:latest salamander1223/python-migrate:latest 2>/dev/null || true
+docker rmi python-migrate:latest grahamklingler26/python-migrate:latest 2>/dev/null || true
 
 # Build and push migration controller
 log_info "Building migration controller..."
 BUILD_TIMESTAMP=$(date +%s)
 if docker build -t python-migrate:latest -f build/Dockerfile.migrate --build-arg BUILD_TIMESTAMP=${BUILD_TIMESTAMP} .; then
     log_success "Migration controller built successfully"
-    docker tag python-migrate:latest salamander1223/python-migrate:latest
+    docker tag python-migrate:latest grahamklingler26/python-migrate:latest
     
     if [ "$LOAD_KIND" = true ]; then
         log_info "Loading migration controller image into KIND cluster..."
-        if kind load docker-image salamander1223/python-migrate:latest --name ${CLUSTER_NAME} 2>/dev/null; then
+        if kind load docker-image grahamklingler26/python-migrate:latest --name ${CLUSTER_NAME} 2>/dev/null; then
             log_success "Migration controller image loaded into KIND successfully"
         else
             log_warning "Failed to load migration controller into KIND"
             log_info "Cluster may not exist. Run: kind create cluster --config manifests/cluster.yml"
         fi
     else
-    if docker push salamander1223/python-migrate:latest; then
+    if docker push grahamklingler26/python-migrate:latest; then
         log_success "Migration controller pushed successfully"
     else
         log_error "Failed to push migration controller"
@@ -164,17 +164,17 @@ fi
 log_info "Building migrator..."
 if docker build -t migrator:latest -f build/Dockerfile.migrator .; then
     log_success "Migrator built successfully"
-    docker tag migrator:latest salamander1223/migrator:latest
+    docker tag migrator:latest grahamklingler26/migrator:latest
     
     if [ "$LOAD_KIND" = true ]; then
         log_info "Loading migrator image into KIND cluster..."
-        if kind load docker-image salamander1223/migrator:latest --name ${CLUSTER_NAME} 2>/dev/null; then
+        if kind load docker-image grahamklingler26/migrator:latest --name ${CLUSTER_NAME} 2>/dev/null; then
             log_success "Migrator image loaded into KIND successfully"
         else
             log_warning "Failed to load migrator into KIND"
         fi
     else
-    if docker push salamander1223/migrator:latest; then
+    if docker push grahamklingler26/migrator:latest; then
         log_success "Migrator pushed successfully"
     else
         log_error "Failed to push migrator"
@@ -190,17 +190,17 @@ fi
 log_info "Building main controller..."
 if docker build -t python-controller:latest -f build/Dockerfile.main .; then
     log_success "Main controller built successfully"
-    docker tag python-controller:latest salamander1223/python-controller:latest
+    docker tag python-controller:latest grahamklingler26/python-controller:latest
     
     if [ "$LOAD_KIND" = true ]; then
         log_info "Loading main controller image into KIND cluster..."
-        if kind load docker-image salamander1223/python-controller:latest --name ${CLUSTER_NAME} 2>/dev/null; then
+        if kind load docker-image grahamklingler26/python-controller:latest --name ${CLUSTER_NAME} 2>/dev/null; then
             log_success "Main controller image loaded into KIND successfully"
         else
             log_warning "Failed to load main controller into KIND"
         fi
     else
-    if docker push salamander1223/python-controller:latest; then
+    if docker push grahamklingler26/python-controller:latest; then
         log_success "Main controller pushed successfully"
     else
         log_error "Failed to push main controller"
@@ -215,17 +215,17 @@ fi
 log_info "Building test pod..."
 if docker build -t testpod:latest -f build/Dockerfile.testpod .; then
     log_success "Test pod built successfully"
-    docker tag testpod:latest salamander1223/testpod:latest
+    docker tag testpod:latest grahamklingler26/testpod:latest
     
     if [ "$LOAD_KIND" = true ]; then
         log_info "Loading test pod image into KIND cluster..."
-        if kind load docker-image salamander1223/testpod:latest --name ${CLUSTER_NAME} 2>/dev/null; then
+        if kind load docker-image grahamklingler26/testpod:latest --name ${CLUSTER_NAME} 2>/dev/null; then
             log_success "Test pod image loaded into KIND successfully"
         else
             log_warning "Failed to load test pod into KIND"
         fi
     else
-    if docker push salamander1223/testpod:latest; then
+    if docker push grahamklingler26/testpod:latest; then
         log_success "Test pod pushed successfully"
     else
         log_error "Failed to push test pod"
@@ -241,17 +241,17 @@ fi
 log_info "Building database upload service..."
 if docker build -t python-db-upload:latest -f build/Dockerfile.db .; then
     log_success "Database upload service built successfully"
-    docker tag python-db-upload:latest salamander1223/python-db-upload:latest
+    docker tag python-db-upload:latest grahamklingler26/python-db-upload:latest
     
     if [ "$LOAD_KIND" = true ]; then
         log_info "Loading database upload service image into KIND cluster..."
-        if kind load docker-image salamander1223/python-db-upload:latest --name ${CLUSTER_NAME} 2>/dev/null; then
+        if kind load docker-image grahamklingler26/python-db-upload:latest --name ${CLUSTER_NAME} 2>/dev/null; then
             log_success "Database upload service image loaded into KIND successfully"
         else
             log_warning "Failed to load database upload service into KIND"
         fi
     else
-        if docker push salamander1223/python-db-upload:latest; then
+        if docker push grahamklingler26/python-db-upload:latest; then
             log_success "Database upload service pushed successfully"
         else
             log_error "Failed to push database upload service"
@@ -267,17 +267,17 @@ fi
 log_info "Building metadata service..."
 if docker build -t python-metadata:latest -f build/Dockerfile.metadata .; then
     log_success "Metadata service built successfully"
-    docker tag python-metadata:latest salamander1223/python-metadata:latest
+    docker tag python-metadata:latest grahamklingler26/python-metadata:latest
     
     if [ "$LOAD_KIND" = true ]; then
         log_info "Loading metadata service image into KIND cluster..."
-        if kind load docker-image salamander1223/python-metadata:latest --name ${CLUSTER_NAME} 2>/dev/null; then
+        if kind load docker-image grahamklingler26/python-metadata:latest --name ${CLUSTER_NAME} 2>/dev/null; then
             log_success "Metadata service image loaded into KIND successfully"
         else
             log_warning "Failed to load metadata service into KIND"
         fi
     else
-        if docker push salamander1223/python-metadata:latest; then
+        if docker push grahamklingler26/python-metadata:latest; then
             log_success "Metadata service pushed successfully"
         else
             log_error "Failed to push metadata service"
@@ -294,12 +294,12 @@ log_success "ALL DOCKER IMAGES BUILT AND PUSHED SUCCESSFULLY"
 log_info "=========================================="
 
 log_info "Built and pushed images:"
-log_info "  - salamander1223/python-migrate:latest"
-log_info "  - salamander1223/migrator:latest"
-log_info "  - salamander1223/python-controller:latest"
-log_info "  - salamander1223/testpod:latest"
-log_info "  - salamander1223/python-db-upload:latest"
-log_info "  - salamander1223/python-metadata:latest"
+log_info "  - grahamklingler26/python-migrate:latest"
+log_info "  - grahamklingler26/migrator:latest"
+log_info "  - grahamklingler26/python-controller:latest"
+log_info "  - grahamklingler26/testpod:latest"
+log_info "  - grahamklingler26/python-db-upload:latest"
+log_info "  - grahamklingler26/python-metadata:latest"
 
 log_info ""
 log_info "Next steps:"
