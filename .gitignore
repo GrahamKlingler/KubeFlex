@@ -3,3 +3,26 @@
 /pyvenv.cfg
 */artifacts/*
 */nbody-artifacts/*
+**/.planning/**
+
+# Cluster credentials — never commit
+src/kubeconfig
+
+# Python caches
+**/__pycache__/
+*.pyc
+*.pyo
+
+# Large generated data directories (too big for GitHub; reproduce locally)
+data/regions/
+data/outputs/
+data/avg_data/
+data/charts/
+data/mana-test/
+
+# Scratch / local notes not meant for the repo
+package-lock.json
+report_prompt.txt
+short_notes.txt
+kubeadm-macs
+config/
