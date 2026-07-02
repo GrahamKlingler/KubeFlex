@@ -8,6 +8,10 @@
 # Cluster credentials — never commit
 src/kubeconfig
 
+# AI assistant project files — local only
+CLAUDE.md
+.claude/
+
 # Python caches
 **/__pycache__/
 *.pyc
