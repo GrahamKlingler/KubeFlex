@@ -1,0 +1,11 @@
+timestamp=20260316_122938
+modules=deploy
+namespace=test-namespace
+mpijob_yaml=./tests/antibody-sim/nbody-mpijob-long.yml
+job_name=nbody-sim
+worker_0_pod=nbody-sim-worker-0
+worker_0_node=kind-worker2
+worker_1_pod=nbody-sim-worker-1
+worker_1_node=kind-worker
+launcher=nbody-sim-launcher-qjh4n
+total_time_s=10

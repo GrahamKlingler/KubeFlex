@@ -1,0 +1,8 @@
+Carbon test pod started
+[INFO][carbon-pod-baseline] N-Body CRIU Migration Test
+[INFO][carbon-pod-baseline] Beginning at Sat Mar 21 03:54:48 UTC 2026
+[INFO][carbon-pod-baseline] Running with parameters: BODIES=10000 ITERS=10000 CHECKPOINT_INTERVAL=10000 RESULTS_FOLDER=/script-data/
+[INFO][carbon-pod-baseline] [TestLogger] Starting N-Body simulation at Sat Mar 21 03:54:48 UTC 2026
+[INFO][carbon-pod-baseline] [TestLogger] Simulation exited with rc=0 duration_ms=1812000
+[INFO][carbon-pod-baseline] SUMMARY bodies=10000 iters=10000 checkpoint_interval=10000 avg_ms=1812000 min_ms=1812000 max_ms=1812000
+[INFO][carbon-pod-baseline] Finish time: Sat Mar 21 04:25:00 UTC 2026

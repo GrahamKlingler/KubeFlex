@@ -1,0 +1,7 @@
+direction,start_ts_iso,start_ts_unix,policy,overhead_min,app_size_mb,total_carbon_kgco2eq,migration_count,migration_hours,dest_grids_visited
+allgrids:SWPP->pool6,2022-04-16,1650121200,1,30,64.0,155.837,0,,
+allgrids:SWPP->pool6,2022-04-16,1650121200,2,30,64.0,138.773,8,4|20|24|25|33|35|36|38,PSCO|PJM|ERCO|PACE|PSCO|ERCO|PSCO|ERCO
+allgrids:SWPP->pool6,2022-04-16,1650121200,3,30,64.0,140.383,2,0|33,PJM|ERCO
+allgrids:SWPP->pool6,2022-04-16,1650121200,4,30,64.0,127.265,2,0|18,PSCO|ERCO
+allgrids:SWPP->pool6,2022-04-16,1650121200,5,30,64.0,136.026,8,3|19|23|24|32|34|35|37,PSCO|PJM|ERCO|PACE|PSCO|ERCO|PSCO|ERCO
+allgrids:SWPP->pool6,2022-04-16,1650121200,6,30,64.0,134.935,1,0,ERCO

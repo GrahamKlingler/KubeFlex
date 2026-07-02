@@ -1,0 +1,8 @@
+policy,source_region,start_ts,start_datetime,hw_weighting,overhead_cost,deadline_gate,ablation_id,lookahead_hours,app_size_mb,expected_completion_min,deadline_multiplier,total_carbon_gco2,baseline_carbon_gco2,savings_pct,migration_count,completed_hours,sweep_kind
+6,CENT,1577836800,2020-01-01T00:00:00+00:00,True,True,True,HW1_OH1_DL1,1,64.0,2880,1.5,39158.5,39158.5,0.0,0,48,horizon
+6,CENT,1577836800,2020-01-01T00:00:00+00:00,True,True,True,HW1_OH1_DL1,2,64.0,2880,1.5,39158.5,39158.5,0.0,0,48,horizon
+6,CENT,1577836800,2020-01-01T00:00:00+00:00,True,True,True,HW1_OH1_DL1,4,64.0,2880,1.5,39158.5,39158.5,0.0,0,48,horizon
+6,CENT,1577836800,2020-01-01T00:00:00+00:00,True,True,True,HW1_OH1_DL1,8,64.0,2880,1.5,39158.5,39158.5,0.0,0,48,horizon
+6,CENT,1577836800,2020-01-01T00:00:00+00:00,True,True,True,HW1_OH1_DL1,12,64.0,2880,1.5,39158.5,39158.5,0.0,0,48,horizon
+6,CENT,1577836800,2020-01-01T00:00:00+00:00,True,True,True,HW1_OH1_DL1,24,64.0,2880,1.5,39158.5,39158.5,0.0,0,48,horizon
+6,CENT,1577836800,2020-01-01T00:00:00+00:00,True,True,True,HW1_OH1_DL1,48,64.0,2880,1.5,39158.5,39158.5,0.0,0,48,horizon

@@ -1,0 +1,11 @@
+timestamp=20260315_184931
+modules=deploy
+namespace=test-namespace
+mpijob_yaml=/Users/grahamklingler/Repositories/KubeFlex/src/tests/distributed-migration/../antibody-sim/nbody-mpijob.yml
+job_name=nbody-sim
+worker_0_pod=nbody-sim-worker-0
+worker_0_node=kind-worker
+worker_1_pod=nbody-sim-worker-1
+worker_1_node=kind-worker2
+launcher=nbody-sim-launcher-29srz
+total_time_s=14

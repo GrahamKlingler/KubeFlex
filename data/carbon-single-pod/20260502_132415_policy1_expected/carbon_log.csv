@@ -1,0 +1,2 @@
+sim_time,sim_datetime,grid,intensity_gco2kwh,cumulative_carbon_gco2,migrations_so_far,active_pod
+1609459200,2021-01-01 00:00,ISNE,1216.3,1216.3,0,carbon-pod

@@ -1,0 +1,261 @@
+grid,region,name,power_per_core,available_cores,tdp_watts,physical_cores,clock_speed_ghz,hostname
+AECI,MIDW,AMD EPYC 7713 64-Core Processor,3.515,16384,225.0,64,2.5,gpn-fiona-mizzou-3.rnet.missouri.edu
+AECI,MIDW,AMD EPYC 7713 64-Core Processor,3.515,16384,225.0,64,2.56,gpn-fiona-mizzou-4.rnet.missouri.edu
+AECI,MIDW,AMD EPYC 7713 64-Core Processor,3.515,16384,225.0,64,2.49,gpn-fiona-mizzou-5.rnet.missouri.edu
+AECI,MIDW,AMD EPYC 7713 64-Core Processor,3.515,16384,225.0,64,2.48,gpn-fiona-mizzou-6.rnet.missouri.edu
+AECI,MIDW,Intel(R) Xeon(R) Gold 6138 CPU @ 2.00GHz,6.25,1600,125.0,20,2.17,gpn-fiona-mizzou-7.rnet.missouri.edu
+AECI,MIDW,Intel(R) Xeon(R) Gold 6138 CPU @ 2.00GHz,6.25,1600,125.0,20,2.2,gpn-fiona-mizzou-8.rnet.missouri.edu
+AECI,MIDW,Intel(R) Xeon(R) Gold 6230 CPU @ 2.10GHz,6.25,1600,125.0,20,3.01,gpn-fiona-mizzou-9.rnet.missouri.edu
+AECI,MIDW,Intel(R) Xeon(R) Gold 6134 CPU @ 3.20GHz,16.25,128,130.0,8,3.58,gpn-fiona-mizzou.rnet.missouri.edu
+AZPS,SW,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.29,pas.phoe.net.internet2.edu
+BANC,CAL,AMD EPYC 7443P 24-Core Processor,8.33,576,200.0,24,3.58,k8s-a6000-01.csus.edu
+BANC,CAL,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.33,pas.sacr.net.internet2.edu
+CISO,CAL,AMD EPYC 7532 32-Core Processor,6.25,2048,200.0,32,2.41,alveo.sdsu.edu
+CISO,CAL,AMD EPYC 7402P 24-Core Processor,7.5,576,180.0,24,3.28,bak-hpc1.csub.edu
+CISO,CAL,INTEL(R) XEON(R) GOLD 6526Y,12.187,1024,195.0,16,3.49,bak-hpc2.csub.edu
+CISO,CAL,Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz,15.83,200,158.0,10,3.12,clu-fiona2.ucmerced.edu
+CISO,CAL,Intel(R) Xeon(R) Gold 6140 CPU @ 2.30GHz,7.77,1296,140.0,18,2.72,cph-blade01.humboldt.edu
+CISO,CAL,Intel(R) Xeon(R) CPU E5-2698 v4 @ 2.20GHz,8.437,1600,169.0,20,2.73,cph-dgx-node2.humboldt.edu
+CISO,CAL,Intel(R) Xeon(R) CPU E5-2698 v4 @ 2.20GHz,8.437,1600,169.0,20,3.16,cph-dgx-node5.humboldt.edu
+CISO,CAL,Intel(R) Xeon(R) CPU E5-2698 v4 @ 2.20GHz,8.437,1600,169.0,20,2.79,cph-dgx-node6.humboldt.edu
+CISO,CAL,Intel(R) Xeon(R) CPU E5-2698 v4 @ 2.20GHz,8.437,1600,169.0,20,2.97,cph-dgx-node7.humboldt.edu
+CISO,CAL,Intel(R) Xeon(R) CPU E5-2698 v4 @ 2.20GHz,8.437,1600,169.0,20,3.0,cph-dgx-node8.humboldt.edu
+CISO,CAL,Intel(R) Xeon(R) CPU E5-2698 v4 @ 2.20GHz,8.437,1600,169.0,20,2.67,cph-dgx-node9.humboldt.edu
+CISO,CAL,Intel(R) Xeon(R) Gold 5222 CPU @ 3.80GHz,26.25,32,105.0,4,3.76,cph-perfsonar.humboldt.edu
+CISO,CAL,Intel(R) Xeon(R) CPU E5-2687W v3 @ 3.10GHz,16.0,400,160.0,10,3.46,edex.calit2.optiputer.net
+CISO,CAL,Intel(R) Xeon(R) CPU E5-2699 v3 @ 2.30GHz,8.055,648,145.0,18,3.42,fiona-dtn-1.calit2.uci.edu
+CISO,CAL,Intel(R) Xeon(R) CPU E5-2650 v4 @ 2.20GHz,8.75,576,105.0,12,2.5,fiona8-0.calit2.uci.edu
+CISO,CAL,Intel(R) Xeon(R) Gold 6136 CPU @ 3.00GHz,12.5,576,150.0,12,3.59,fiona8-1.calit2.uci.edu
+CISO,CAL,AMD EPYC 7551P 32-Core Processor,5.625,2048,180.0,32,2.49,fiona8.ucsc.edu
+CISO,CAL,AMD EPYC 9254 24-Core Processor,8.33,2304,200.0,24,3.71,k8s-100g-dtn-6.ucsc.edu
+CISO,CAL,Intel(R) Xeon(R) Gold 6136 CPU @ 3.00GHz,12.5,576,150.0,12,3.25,k8s-chase-ci-01.calit2.optiputer.net
+CISO,CAL,Intel(R) Xeon(R) Gold 6136 CPU @ 3.00GHz,12.5,576,150.0,12,2.98,k8s-chase-ci-02.calit2.optiputer.net
+CISO,CAL,Intel(R) Xeon(R) Gold 6136 CPU @ 3.00GHz,12.5,576,150.0,12,3.15,k8s-chase-ci-03.calit2.optiputer.net
+CISO,CAL,Intel(R) Xeon(R) Gold 6136 CPU @ 3.00GHz,12.5,576,150.0,12,3.42,k8s-chase-ci-04.calit2.optiputer.net
+CISO,CAL,AMD EPYC 7551P 32-Core Processor,5.625,2048,180.0,32,2.31,k8s-chase-ci-05.calit2.optiputer.net
+CISO,CAL,Intel(R) Xeon(R) Gold 6140 CPU @ 2.30GHz,7.77,1296,140.0,18,2.19,k8s-chase-ci-07.calit2.optiputer.net
+CISO,CAL,AMD EPYC 7401P 24-Core Processor,7.083,1152,170.0,24,2.66,k8s-chase-ci-10.calit2.optiputer.net
+CISO,CAL,AMD EPYC 7252 8-Core Processor,15.0,128,120.0,8,3.14,k8s-gen4-03.calit2.optiputer.net
+CISO,CAL,AMD EPYC 7252 8-Core Processor,15.0,128,120.0,8,3.11,k8s-gen4-05.calit2.optiputer.net
+CISO,CAL,AMD EPYC 7252 8-Core Processor,15.0,128,120.0,8,3.2,k8s-gen4-07.ultralight.org
+CISO,CAL,Intel(R) Xeon(R) Gold 6136 CPU @ 3.00GHz,12.5,576,150.0,12,2.59,k8s-gpu-03.sdsc.optiputer.net
+CISO,CAL,Intel(R) Xeon(R) Gold 6136 CPU @ 3.00GHz,12.5,576,150.0,12,2.63,k8s-gpu-1.ucsc.edu
+CISO,CAL,AMD EPYC 7551P 32-Core Processor,5.625,2048,180.0,32,2.08,k8s-gpu-2.ucr.edu
+CISO,CAL,Intel(R) Xeon(R) Gold 6136 CPU @ 3.00GHz,12.5,576,150.0,12,2.0,k8s-gpu-2.ucsc.edu
+CISO,CAL,AMD EPYC 7551P 32-Core Processor,5.625,2048,180.0,32,2.09,k8s-gpu-3.ucr.edu
+CISO,CAL,AMD EPYC 9254 24-Core Processor,8.33,2304,200.0,24,3.74,k8s-gpu-6.ucsc.edu
+CISO,CAL,Intel(R) Xeon(R) Gold 6230 CPU @ 2.10GHz,6.25,1600,125.0,20,1.84,k8s-haosu-02.sdsc.optiputer.net
+CISO,CAL,Intel(R) Xeon(R) Gold 6230 CPU @ 2.10GHz,6.25,1600,125.0,20,2.47,k8s-haosu-03.sdsc.optiputer.net
+CISO,CAL,Intel(R) Xeon(R) Gold 6230 CPU @ 2.10GHz,6.25,1600,125.0,20,2.62,k8s-haosu-05.sdsc.optiputer.net
+CISO,CAL,Intel(R) Xeon(R) Gold 6230 CPU @ 2.10GHz,6.25,1600,125.0,20,2.54,k8s-haosu-06.sdsc.optiputer.net
+CISO,CAL,Intel(R) Xeon(R) Gold 6230 CPU @ 2.10GHz,6.25,1600,125.0,20,2.34,k8s-haosu-07.sdsc.optiputer.net
+CISO,CAL,Intel(R) Xeon(R) Gold 6230 CPU @ 2.10GHz,6.25,1600,125.0,20,2.14,k8s-haosu-09.sdsc.optiputer.net
+CISO,CAL,Intel(R) Xeon(R) Gold 6230 CPU @ 2.10GHz,6.25,1600,125.0,20,2.0,k8s-haosu-10.sdsc.optiputer.net
+CISO,CAL,Intel(R) Xeon(R) Gold 6230 CPU @ 2.10GHz,6.25,1600,125.0,20,2.28,k8s-haosu-11.sdsc.optiputer.net
+CISO,CAL,Intel(R) Xeon(R) Gold 6230 CPU @ 2.10GHz,6.25,1600,125.0,20,2.33,k8s-haosu-12.sdsc.optiputer.net
+CISO,CAL,Intel(R) Xeon(R) Gold 6230 CPU @ 2.10GHz,6.25,1600,125.0,20,2.5,k8s-haosu-15.sdsc.optiputer.net
+CISO,CAL,Intel(R) Xeon(R) Gold 6230 CPU @ 2.10GHz,6.25,1600,125.0,20,2.41,k8s-haosu-17.sdsc.optiputer.net
+CISO,CAL,Intel(R) Xeon(R) Gold 6230 CPU @ 2.10GHz,6.25,1600,125.0,20,2.32,k8s-haosu-18.sdsc.optiputer.net
+CISO,CAL,Intel(R) Xeon(R) Gold 6230 CPU @ 2.10GHz,6.25,1600,125.0,20,2.51,k8s-haosu-19.sdsc.optiputer.net
+CISO,CAL,Intel(R) Xeon(R) Gold 6230 CPU @ 2.10GHz,6.25,1600,125.0,20,2.7,k8s-haosu-21.sdsc.optiputer.net
+CISO,CAL,Intel(R) Xeon(R) Gold 6230 CPU @ 2.10GHz,6.25,1600,125.0,20,2.6,k8s-haosu-22.sdsc.optiputer.net
+CISO,CAL,Intel(R) Xeon(R) Gold 6230 CPU @ 2.10GHz,6.25,1600,125.0,20,1.89,k8s-haosu-23.sdsc.optiputer.net
+CISO,CAL,Intel(R) Xeon(R) Gold 6230 CPU @ 2.10GHz,6.25,1600,125.0,20,3.23,k8s-haosu-24.sdsc.optiputer.net
+CISO,CAL,AMD EPYC 7252 8-Core Processor,15.0,128,120.0,8,3.15,k8s-igrok-01.calit2.optiputer.net
+CISO,CAL,AMD EPYC 7252 8-Core Processor,15.0,128,120.0,8,3.11,k8s-igrok-02.calit2.optiputer.net
+CISO,CAL,AMD EPYC 7252 8-Core Processor,15.0,128,120.0,8,3.08,k8s-igrok-03.calit2.optiputer.net
+CISO,CAL,AMD EPYC 7252 8-Core Processor,15.0,256,120.0,8,3.12,k8s-igrok-04.calit2.optiputer.net
+CISO,CAL,AMD EPYC 7252 8-Core Processor,15.0,256,120.0,8,3.12,k8s-igrok-05.calit2.optiputer.net
+CISO,CAL,AMD EPYC 7252 8-Core Processor,15.0,256,120.0,8,3.1,k8s-igrok-06.calit2.optiputer.net
+CISO,CAL,Intel(R) Xeon(R) CPU E5-1680 v4 @ 3.40GHz,17.5,64,140.0,8,3.6,k8s-nvme-01.ultralight.org
+CISO,CAL,Intel(R) Xeon(R) CPU E5-2620 v4 @ 2.10GHz,15.83,256,127.0,8,2.5,k8s-ravi-01.calit2.optiputer.net
+CISO,CAL,Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz,15.83,200,158.0,10,2.6,k8s-u200-00.calit2.optiputer.net
+CISO,CAL,AMD EPYC 7402 24-Core Processor,7.5,1152,180.0,24,3.34,k8s-usra-01.calit2.optiputer.net
+CISO,CAL,Intel(R) Xeon(R) CPU E5-2680 v3 @ 2.50GHz,10.0,288,120.0,12,2.89,knuron.calit2.optiputer.net
+CISO,CAL,AMD EPYC 7453 28-Core Processor,8.035,784,225.0,28,2.77,nautilus-ext-gpu01.fullerton.edu
+CISO,CAL,Intel(R) Xeon(R) CPU E5-2697 v3 @ 2.60GHz,10.357,784,145.0,14,2.06,nautilus-it-cpu01.fullerton.edu
+CISO,CAL,Intel(R) Xeon(R) CPU E5-2697 v3 @ 2.60GHz,10.357,784,145.0,14,2.85,nautilus-it-cpu02.fullerton.edu
+CISO,CAL,Intel(R) Xeon(R) CPU E5-2697 v3 @ 2.60GHz,10.357,784,145.0,14,2.45,nautilus-it-cpu03.fullerton.edu
+CISO,CAL,Intel(R) Xeon(R) CPU E5-2697 v3 @ 2.60GHz,10.357,784,145.0,14,2.91,nautilus-it-cpu04.fullerton.edu
+CISO,CAL,Intel(R) Xeon(R) CPU E5-2697 v3 @ 2.60GHz,10.357,784,145.0,14,2.85,nautilus-it-cpu05.fullerton.edu
+CISO,CAL,Intel(R) Xeon(R) CPU E5-2697 v3 @ 2.60GHz,10.357,784,145.0,14,2.9,nautilus-it-cpu06.fullerton.edu
+CISO,CAL,Intel(R) Xeon(R) CPU E5-2697 v3 @ 2.60GHz,10.357,784,145.0,14,2.68,nautilus-it-cpu07.fullerton.edu
+CISO,CAL,Intel(R) Xeon(R) CPU E5-2697 v3 @ 2.60GHz,10.357,784,145.0,14,2.9,nautilus-it-cpu08.fullerton.edu
+CISO,CAL,Intel(R) Xeon(R) CPU E5-2697 v3 @ 2.60GHz,10.357,784,145.0,14,2.95,nautilus-it-cpu09.fullerton.edu
+CISO,CAL,Intel(R) Xeon(R) CPU E5-2697 v3 @ 2.60GHz,10.357,784,145.0,14,2.96,nautilus-it-cpu11.fullerton.edu
+CISO,CAL,Intel(R) Xeon(R) CPU E5-2697 v3 @ 2.60GHz,10.357,784,145.0,14,2.95,nautilus-it-cpu12.fullerton.edu
+CISO,CAL,Intel(R) Xeon(R) Silver 4116 CPU @ 2.10GHz,7.083,576,85.0,12,1.86,nautilus-it-cpu13.fullerton.edu
+CISO,CAL,Intel(R) Xeon(R) Silver 4116 CPU @ 2.10GHz,7.083,576,85.0,12,2.08,nautilus-it-cpu14.fullerton.edu
+CISO,CAL,Intel(R) Xeon(R) Silver 4116 CPU @ 2.10GHz,7.083,576,85.0,12,1.91,nautilus-it-cpu15.fullerton.edu
+CISO,CAL,Intel(R) Xeon(R) Silver 4116 CPU @ 2.10GHz,7.083,576,85.0,12,2.0,nautilus-it-cpu16.fullerton.edu
+CISO,CAL,Intel(R) Xeon(R) Silver 4116 CPU @ 2.10GHz,7.083,576,85.0,12,2.13,nautilus-it-cpu17.fullerton.edu
+CISO,CAL,AMD EPYC 9334 32-Core Processor,6.56,2048,210.0,32,3.77,nautilus-it-gpu01.fullerton.edu
+CISO,CAL,AMD EPYC 9334 32-Core Processor,6.56,2048,210.0,32,3.36,nautilus-it-gpu02.fullerton.edu
+CISO,CAL,AMD EPYC 9334 32-Core Processor,6.56,2048,210.0,32,3.67,nautilus-it-gpu03.fullerton.edu
+CISO,CAL,AMD EPYC 9334 32-Core Processor,6.56,2048,210.0,32,3.6,nautilus-it-gpu04.fullerton.edu
+CISO,CAL,AMD EPYC 9334 32-Core Processor,6.56,2048,210.0,32,3.52,nautilus-it-gpu05.fullerton.edu
+CISO,CAL,AMD EPYC 9334 32-Core Processor,6.56,2048,210.0,32,3.64,nautilus-it-gpu06.fullerton.edu
+CISO,CAL,AMD EPYC 7742 64-Core Processor,3.515,8192,225.0,64,2.25,node-1-1.sdsc.optiputer.net
+CISO,CAL,AMD EPYC 7742 64-Core Processor,3.515,8192,225.0,64,2.58,node-1-3.sdsc.optiputer.net
+CISO,CAL,AMD EPYC 7742 64-Core Processor,3.515,8192,225.0,64,2.41,node-1-4.sdsc.optiputer.net
+CISO,CAL,AMD EPYC 7742 64-Core Processor,3.515,8192,225.0,64,2.74,node-2-1.sdsc.optiputer.net
+CISO,CAL,AMD EPYC 7742 64-Core Processor,3.515,8192,225.0,64,2.61,node-2-2.sdsc.optiputer.net
+CISO,CAL,AMD EPYC 7742 64-Core Processor,3.515,8192,225.0,64,2.79,node-2-3.sdsc.optiputer.net
+CISO,CAL,AMD EPYC 7742 64-Core Processor,3.515,16384,225.0,64,2.67,node-2-6.sdsc.optiputer.net
+CISO,CAL,AMD EPYC 7742 64-Core Processor,3.515,8192,225.0,64,2.82,node-2-7.sdsc.optiputer.net
+CISO,CAL,AMD EPYC 7742 64-Core Processor,3.515,16384,225.0,64,2.55,node-2-9.sdsc.optiputer.net
+CISO,CAL,AMD EPYC 7443P 24-Core Processor,8.33,576,200.0,24,3.14,nrp-01.csumb.edu
+CISO,CAL,AMD EPYC 9684X 96-Core Processor,4.166,36864,400.0,96,2.88,nrp-ai-100-01.sdsc.optiputer.net
+CISO,CAL,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.28,pas.sunn.net.internet2.edu
+CISO,CAL,Intel(R) Xeon(R) CPU E5-2687W v3 @ 3.10GHz,16.0,400,160.0,10,1.4,patternlab.calit2.optiputer.net
+CISO,CAL,Intel(R) Xeon(R) CPU E5-2667 v4 @ 3.20GHz,21.66,128,173.0,8,3.51,perfsonar.csusb.edu
+CISO,CAL,Intel(R) Xeon(R) Silver 4114 CPU @ 2.20GHz,8.5,400,85.0,10,1.25,prp-gpu-2.t2.ucsd.edu
+CISO,CAL,Intel(R) Xeon(R) CPU E5-2667 v4 @ 3.20GHz,21.66,256,173.0,8,2.65,ps-100g.sdsu.edu
+CISO,CAL,Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz,6.406,2048,205.0,32,1.96,rci-nrp-cpu-03.sdsu.edu
+CISO,CAL,Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz,6.406,2048,205.0,32,1.92,rci-nrp-cpu-04.sdsu.edu
+CISO,CAL,Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz,6.406,2048,205.0,32,2.7,rci-nrp-gpu-04.sdsu.edu
+CISO,CAL,Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz,6.406,2048,205.0,32,2.79,rci-nrp-gpu-05.sdsu.edu
+CISO,CAL,Intel(R) Xeon(R) Gold 6430,8.437,2048,270.0,32,2.21,rci-tide-cpu-01.sdsu.edu
+CISO,CAL,Intel(R) Xeon(R) Gold 6430,8.437,2048,270.0,32,2.17,rci-tide-cpu-02.sdsu.edu
+CISO,CAL,Intel(R) Xeon(R) Gold 6430,8.437,2048,270.0,32,2.18,rci-tide-cpu-03.sdsu.edu
+CISO,CAL,Intel(R) Xeon(R) Gold 6430,8.437,2048,270.0,32,2.19,rci-tide-cpu-04.sdsu.edu
+CISO,CAL,Intel(R) Xeon(R) Gold 6430,8.437,2048,270.0,32,2.13,rci-tide-cpu-05.sdsu.edu
+CISO,CAL,Intel(R) Xeon(R) Silver 4410Y,12.5,288,150.0,12,2.76,rci-tide-gpu-01.sdsu.edu
+CISO,CAL,Intel(R) Xeon(R) Silver 4410Y,12.5,288,150.0,12,2.76,rci-tide-gpu-02.sdsu.edu
+CISO,CAL,Intel(R) Xeon(R) Silver 4410Y,12.5,288,150.0,12,2.68,rci-tide-gpu-03.sdsu.edu
+CISO,CAL,Intel(R) Xeon(R) Silver 4410Y,12.5,288,150.0,12,2.59,rci-tide-gpu-04.sdsu.edu
+CISO,CAL,Intel(R) Xeon(R) Silver 4410Y,12.5,288,150.0,12,3.05,rci-tide-gpu-05.sdsu.edu
+CISO,CAL,Intel(R) Xeon(R) Silver 4410Y,12.5,288,150.0,12,2.69,rci-tide-gpu-06.sdsu.edu
+CISO,CAL,Intel(R) Xeon(R) W-3223 CPU @ 3.50GHz,20.0,128,160.0,8,3.73,rincewind.crbs.ucsd.edu
+CISO,CAL,AMD EPYC 7343 16-Core Processor,11.875,512,190.0,16,3.59,ry-gpu-04.sdsc.optiputer.net
+CISO,CAL,AMD EPYC 7343 16-Core Processor,11.875,512,190.0,16,3.81,ry-gpu-08.sdsc.optiputer.net
+CISO,CAL,AMD EPYC 7343 16-Core Processor,11.875,512,190.0,16,3.8,ry-gpu-09.sdsc.optiputer.net
+CISO,CAL,AMD EPYC 7343 16-Core Processor,11.875,512,190.0,16,3.78,ry-gpu-10.sdsc.optiputer.net
+CISO,CAL,AMD EPYC 7343 16-Core Processor,11.875,512,190.0,16,3.58,ry-gpu-11.sdsc.optiputer.net
+CISO,CAL,AMD EPYC 7343 16-Core Processor,11.875,512,190.0,16,3.73,ry-gpu-12.sdsc.optiputer.net
+CISO,CAL,Intel(R) Xeon(R) Gold 6346 CPU @ 3.10GHz,12.81,1024,205.0,16,3.2,ry-gpu-13.sdsc.optiputer.net
+CISO,CAL,Intel(R) Xeon(R) Gold 6346 CPU @ 3.10GHz,12.81,1024,205.0,16,3.03,ry-gpu-14.sdsc.optiputer.net
+CISO,CAL,AMD EPYC 7343 16-Core Processor,11.875,512,190.0,16,3.07,ry-gpu-15.sdsc.optiputer.net
+CISO,CAL,AMD EPYC 7343 16-Core Processor,11.875,512,190.0,16,3.35,ry-gpu-16.sdsc.optiputer.net
+CISO,CAL,Intel(R) Xeon(R) CPU E5-1680 v4 @ 3.40GHz,17.5,64,140.0,8,3.18,siderea.ucsc.edu
+CISO,CAL,AMD EPYC 9554 64-Core Processor,5.625,8192,360.0,64,3.51,stratus1.nrp-espm.berkeley.edu
+CISO,CAL,Intel(R) Xeon(R) CPU E5-1680 v4 @ 3.40GHz,17.5,128,140.0,8,3.6,suncave-0
+CISO,CAL,Intel(R) Xeon(R) CPU E5-1660 v4 @ 3.20GHz,17.5,128,140.0,8,3.4,suncave-1
+CISO,CAL,Intel(R) Xeon(R) CPU E5-1660 v4 @ 3.20GHz,17.5,128,140.0,8,3.4,suncave-10
+CISO,CAL,Intel(R) Xeon(R) CPU E5-1660 v4 @ 3.20GHz,17.5,128,140.0,8,3.4,suncave-11
+CISO,CAL,Intel(R) Xeon(R) CPU E5-1660 v4 @ 3.20GHz,17.5,128,140.0,8,3.4,suncave-12
+CISO,CAL,Intel(R) Xeon(R) CPU E5-1660 v4 @ 3.20GHz,17.5,128,140.0,8,3.38,suncave-13
+CISO,CAL,Intel(R) Xeon(R) CPU E5-1660 v4 @ 3.20GHz,17.5,128,140.0,8,3.41,suncave-14
+CISO,CAL,Intel(R) Xeon(R) CPU E5-1660 v4 @ 3.20GHz,17.5,128,140.0,8,3.4,suncave-15
+CISO,CAL,Intel(R) Xeon(R) CPU E5-1660 v4 @ 3.20GHz,17.5,128,140.0,8,3.4,suncave-17
+CISO,CAL,Intel(R) Xeon(R) CPU E5-1660 v4 @ 3.20GHz,17.5,128,140.0,8,3.45,suncave-2
+CISO,CAL,Intel(R) Xeon(R) CPU E5-1660 v4 @ 3.20GHz,17.5,128,140.0,8,3.4,suncave-3
+CISO,CAL,Intel(R) Xeon(R) CPU E5-1660 v4 @ 3.20GHz,17.5,128,140.0,8,3.4,suncave-4
+CISO,CAL,Intel(R) Xeon(R) CPU E5-1660 v4 @ 3.20GHz,17.5,128,140.0,8,3.4,suncave-6
+CISO,CAL,Intel(R) Xeon(R) CPU E5-1660 v4 @ 3.20GHz,17.5,128,140.0,8,3.4,suncave-7
+CISO,CAL,Intel(R) Xeon(R) CPU E5-1660 v4 @ 3.20GHz,17.5,128,140.0,8,3.41,suncave-8
+CISO,CAL,Intel(R) Xeon(R) CPU E5-1660 v4 @ 3.20GHz,17.5,128,140.0,8,3.4,suncave-9
+CISO,CAL,AMD EPYC 7551P 32-Core Processor,5.625,2048,180.0,32,2.4,ucm-fiona01.ucmerced.edu
+CISO,CAL,Intel(R) Core(TM) i9-9820X CPU @ 3.30GHz,16.5,200,165.0,10,4.05,unseenu.crbs.ucsd.edu
+CISO,CAL,Intel(R) Xeon(R) Gold 6226 CPU @ 2.70GHz,10.416,576,125.0,12,3.63,v100-cc-star-01.noc.ucsb.edu
+DUK,CAR,Intel(R) Xeon(R) Gold 6140 CPU @ 2.30GHz,7.77,1296,140.0,18,2.93,epic001.clemson.edu
+DUK,CAR,AMD EPYC 7453 28-Core Processor,8.035,784,225.0,28,3.23,k8s-3090-01.clemson.edu
+DUK,CAR,AMD EPYC 7453 28-Core Processor,8.035,784,225.0,28,3.17,k8s-3090-02.clemson.edu
+DUK,CAR,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.27,pas.char.net.internet2.edu
+EPE,SW,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.32,pas.elpa.net.internet2.edu
+ERCO,TEX,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.19,pas.dall3.net.internet2.edu
+IPCO,NW,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.22,pas.bois.net.internet2.edu
+ISNE,NE,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.31,dtn-01.nrp.mghpcc.org
+ISNE,NE,AMD EPYC 7502 32-Core Processor,5.625,4096,180.0,32,2.98,gpu-03.nrp.mghpcc.org
+ISNE,NE,AMD EPYC 7502 32-Core Processor,5.625,4096,180.0,32,2.9,gpu-05.nrp.mghpcc.org
+ISNE,NE,AMD EPYC 7502 32-Core Processor,5.625,4096,180.0,32,2.88,gpu-08.nrp.mghpcc.org
+ISNE,NE,AMD EPYC 7502 32-Core Processor,5.625,4096,180.0,32,2.88,gpu-11.nrp.mghpcc.org
+ISNE,NE,AMD EPYC 7502 32-Core Processor,5.625,4096,180.0,32,2.93,gpu-12.nrp.mghpcc.org
+ISNE,NE,AMD EPYC 7502 32-Core Processor,5.625,4096,180.0,32,2.84,gpu-13.nrp.mghpcc.org
+ISNE,NE,AMD EPYC 7502 32-Core Processor,5.625,4096,180.0,32,2.91,gpu-14.nrp.mghpcc.org
+ISNE,NE,AMD EPYC 7502 32-Core Processor,5.625,4096,180.0,32,2.91,gpu-15.nrp.mghpcc.org
+ISNE,NE,AMD EPYC 7502 32-Core Processor,5.625,4096,180.0,32,3.11,gpu-16.nrp.mghpcc.org
+ISNE,NE,AMD EPYC 7502 32-Core Processor,5.625,4096,180.0,32,2.79,gpu-17.nrp.mghpcc.org
+ISNE,NE,AMD EPYC 7502 32-Core Processor,5.625,4096,180.0,32,2.73,gpu-18.nrp.mghpcc.org
+ISNE,NE,AMD EPYC 9254 24-Core Processor,8.33,1152,200.0,24,3.86,pas.bost.net.internet2.edu
+ISNE,NE,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.28,pas.hart2.net.internet2.edu
+ISNE,NE,AMD EPYC 9254 24-Core Processor,8.33,1152,200.0,24,3.91,pas.holy.net.internet2.edu
+JEA,FLA,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.23,pas.jack.net.internet2.edu
+LDWP,CAL,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,2.86,igrok-la.cenic.net
+LDWP,CAL,AMD EPYC 7453 28-Core Processor,8.035,784,225.0,28,2.96,nrp-01.laccd.edu
+LDWP,CAL,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.32,pas.losa.net.internet2.edu
+LDWP,CAL,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.31,pas.losa2.net.internet2.edu
+MISO,MIDW,AMD EPYC 7713 64-Core Processor,3.515,16384,225.0,64,2.58,gpengine-uams.areon.net
+MISO,MIDW,AMD EPYC 7262 8-Core Processor,19.375,256,155.0,8,3.2,msu-nrp.aglt2.org
+MISO,MIDW,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.29,pas.indi.net.internet2.edu
+MISO,MIDW,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.33,pas.minn.net.internet2.edu
+MISO,MIDW,Intel(R) Xeon(R) Gold 5115 CPU @ 2.40GHz,8.5,400,85.0,10,3.13,sl-um-es2.slateci.io
+MISO,MIDW,Intel(R) Xeon(R) Gold 6132 CPU @ 2.60GHz,10.0,784,140.0,14,3.5,sl-um-es3.slateci.io
+NEVP,NW,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.28,pas.lasv.net.internet2.edu
+NEVP,NW,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.34,pas.reno.net.internet2.edu
+NWMT,NW,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.22,pas.miss.net.internet2.edu
+NYIS,NY,AMD EPYC 7443P 24-Core Processor,8.33,576,200.0,24,2.98,nautilus01.hsrn.nyu.edu
+NYIS,NY,AMD EPYC 7443P 24-Core Processor,8.33,576,200.0,24,3.05,nautilus02.hsrn.nyu.edu
+NYIS,NY,Intel(R) Xeon(R) CPU E5-2680 v3 @ 2.50GHz,10.0,576,120.0,12,3.27,nrp-c10.nysernet.org
+NYIS,NY,Intel(R) Xeon(R) CPU E5-2680 v3 @ 2.50GHz,10.0,576,120.0,12,2.98,nrp-c11.nysernet.org
+NYIS,NY,Intel(R) Xeon(R) CPU E5-2680 v3 @ 2.50GHz,10.0,576,120.0,12,2.9,nrp-c12.nysernet.org
+NYIS,NY,AMD EPYC 7552 48-Core Processor,4.166,9216,200.0,48,2.38,nrp-c15.nysernet.org
+NYIS,NY,AMD EPYC 7552 48-Core Processor,4.166,9216,200.0,48,2.72,nrp-c17.nysernet.org
+NYIS,NY,AMD EPYC 7443P 24-Core Processor,8.33,576,200.0,24,3.14,nrp-fiona-001.sdmz.amnh.org
+NYIS,NY,AMD EPYC 7451 24-Core Processor,7.5,1152,180.0,24,2.36,nrp-g1.nysernet.org
+NYIS,NY,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.2,pas.newy32aoa.net.internet2.edu
+PACE,NW,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.28,pas.salt.net.internet2.edu
+PGE,NW,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.23,pas.port.net.internet2.edu
+PJM,MIDA,Intel(R) Xeon(R) Silver 4310 CPU @ 2.10GHz,10.0,576,120.0,12,2.33,dtn-crispie.njedge.net
+PJM,MIDA,Intel(R) Xeon(R) CPU E5-2630 v3 @ 2.40GHz,10.625,128,85.0,8,2.75,gdc-mren-dtn.scidmz.northwestern.edu
+PJM,MIDA,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.29,pas.ashb.net.internet2.edu
+PJM,MIDA,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.32,pas.cinc.net.internet2.edu
+PJM,MIDA,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.24,pas.clev.net.internet2.edu
+PJM,MIDA,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.27,pas.eqch.net.internet2.edu
+PJM,MIDA,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.22,pas.phil.net.internet2.edu
+PJM,MIDA,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.29,pas.pitt.net.internet2.edu
+PJM,MIDA,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.33,pas.star.net.internet2.edu
+PJM,MIDA,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.31,pas.wash.net.internet2.edu
+PJM,MIDA,AMD EPYC 7252 8-Core Processor,15.0,128,120.0,8,3.16,starlightdtn108.scidmz.northwestern.edu
+PNM,SW,AMD EPYC 7443P 24-Core Processor,8.33,576,200.0,24,3.69,k8s-a6000-01.unm.edu
+PSCO,NW,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.34,pas.denv.net.internet2.edu
+SCL,NW,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.31,pas.seat.net.internet2.edu
+SOCO,SE,Intel(R) Xeon(R) Silver 4215R CPU @ 3.20GHz,16.25,128,130.0,8,3.42,bcdc-gw-40g-ps.gatech.edu
+SOCO,SE,Intel(R) Xeon(R) E-2374G CPU @ 3.70GHz,20.0,32,80.0,4,4.3,msm-ps.sox.net
+SOCO,SE,Intel(R) Xeon(R) Silver 4215R CPU @ 3.20GHz,16.25,128,130.0,8,3.9,nautilus1.sox.net
+SOCO,SE,Intel(R) Xeon(R) Silver 4215R CPU @ 3.20GHz,16.25,128,130.0,8,3.48,nautilus2.sox.net
+SOCO,SE,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.27,pas.pens.net.internet2.edu
+SOCO,SE,Intel(R) Xeon(R) Silver 4215R CPU @ 3.20GHz,16.25,128,130.0,8,3.24,rich-gw-40g-ps.gatech.edu
+SOCO,SE,Intel(R) Xeon(R) E E-2456,13.33,72,80.0,6,3.77,tuskegee-ps.sox.net
+SWPP,CENT,Intel(R) Xeon(R) Gold 6134 CPU @ 3.20GHz,16.25,128,130.0,8,3.7,fiona.hpc.okstate.edu
+SWPP,CENT,Intel(R) Xeon(R) Gold 6134 CPU @ 3.20GHz,16.25,128,130.0,8,3.58,fiona.offn.oscer.ou.edu
+SWPP,CENT,AMD EPYC 7713 64-Core Processor,3.515,16384,225.0,64,2.47,gpengine-uark.areon.net
+SWPP,CENT,Intel(R) Xeon(R) CPU E5-2680 v3 @ 2.50GHz,10.0,576,120.0,12,3.19,gpn-cisco1-nautilus.greatplains.net
+SWPP,CENT,Intel(R) Xeon(R) CPU E5-2680 v3 @ 2.50GHz,10.0,576,120.0,12,2.94,gpn-cisco2-nautilus.greatplains.net
+SWPP,CENT,Intel(R) Xeon(R) Gold 6134 CPU @ 3.20GHz,16.25,256,130.0,8,3.11,gpn-fiona.usd.edu
+SWPP,CENT,AMD EPYC 7713 64-Core Processor,3.515,16384,225.0,64,2.34,hcc-gpengine-shor-c5303.unl.edu
+SWPP,CENT,AMD EPYC 7713 64-Core Processor,3.515,8192,225.0,64,2.26,hcc-gpn-argo-1.unl.edu
+SWPP,CENT,Intel(R) Xeon(R) 6517P,11.875,512,190.0,16,1.61,hcc-nrp-pki-c1703.unl.edu
+SWPP,CENT,Intel(R) Xeon(R) 6517P,11.875,512,190.0,16,2.62,hcc-nrp-pki-c1705.unl.edu
+SWPP,CENT,AMD EPYC 7282 16-Core Processor,7.5,512,120.0,16,3.17,hcc-nrp-shor-c5226.unl.edu
+SWPP,CENT,AMD EPYC 7502 32-Core Processor,5.625,4096,180.0,32,2.92,hcc-nrp-shor-c5813.unl.edu
+SWPP,CENT,AMD EPYC 7502 32-Core Processor,5.625,4096,180.0,32,3.03,hcc-nrp-shor-c5825.unl.edu
+SWPP,CENT,AMD EPYC 7282 16-Core Processor,7.5,1024,120.0,16,3.11,hcc-nrp-shor-c5830.unl.edu
+SWPP,CENT,AMD EPYC 7282 16-Core Processor,7.5,512,120.0,16,3.13,hcc-nrp-shor-c5834.unl.edu
+SWPP,CENT,AMD EPYC 7282 16-Core Processor,7.5,1024,120.0,16,3.01,hcc-nrp-shor-c5930.unl.edu
+SWPP,CENT,AMD EPYC 7282 16-Core Processor,7.5,512,120.0,16,3.17,hcc-nrp-shor-c5934.unl.edu
+SWPP,CENT,AMD EPYC 7502 32-Core Processor,5.625,4096,180.0,32,3.04,hcc-nrp-shor-c6021.unl.edu
+SWPP,CENT,AMD EPYC 7502 32-Core Processor,5.625,4096,180.0,32,2.63,hcc-nrp-shor-c6025.unl.edu
+SWPP,CENT,AMD EPYC 7502 32-Core Processor,5.625,4096,180.0,32,2.98,hcc-nrp-shor-c6029.unl.edu
+SWPP,CENT,AMD EPYC 7282 16-Core Processor,7.5,512,120.0,16,3.19,hcc-nrp-shor-c6034.unl.edu
+SWPP,CENT,AMD EPYC 7443P 24-Core Processor,8.33,576,200.0,24,3.71,hcc-prp-c5036.unl.edu
+SWPP,CENT,AMD EPYC 7443P 24-Core Processor,8.33,576,200.0,24,3.5,k8s-3090-01.usd.edu
+SWPP,CENT,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.34,pas.tuls.net.internet2.edu
+SWPP,CENT,AMD EPYC 7713 64-Core Processor,3.515,8192,225.0,64,2.77,ren-gp-argo-01.madren.org
+SWPP,CENT,AMD EPYC 7713 64-Core Processor,3.515,8192,225.0,64,2.32,sdsu.gp-argo.greatplains.net
+TEPC,SW,AMD EPYC 7402P 24-Core Processor,7.5,1152,180.0,24,3.17,pas.tucs.net.internet2.edu
+TVA,TEN,INTEL(R) XEON(R) SILVER 4509Y,15.625,128,125.0,8,3.48,365dc-ps.sox.net
+TVA,TEN,INTEL(R) XEON(R) SILVER 4509Y,15.625,128,125.0,8,3.33,sidco-ps.sox.net
+WACM,NW,Intel(R) Xeon(R) CPU E5-2643 v4 @ 3.40GHz,32.5,72,195.0,6,3.61,fiona.nwsc.ucar.edu
+WACM,NW,Intel(R) Xeon(R) Gold 6134 CPU @ 3.20GHz,16.25,256,130.0,8,3.68,sdsmt-fiona.sdsmt.edu
+WACM,NW,AMD EPYC 7713 64-Core Processor,3.515,8192,225.0,64,2.6,sdsmt.gp-argo.greatplains.net

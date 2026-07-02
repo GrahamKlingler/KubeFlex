@@ -1,0 +1,27 @@
+{
+  "git_sha": "b9a65db17fc1addf2473365dc9c5fee868332ee8",
+  "started_at": "2026-05-01T19:52:21.595846+00:00",
+  "finished_at": "2026-05-01T19:56:42.467894+00:00",
+  "duration_seconds": 260.87,
+  "n_workers": 9,
+  "total_runs": 52704,
+  "wrap_into_val_count": 348,
+  "args": {
+    "sweep_kind": "main",
+    "smoke": false,
+    "workers": null,
+    "chunksize": 64,
+    "out_dir": null,
+    "app_size_mb": 64.0,
+    "expected_completion_min": 600,
+    "expected_migration_min": 5,
+    "deadline_multiplier": 1.5,
+    "lookahead_hours": 48,
+    "include_network_power": true,
+    "sample_data_dir": null,
+    "source_regions": [
+      "NE"
+    ],
+    "timestamps": null
+  }
+}

@@ -1,0 +1,2 @@
+timestamp,policy,bodies,iters,expected_duration_min,baseline_ms,total_runtime_ms,workload_reported_ms,migration_overhead_ms,num_migrations,total_carbon_gco2,baseline_carbon_gco2,job_time_carbon_gco2,migration_carbon_gco2,hours_tracked,migration_events
+20260320_232930,4,10000,10000,360,1812000,1783639,1777000,6639,0,9004.0,9004.0,8970.4,33.5,48,

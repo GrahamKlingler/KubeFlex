@@ -1,0 +1,3 @@
+[holder] Container started, waiting for CRIU restore...
+[holder] Restored process PID: 406
+[holder] Restored process finished, exiting

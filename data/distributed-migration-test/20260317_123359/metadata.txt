@@ -1,0 +1,17 @@
+timestamp=20260317_123359
+modules=deploy service migrate verify cleanup
+namespace=test-namespace
+mpijob_yaml=/Users/grahamklingler/Repositories/KubeFlex/src/tests/distributed-migration/../antibody-sim/nbody-mpijob-long.yml
+job_name=nbody-sim
+worker_0_pod=nbody-sim-worker-0
+worker_0_node=kind-worker2
+worker_1_pod=nbody-sim-worker-1
+worker_1_node=kind-worker
+launcher=nbody-sim-launcher-q7d9g
+migrate_mode=http
+target_nodes=kind-worker,kind-worker2
+http_code=500
+migration_time_s=1
+verify_pass=0
+verify_fail=3
+total_time_s=48

@@ -1,0 +1,4 @@
+sim_time,sim_datetime,region,intensity_gco2kwh,cumulative_carbon_gco2,migrations_so_far,active_pod
+1609459200,2021-01-01 00:00,NE,195.1,195.1,0,carbon-pod
+1609462800,2021-01-01 01:00,NE,190.7,385.8,0,carbon-pod
+1609466400,2021-01-01 02:00,NE,180.7,566.4,0,carbon-pod

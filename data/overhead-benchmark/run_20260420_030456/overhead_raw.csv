@@ -1,0 +1,6 @@
+run_id,migration_num,workload,source_region,target_region,repetition,checkpoint_ms,transfer_ms,restore_ms,total_ms,success,timestamp_utc
+20260420_030456,1,sysbench_cpu,NE,TEN,1,,,,,failed,2026-04-20T03:05:16.982435+00:00
+20260420_030456,2,sysbench_cpu,NE,TEN,2,,,,,failed,2026-04-20T03:05:27.981806+00:00
+20260420_030456,3,sysbench_cpu,NE,TEN,3,,,,,failed,2026-04-20T03:05:39.038238+00:00
+20260420_030456,4,sysbench_cpu,NE,CENT,1,,,,,failed,2026-04-20T03:05:50.075065+00:00
+20260420_030456,5,sysbench_cpu,NE,CENT,2,,,,,failed,2026-04-20T03:06:01.107287+00:00

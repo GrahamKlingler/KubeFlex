@@ -1,0 +1,167 @@
+(00.000000) CRIU run id = 44fd1ee6-3b24-463a-941e-6beacbdde17e
+(00.000099) Version: 4.1.1 (gitid v4.1.1)
+(00.000105) Running on nbody-sim-worker-1 Linux 6.12.69-linuxkit #1 SMP Mon Feb 16 11:19:06 UTC 2026 aarch64
+(00.000110) File /run/criu.kdat does not exist
+(00.000125) sockets: Probing sock diag modules
+(00.001639) sockets: Done probing
+(00.004789) PAGEMAP_SCAN is supported
+(00.004809) Pagemap is fully functional
+(00.004835) Found anon-shmem device at 1
+(00.005010) Hugetlb size 0 Mb is supported but cannot get dev's number
+(00.005087) Hugetlb size 2 Mb is supported but cannot get dev's number
+(00.005093) Hugetlb size 32 Mb is supported but cannot get dev's number
+(00.005098) Hugetlb size 1024 Mb is supported but cannot get dev's number
+(00.005103) Reset 107's dirty tracking
+(00.005200)  ... done
+(00.005220) Dirty tracking support is OFF
+(00.005280) Found task size of 1000000000000
+(00.007836) net: Restoring netdev veth idx 10
+(00.007899) Error (criu/libnetlink.c:54): -95 reported by netlink: Operation not supported
+(00.007902) Error (criu/net.c:3997): net: Unable to create a veth pair: -95
+(00.008304) Warn  (criu/net.c:4023): net: NSID isn't reported for network links
+(00.022291) uffd: Lazy pages are not available: Function not implemented
+(00.022567) vdso: Parsing at ffffbc158000 ffffbc15a000
+(00.022572) vdso: PT_LOAD p_vaddr: 0
+(00.022573) vdso: DT_HASH: e8
+(00.022574) vdso: DT_STRTAB: 1c0
+(00.022575) vdso: DT_SYMTAB: 118
+(00.022575) vdso: DT_STRSZ: 8a
+(00.022576) vdso: DT_SYMENT: 18
+(00.022577) vdso: nbucket 3 nchain 7 bucket ffffbc1580f0 chain ffffbc1580fc
+(00.022578) vdso: symbol __kernel_clock_getres at address 750
+(00.022579) vdso: symbol __kernel_clock_gettime at address 300
+(00.022580) vdso: symbol __kernel_gettimeofday at address 5a0
+(00.022580) vdso: symbol __kernel_rt_sigreturn at address 7e8
+(00.022581) vdso: rt [vdso] ffffbc158000-ffffbc15a000 [vvar] ffffbc156000-ffffbc158000
+(00.023353) Adjust mmap_min_addr 0x8000 -> 0x10000
+(00.023359) Found mmap_min_addr 0x10000
+(00.023362) files stat: fs/nr_open 1048576
+(00.023373) Will drop all TCP connections on restore
+(00.023377) rlimit: RLIMIT_NOFILE unlimited for self
+(00.023405) Dump CRIU run id = 79aa0704-d31b-4662-87fe-f5ecbbd97c6d
+(00.023443) kernel pid_max=4194304
+(00.023445) Reading image tree
+(00.023469) Add mnt ns 6 pid 25
+(00.023471) Add net ns 2 pid 25
+(00.023471) Add pid ns 1 pid 25
+(00.023473) pstree pid_max=25
+(00.023475) Migrating process tree (SID 22->101)
+(00.023476) Will restore in 0 namespaces
+(00.023477) NS mask to use 0
+(00.023486) Collecting 51/56 (flags 3)
+(00.023492) No memfd.img image
+(00.023493)  `- ... done
+(00.023495) Collecting 40/54 (flags 2)
+(00.023503) Collected [app/nbody/elastic_nbody] ID 0x1
+(00.023507) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_osc_rdma.so] ID 0x2
+(00.023508) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_osc_sm.so] ID 0x3
+(00.023510) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_coll_libnbc.so] ID 0x4
+(00.023511) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_coll_basic.so] ID 0x5
+(00.023512) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_coll_inter.so] ID 0x6
+(00.023513) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_coll_tuned.so] ID 0x7
+(00.023514) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_coll_han.so] ID 0x8
+(00.023515) Collected [usr/lib/aarch64-linux-gnu/libmca_common_sm.so.40.30.0] ID 0x9
+(00.023517) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_coll_sm.so] ID 0xa
+(00.023519) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_coll_self.so] ID 0xb
+(00.023520) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_coll_adapt.so] ID 0xc
+(00.023521) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_pml_ob1.so] ID 0xd
+(00.023522) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_btl_tcp.so] ID 0xe
+(00.023523) Collected [tmp/ompi.nbody-sim-worker-1.0/jf.28586/pmix_dstor_ds21_22/smdataseg-1873412097-0] ID 0xf
+(00.023524) Collected [tmp/ompi.nbody-sim-worker-1.0/jf.28586/pmix_dstor_ds21_22/smseg-1873412097-0] ID 0x10
+(00.023531) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_coll_sync.so] ID 0x11
+(00.023532) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_btl_self.so] ID 0x12
+(00.023533) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_btl_sm.so] ID 0x13
+(00.023535) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_bml_r2.so] ID 0x14
+(00.023536) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_mpool_hugepage.so] ID 0x15
+(00.023541) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_rcache_grdma.so] ID 0x16
+(00.023545) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_allocator_basic.so] ID 0x17
+(00.023546) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_allocator_bucket.so] ID 0x18
+(00.023548) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_state_app.so] ID 0x19
+(00.023549) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_errmgr_default_app.so] ID 0x1a
+(00.023550) Collected [usr/lib/aarch64-linux-gnu/pmix2/lib/pmix/mca_pcompress_zlib.so] ID 0x1b
+(00.023552) Collected [usr/lib/aarch64-linux-gnu/libresolv.so.2] ID 0x1c
+(00.023553) Collected [usr/lib/aarch64-linux-gnu/libkeyutils.so.1.9] ID 0x1d
+(00.023554) Collected [usr/lib/aarch64-linux-gnu/libffi.so.8.1.0] ID 0x1e
+(00.023555) Collected [usr/lib/aarch64-linux-gnu/libbrotlicommon.so.1.0.9] ID 0x1f
+(00.023556) Collected [usr/lib/aarch64-linux-gnu/libsasl2.so.2.0.25] ID 0x20
+(00.023559) Collected [usr/lib/aarch64-linux-gnu/libkrb5support.so.0.1] ID 0x21
+(00.023560) Collected [usr/lib/aarch64-linux-gnu/libcom_err.so.2.1] ID 0x22
+(00.023561) Collected [usr/lib/aarch64-linux-gnu/libk5crypto.so.3.1] ID 0x23
+(00.023562) Collected [usr/lib/aarch64-linux-gnu/libkrb5.so.3.3] ID 0x24
+(00.023563) Collected [usr/lib/aarch64-linux-gnu/libtasn1.so.6.6.2] ID 0x25
+(00.023564) Collected [usr/lib/aarch64-linux-gnu/libp11-kit.so.0.3.0] ID 0x26
+(00.023565) Collected [usr/lib/aarch64-linux-gnu/libcrypto.so.3] ID 0x27
+(00.023566) Collected [usr/lib/aarch64-linux-gnu/libgmp.so.10.4.1] ID 0x28
+(00.023567) Collected [usr/lib/aarch64-linux-gnu/libhogweed.so.6.4] ID 0x29
+(00.023569) Collected [usr/lib/aarch64-linux-gnu/libunistring.so.2.2.0] ID 0x2a
+(00.023570) Collected [usr/lib/aarch64-linux-gnu/libbrotlidec.so.1.0.9] ID 0x2b
+(00.023574) Collected [usr/lib/aarch64-linux-gnu/libzstd.so.1.4.8] ID 0x2c
+(00.023575) Collected [usr/lib/aarch64-linux-gnu/liblber-2.5.so.0.1.15] ID 0x2d
+(00.023576) Collected [usr/lib/aarch64-linux-gnu/libldap-2.5.so.0.1.15] ID 0x2e
+(00.023577) Collected [usr/lib/aarch64-linux-gnu/libgssapi_krb5.so.2.2] ID 0x2f
+(00.023578) Collected [usr/lib/aarch64-linux-gnu/libgnutls.so.30.31.0] ID 0x30
+(00.023579) Collected [usr/lib/aarch64-linux-gnu/libnettle.so.8.4] ID 0x31
+(00.023580) Collected [usr/lib/aarch64-linux-gnu/libpsl.so.5.3.2] ID 0x32
+(00.023581) Collected [usr/lib/aarch64-linux-gnu/libssh.so.4.8.7] ID 0x33
+(00.023583) Collected [usr/lib/aarch64-linux-gnu/librtmp.so.1] ID 0x34
+(00.023584) Collected [usr/lib/aarch64-linux-gnu/libidn2.so.0.3.7] ID 0x35
+(00.023585) Collected [usr/lib/aarch64-linux-gnu/libnghttp2.so.14.20.1] ID 0x36
+(00.023586) Collected [usr/lib/aarch64-linux-gnu/libcurl-gnutls.so.4.7.0] ID 0x37
+(00.023587) Collected [usr/lib/aarch64-linux-gnu/pmix2/lib/libpmix.so.2.5.2] ID 0x38
+(00.023588) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_pmix_ext3x.so] ID 0x39
+(00.023589) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_ess_pmi.so] ID 0x3a
+(00.023593) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_schizo_flux.so] ID 0x3b
+(00.023594) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_schizo_jsm.so] ID 0x3c
+(00.023595) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_schizo_orte.so] ID 0x3d
+(00.023596) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_schizo_slurm.so] ID 0x3e
+(00.023597) Collected [usr/lib/aarch64-linux-gnu/libnl-3.so.200.26.0] ID 0x3f
+(00.023598) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_reachable_netlink.so] ID 0x40
+(00.023610) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_shmem_mmap.so] ID 0x41
+(00.023613) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_schizo_ompi.so] ID 0x42
+(00.023615) Collected [usr/lib/aarch64-linux-gnu/libudev.so.1.7.2] ID 0x43
+(00.023621) Collected [usr/lib/aarch64-linux-gnu/libz.so.1.2.11] ID 0x44
+(00.023622) Collected [usr/lib/aarch64-linux-gnu/libevent_pthreads-2.1.so.7.0.1] ID 0x45
+(00.023623) Collected [usr/lib/aarch64-linux-gnu/libevent_core-2.1.so.7.0.1] ID 0x46
+(00.023624) Collected [usr/lib/aarch64-linux-gnu/libhwloc.so.15.5.2] ID 0x47
+(00.023625) Collected [usr/lib/aarch64-linux-gnu/libopen-rte.so.40.30.2] ID 0x48
+(00.023626) Collected [usr/lib/aarch64-linux-gnu/libopen-pal.so.40.30.2] ID 0x49
+(00.023627) Collected [usr/lib/aarch64-linux-gnu/libc.so.6] ID 0x4a
+(00.023628) Collected [usr/lib/aarch64-linux-gnu/libgcc_s.so.1] ID 0x4b
+(00.023631) Collected [usr/lib/aarch64-linux-gnu/libm.so.6] ID 0x4c
+(00.023632) Collected [usr/lib/aarch64-linux-gnu/libstdc++.so.6.0.30] ID 0x4d
+(00.023633) Collected [usr/lib/aarch64-linux-gnu/libmpi.so.40.30.2] ID 0x4e
+(00.023634) Collected [usr/lib/aarch64-linux-gnu/libmpi_cxx.so.40.30.1] ID 0x4f
+(00.023635) Collected [usr/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1] ID 0x50
+(00.023636) Collected [tmp/ompi.nbody-sim-worker-1.0/jf.28586/pmix_dstor_ds21_22/initial-pmix_shared-segment-0] ID 0x51
+(00.023637) Collected [tmp/ompi.nbody-sim-worker-1.0/jf.28586/pmix_dstor_ds21_22/smlockseg-1873412097] ID 0x52
+(00.023638) Collected [tmp/ompi.nbody-sim-worker-1.0/jf.28586/pmix_dstor_ds12_22/initial-pmix_shared-segment-0] ID 0x53
+(00.023639) Collected [tmp/ompi.nbody-sim-worker-1.0/jf.28586/pmix_dstor_ds12_22/dstore_sm.lock] ID 0x54
+(00.023642) Collected [dev/null] ID 0x55
+(00.023643) Collected [dev/pts/0] ID 0x57
+(00.023646) Collected pipe entry ID 0x58 PIPE ID 0xadae
+(00.023651) Collected pipe entry ID 0x59 PIPE ID 0xa6c0
+(00.023654) Collected pipe entry ID 0x5a PIPE ID 0xa6c0
+(00.023655) eventfd: Collected : id 0x00005b flags 0x802 counter 0000000000000000
+(00.023657) Collected [dev/shm/open_mpi.0000] ID 0x5c
+(00.023658) Collected pipe entry ID 0x5d PIPE ID 0xa6c1
+(00.023660) Collected pipe entry ID 0x5e PIPE ID 0xa6c1
+(00.023661) eventfd: Collected : id 0x00005f flags 0x802 counter 0000000000000000
+(00.023664) epoll: Collected eventpoll: id 0x000060 flags 0x02
+(00.023665) Collected pipe entry ID 0x61 PIPE ID 0xa6c2
+(00.023666) Collected pipe entry ID 0x62 PIPE ID 0xa6c2
+(00.023667) eventfd: Collected : id 0x000063 flags 0x802 counter 0000000000000000
+(00.023675) Collected [app/nbody] ID 0x68
+(00.023676) Collected [.] ID 0x69
+(00.023678)  `- ... done
+(00.023679) Collecting 46/69 (flags 0)
+(00.023687) Opening ghost file 0x1 for dev/shm/open_mpi.0000
+(00.023690)  `- ... done
+(00.023692) tty: Standard stream is not a terminal, may fail later
+(00.023704) No apparmor.img image
+(00.023709) No cgroup.img image
+(00.023712) Running pre-restore scripts
+(00.023735) No pidns-1.img image
+(00.023765) Forking task with 25 pid (flags 0x0)
+(00.023768) Creating process using clone3()
+(00.023869) Error (criu/cr-restore.c:1230): Can't fork for 25: File exists
+(00.023883) Error (criu/cr-restore.c:2320): Restoring FAILED.

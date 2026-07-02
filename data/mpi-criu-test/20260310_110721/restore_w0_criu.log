@@ -1,0 +1,567 @@
+(00.000000) CRIU run id = 67cbb3d1-42f3-477c-a173-afb806b86c81
+(00.000053) Version: 4.1.1 (gitid v4.1.1)
+(00.000059) Running on nbody-sim-worker-0 Linux 6.12.69-linuxkit #1 SMP Mon Feb 16 11:19:06 UTC 2026 aarch64
+(00.000063) File /run/criu.kdat does not exist
+(00.000072) sockets: Probing sock diag modules
+(00.001213) sockets: Done probing
+(00.001891) PAGEMAP_SCAN is supported
+(00.001901) Pagemap is fully functional
+(00.001918) Found anon-shmem device at 1
+(00.001955) Hugetlb size 0 Mb is supported but cannot get dev's number
+(00.001969) Hugetlb size 2 Mb is supported but cannot get dev's number
+(00.001978) Hugetlb size 32 Mb is supported but cannot get dev's number
+(00.001986) Hugetlb size 1024 Mb is supported but cannot get dev's number
+(00.001990) Reset 139's dirty tracking
+(00.002016)  ... done
+(00.002027) Dirty tracking support is OFF
+(00.002055) Found task size of 1000000000000
+(00.003369) net: Restoring netdev veth idx 10
+(00.003397) Error (criu/libnetlink.c:54): -95 reported by netlink: Operation not supported
+(00.003398) Error (criu/net.c:3997): net: Unable to create a veth pair: -95
+(00.003748) Warn  (criu/net.c:4023): net: NSID isn't reported for network links
+(00.022421) uffd: Lazy pages are not available: Function not implemented
+(00.022709) vdso: Parsing at ffffa4fd2000 ffffa4fd4000
+(00.022711) vdso: PT_LOAD p_vaddr: 0
+(00.022712) vdso: DT_HASH: e8
+(00.022713) vdso: DT_STRTAB: 1c0
+(00.022714) vdso: DT_SYMTAB: 118
+(00.022715) vdso: DT_STRSZ: 8a
+(00.022715) vdso: DT_SYMENT: 18
+(00.022716) vdso: nbucket 3 nchain 7 bucket ffffa4fd20f0 chain ffffa4fd20fc
+(00.022718) vdso: symbol __kernel_clock_getres at address 750
+(00.022719) vdso: symbol __kernel_clock_gettime at address 300
+(00.022720) vdso: symbol __kernel_gettimeofday at address 5a0
+(00.022721) vdso: symbol __kernel_rt_sigreturn at address 7e8
+(00.022721) vdso: rt [vdso] ffffa4fd2000-ffffa4fd4000 [vvar] ffffa4fd0000-ffffa4fd2000
+(00.023561) Adjust mmap_min_addr 0x8000 -> 0x10000
+(00.023567) Found mmap_min_addr 0x10000
+(00.023572) files stat: fs/nr_open 1048576
+(00.023581) Will drop all TCP connections on restore
+(00.023584) File /dev/null will be restored from inherit fd 0
+(00.023588) File /dev/null will be restored from inherit fd 1
+(00.023589) File /dev/null will be restored from inherit fd 2
+(00.023592) rlimit: RLIMIT_NOFILE unlimited for self
+(00.023612) Dump CRIU run id = 91e706f7-77bc-4867-abcf-20bf37ec8537
+(00.023636) kernel pid_max=4194304
+(00.023637) Reading image tree
+(00.023673) Add mnt ns 6 pid 33
+(00.023676) Add net ns 2 pid 33
+(00.023676) Add pid ns 1 pid 33
+(00.023678) pstree pid_max=33
+(00.023681) Will restore in 0 namespaces
+(00.023682) NS mask to use 0
+(00.023700) Collecting 51/56 (flags 3)
+(00.023703) No memfd.img image
+(00.023704)  `- ... done
+(00.023708) Collecting 40/54 (flags 2)
+(00.023717) Collected [app/nbody/elastic_nbody] ID 0x1
+(00.023719) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_osc_rdma.so] ID 0x2
+(00.023720) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_osc_sm.so] ID 0x3
+(00.023722) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_coll_libnbc.so] ID 0x4
+(00.023724) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_coll_basic.so] ID 0x5
+(00.023725) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_coll_inter.so] ID 0x6
+(00.023726) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_coll_tuned.so] ID 0x7
+(00.023727) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_coll_han.so] ID 0x8
+(00.023729) Collected [usr/lib/aarch64-linux-gnu/libmca_common_sm.so.40.30.0] ID 0x9
+(00.023730) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_coll_sm.so] ID 0xa
+(00.023733) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_coll_self.so] ID 0xb
+(00.023734) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_coll_adapt.so] ID 0xc
+(00.023735) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_pml_ob1.so] ID 0xd
+(00.023737) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_btl_tcp.so] ID 0xe
+(00.023738) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_coll_sync.so] ID 0xf
+(00.023744) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_btl_self.so] ID 0x10
+(00.023746) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_btl_sm.so] ID 0x11
+(00.023748) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_bml_r2.so] ID 0x12
+(00.023752) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_mpool_hugepage.so] ID 0x13
+(00.023754) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_rcache_grdma.so] ID 0x14
+(00.023755) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_allocator_basic.so] ID 0x15
+(00.023756) Collected [tmp/ompi.nbody-sim-worker-0.0/jf.28586/pmix_dstor_ds21_30/smdataseg-1873412097-0] ID 0x16
+(00.023757) Collected [tmp/ompi.nbody-sim-worker-0.0/jf.28586/pmix_dstor_ds21_30/smseg-1873412097-0] ID 0x17
+(00.023759) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_allocator_bucket.so] ID 0x18
+(00.023761) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_state_app.so] ID 0x19
+(00.023762) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_errmgr_default_app.so] ID 0x1a
+(00.023763) Collected [usr/lib/aarch64-linux-gnu/pmix2/lib/pmix/mca_pcompress_zlib.so] ID 0x1b
+(00.023767) Collected [usr/lib/aarch64-linux-gnu/libresolv.so.2] ID 0x1c
+(00.023768) Collected [usr/lib/aarch64-linux-gnu/libkeyutils.so.1.9] ID 0x1d
+(00.023769) Collected [usr/lib/aarch64-linux-gnu/libffi.so.8.1.0] ID 0x1e
+(00.023770) Collected [usr/lib/aarch64-linux-gnu/libbrotlicommon.so.1.0.9] ID 0x1f
+(00.023772) Collected [usr/lib/aarch64-linux-gnu/libsasl2.so.2.0.25] ID 0x20
+(00.023775) Collected [usr/lib/aarch64-linux-gnu/libkrb5support.so.0.1] ID 0x21
+(00.023776) Collected [usr/lib/aarch64-linux-gnu/libcom_err.so.2.1] ID 0x22
+(00.023777) Collected [usr/lib/aarch64-linux-gnu/libk5crypto.so.3.1] ID 0x23
+(00.023779) Collected [usr/lib/aarch64-linux-gnu/libkrb5.so.3.3] ID 0x24
+(00.023780) Collected [usr/lib/aarch64-linux-gnu/libtasn1.so.6.6.2] ID 0x25
+(00.023782) Collected [usr/lib/aarch64-linux-gnu/libp11-kit.so.0.3.0] ID 0x26
+(00.023783) Collected [usr/lib/aarch64-linux-gnu/libcrypto.so.3] ID 0x27
+(00.023784) Collected [usr/lib/aarch64-linux-gnu/libgmp.so.10.4.1] ID 0x28
+(00.023786) Collected [usr/lib/aarch64-linux-gnu/libhogweed.so.6.4] ID 0x29
+(00.023787) Collected [usr/lib/aarch64-linux-gnu/libunistring.so.2.2.0] ID 0x2a
+(00.023788) Collected [usr/lib/aarch64-linux-gnu/libbrotlidec.so.1.0.9] ID 0x2b
+(00.023790) Collected [usr/lib/aarch64-linux-gnu/libzstd.so.1.4.8] ID 0x2c
+(00.023791) Collected [usr/lib/aarch64-linux-gnu/liblber-2.5.so.0.1.15] ID 0x2d
+(00.023792) Collected [usr/lib/aarch64-linux-gnu/libldap-2.5.so.0.1.15] ID 0x2e
+(00.023793) Collected [usr/lib/aarch64-linux-gnu/libgssapi_krb5.so.2.2] ID 0x2f
+(00.023794) Collected [usr/lib/aarch64-linux-gnu/libgnutls.so.30.31.0] ID 0x30
+(00.023796) Collected [usr/lib/aarch64-linux-gnu/libnettle.so.8.4] ID 0x31
+(00.023797) Collected [usr/lib/aarch64-linux-gnu/libpsl.so.5.3.2] ID 0x32
+(00.023798) Collected [usr/lib/aarch64-linux-gnu/libssh.so.4.8.7] ID 0x33
+(00.023801) Collected [usr/lib/aarch64-linux-gnu/librtmp.so.1] ID 0x34
+(00.023802) Collected [usr/lib/aarch64-linux-gnu/libidn2.so.0.3.7] ID 0x35
+(00.023803) Collected [usr/lib/aarch64-linux-gnu/libnghttp2.so.14.20.1] ID 0x36
+(00.023804) Collected [usr/lib/aarch64-linux-gnu/libcurl-gnutls.so.4.7.0] ID 0x37
+(00.023805) Collected [usr/lib/aarch64-linux-gnu/pmix2/lib/libpmix.so.2.5.2] ID 0x38
+(00.023806) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_pmix_ext3x.so] ID 0x39
+(00.023808) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_ess_pmi.so] ID 0x3a
+(00.023809) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_schizo_flux.so] ID 0x3b
+(00.023811) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_schizo_jsm.so] ID 0x3c
+(00.023812) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_schizo_orte.so] ID 0x3d
+(00.023813) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_schizo_slurm.so] ID 0x3e
+(00.023816) Collected [usr/lib/aarch64-linux-gnu/libnl-3.so.200.26.0] ID 0x3f
+(00.023817) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_reachable_netlink.so] ID 0x40
+(00.023818) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_shmem_mmap.so] ID 0x41
+(00.023819) Collected [usr/lib/aarch64-linux-gnu/openmpi/lib/openmpi3/mca_schizo_ompi.so] ID 0x42
+(00.023821) Collected [usr/lib/aarch64-linux-gnu/libudev.so.1.7.2] ID 0x43
+(00.023825) Collected [usr/lib/aarch64-linux-gnu/libz.so.1.2.11] ID 0x44
+(00.023826) Collected [usr/lib/aarch64-linux-gnu/libevent_pthreads-2.1.so.7.0.1] ID 0x45
+(00.023834) Collected [usr/lib/aarch64-linux-gnu/libevent_core-2.1.so.7.0.1] ID 0x46
+(00.023854) Collected [usr/lib/aarch64-linux-gnu/libhwloc.so.15.5.2] ID 0x47
+(00.023856) Collected [usr/lib/aarch64-linux-gnu/libopen-rte.so.40.30.2] ID 0x48
+(00.023858) Collected [usr/lib/aarch64-linux-gnu/libopen-pal.so.40.30.2] ID 0x49
+(00.023859) Collected [usr/lib/aarch64-linux-gnu/libc.so.6] ID 0x4a
+(00.023861) Collected [usr/lib/aarch64-linux-gnu/libgcc_s.so.1] ID 0x4b
+(00.023863) Collected [usr/lib/aarch64-linux-gnu/libm.so.6] ID 0x4c
+(00.023864) Collected [usr/lib/aarch64-linux-gnu/libstdc++.so.6.0.30] ID 0x4d
+(00.023865) Collected [usr/lib/aarch64-linux-gnu/libmpi.so.40.30.2] ID 0x4e
+(00.023866) Collected [usr/lib/aarch64-linux-gnu/libmpi_cxx.so.40.30.1] ID 0x4f
+(00.023868) Collected [usr/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1] ID 0x50
+(00.023869) Collected [tmp/ompi.nbody-sim-worker-0.0/jf.28586/pmix_dstor_ds21_30/initial-pmix_shared-segment-0] ID 0x51
+(00.023870) Collected [tmp/ompi.nbody-sim-worker-0.0/jf.28586/pmix_dstor_ds21_30/smlockseg-1873412097] ID 0x52
+(00.023871) Collected [tmp/ompi.nbody-sim-worker-0.0/jf.28586/pmix_dstor_ds12_30/initial-pmix_shared-segment-0] ID 0x53
+(00.023876) Collected [tmp/ompi.nbody-sim-worker-0.0/jf.28586/pmix_dstor_ds12_30/dstore_sm.lock] ID 0x54
+(00.023878) Collected pipe entry ID 0x55 PIPE ID 0x2dda6
+(00.023880) Collected [dev/pts/0] ID 0x57
+(00.023883) Collected pipe entry ID 0x58 PIPE ID 0x2dda7
+(00.023884) Collected pipe entry ID 0x59 PIPE ID 0x2bfe5
+(00.023886) Collected pipe entry ID 0x5a PIPE ID 0x2bfe5
+(00.023888) eventfd: Collected : id 0x00005b flags 0x802 counter 0000000000000000
+(00.023890) Collected [dev/shm/open_mpi.0000] ID 0x5c
+(00.023892) Collected pipe entry ID 0x5d PIPE ID 0x2bfe6
+(00.023893) Collected pipe entry ID 0x5e PIPE ID 0x2bfe6
+(00.023894) eventfd: Collected : id 0x00005f flags 0x802 counter 0000000000000000
+(00.023896) epoll: Collected eventpoll: id 0x000060 flags 0x02
+(00.023898) Collected pipe entry ID 0x61 PIPE ID 0x2bfeb
+(00.023899) Collected pipe entry ID 0x62 PIPE ID 0x2bfeb
+(00.023900) eventfd: Collected : id 0x000063 flags 0x802 counter 0000000000000000
+(00.023911) Collected [app/nbody] ID 0x68
+(00.023912) Collected [.] ID 0x69
+(00.023914)  `- ... done
+(00.023915) Collecting 46/69 (flags 0)
+(00.023919) Opening ghost file 0x1 for dev/shm/open_mpi.0000
+(00.023921)  `- ... done
+(00.023925) No apparmor.img image
+(00.023928) No cgroup.img image
+(00.023931) Running pre-restore scripts
+(00.023943) No pidns-1.img image
+(00.023972) Forking task with 33 pid (flags 0x0)
+(00.023973) Creating process using clone3()
+(00.024077) PID: real 33 virt 33
+(00.024234)     33: timens: monotonic -6 493857539
+(00.024241)     33: timens: boottime -6 493851039
+(00.024270)     33: cg: Cgroup namespace inherited from parent
+(00.024274)     33: cg: Cgroups 1 inherited from parent
+(00.024275)     33: Calling restore_sid() for init
+(00.024278)     33: Collecting 44/37 (flags 2)
+(00.024296)     33: tty: Collected tty ID 0x56 (pts)
+(00.024304)     33:  `- ... done
+(00.024305)     33: Collecting 45/51 (flags 0)
+(00.024311)     33: No tty-data.img image
+(00.024315)     33:  `- ... done
+(00.024316)     33: Restoring namespaces 33 flags 0x0
+(00.024318)     33: Preparing info about shared resources
+(00.024326)     33: Configuring remap 0x5c -> 0x1
+(00.024353)     33: Remap rpath is dev/shm/open_mpi.0000.cr.1.ghost
+(00.024358)     33: Collecting 48/38 (flags 0)
+(00.024360)     33: No filelocks.img image
+(00.024367)     33:  `- ... done
+(00.024368)     33: Collecting 42/27 (flags 0)
+(00.024372)     33: Collected pipe data for 0x2dda6 (chain 6)
+(00.024374)     33: Collected pipe data for 0x2bfe5 (chain 5)
+(00.024375)     33: Collected pipe data for 0x2bfe6 (chain 6)
+(00.024377)     33: Collected pipe data for 0x2bfeb (chain 11)
+(00.024378)     33:  `- ... done
+(00.024379)     33: Collecting 43/27 (flags 0)
+(00.024381)     33: No fifo-data.img image
+(00.024381)     33:  `- ... done
+(00.024382)     33: Collecting 41/70 (flags 0)
+(00.024384)     33: No sk-queues.img image
+(00.024385)     33:  `- ... done
+(00.024484)     33: Found 346 VMAs in image
+(00.024486)     33: vma 0xaaaae5790000 0xaaaae57e3000
+(00.024487)     33: vma 0xaaaae57f2000 0xaaaae57f5000
+(00.024488)     33: vma 0xaaaae57f5000 0xaaaae57f6000
+(00.024489)     33: vma 0xaaab132ea000 0xaaab134a8000
+(00.024490)     33: vma 0xffffa8000000 0xffffa8021000
+(00.024491)     33: vma 0xffffa8021000 0xffffac000000
+(00.024491)     33: vma 0xffffb0000000 0xffffb0021000
+(00.024492)     33: vma 0xffffb0021000 0xffffb4000000
+(00.024493)     33: vma 0xffffb4ecd000 0xffffb4ef0000
+(00.024494)     33: vma 0xffffb4ef0000 0xffffb4f09000
+(00.024494)     33: vma 0xffffb4f09000 0xffffb4f19000
+(00.024495)     33: vma 0xffffb4f19000 0xffffb4f1a000
+(00.024496)     33: vma 0xffffb4f1a000 0xffffb4f1b000
+(00.024497)     33: vma 0xffffb4f20000 0xffffb4f27000
+(00.024498)     33: vma 0xffffb4f27000 0xffffb4f36000
+(00.024498)     33: vma 0xffffb4f36000 0xffffb4f37000
+(00.024499)     33: vma 0xffffb4f37000 0xffffb4f39000
+(00.024500)     33: vma 0xffffb4f3d000 0xffffb4f60000
+(00.024501)     33: vma 0xffffb4f60000 0xffffb4f7e000
+(00.024502)     33: vma 0xffffb4f7e000 0xffffb4f8e000
+(00.024502)     33: vma 0xffffb4f8e000 0xffffb4f8f000
+(00.024503)     33: vma 0xffffb4f8f000 0xffffb4f90000
+(00.024504)     33: vma 0xffffb4fa0000 0xffffb4faf000
+(00.024505)     33: vma 0xffffb4faf000 0xffffb4fbf000
+(00.024505)     33: vma 0xffffb4fbf000 0xffffb4fc0000
+(00.024506)     33: vma 0xffffb4fc0000 0xffffb4fc1000
+(00.024507)     33: vma 0xffffb4fd0000 0xffffb4fd3000
+(00.024508)     33: vma 0xffffb4fd3000 0xffffb4fe3000
+(00.024509)     33: vma 0xffffb4fe3000 0xffffb4fe4000
+(00.024509)     33: vma 0xffffb4fe4000 0xffffb4fe5000
+(00.024510)     33: vma 0xffffb4ffd000 0xffffb5020000
+(00.024511)     33: vma 0xffffb5020000 0xffffb5030000
+(00.024512)     33: vma 0xffffb5030000 0xffffb5040000
+(00.024513)     33: vma 0xffffb5040000 0xffffb5041000
+(00.024514)     33: vma 0xffffb5041000 0xffffb5042000
+(00.024517)     33: vma 0xffffb5050000 0xffffb5068000
+(00.024518)     33: vma 0xffffb5068000 0xffffb5077000
+(00.024519)     33: vma 0xffffb5077000 0xffffb5078000
+(00.024519)     33: vma 0xffffb5078000 0xffffb5079000
+(00.024520)     33: vma 0xffffb5080000 0xffffb5082000
+(00.024521)     33: vma 0xffffb5082000 0xffffb5091000
+(00.024522)     33: vma 0xffffb5091000 0xffffb5092000
+(00.024522)     33: vma 0xffffb5092000 0xffffb5093000
+(00.024523)     33: vma 0xffffb50a0000 0xffffb50a7000
+(00.024524)     33: vma 0xffffb50a7000 0xffffb50b7000
+(00.024524)     33: vma 0xffffb50b7000 0xffffb50b8000
+(00.024525)     33: vma 0xffffb50b8000 0xffffb50b9000
+(00.024526)     33: vma 0xffffb50c0000 0xffffb50c2000
+(00.024527)     33: vma 0xffffb50c2000 0xffffb50d2000
+(00.024527)     33: vma 0xffffb50d2000 0xffffb50d3000
+(00.024528)     33: vma 0xffffb50d3000 0xffffb50d4000
+(00.024529)     33: vma 0xffffb50e0000 0xffffb50eb000
+(00.024529)     33: vma 0xffffb50eb000 0xffffb50fa000
+(00.024530)     33: vma 0xffffb50fa000 0xffffb50fb000
+(00.024531)     33: vma 0xffffb50fb000 0xffffb50fc000
+(00.024532)     33: vma 0xffffb5100000 0xffffb511b000
+(00.024532)     33: vma 0xffffb511b000 0xffffb512a000
+(00.024533)     33: vma 0xffffb512a000 0xffffb512b000
+(00.024534)     33: vma 0xffffb512b000 0xffffb512c000
+(00.024534)     33: vma 0xffffb514c000 0xffffb52f0000
+(00.024535)     33: vma 0xffffb52f0000 0xffffb5300000
+(00.024536)     33: vma 0xffffb5300000 0xffffb530f000
+(00.024536)     33: vma 0xffffb530f000 0xffffb5310000
+(00.024537)     33: vma 0xffffb5310000 0xffffb5312000
+(00.024540)     33: vma 0xffffb5320000 0xffffb5323000
+(00.024541)     33: vma 0xffffb5323000 0xffffb5332000
+(00.024541)     33: vma 0xffffb5332000 0xffffb5333000
+(00.024542)     33: vma 0xffffb5333000 0xffffb5334000
+(00.024543)     33: vma 0xffffb5340000 0xffffb5343000
+(00.024543)     33: vma 0xffffb5343000 0xffffb5352000
+(00.024544)     33: vma 0xffffb5352000 0xffffb5353000
+(00.024545)     33: vma 0xffffb5353000 0xffffb5354000
+(00.024546)     33: vma 0xffffb5360000 0xffffb5361000
+(00.024546)     33: vma 0xffffb5361000 0xffffb5370000
+(00.024547)     33: vma 0xffffb5370000 0xffffb5371000
+(00.024548)     33: vma 0xffffb5371000 0xffffb5372000
+(00.024548)     33: vma 0xffffb5380000 0xffffb5384000
+(00.024549)     33: vma 0xffffb5384000 0xffffb5393000
+(00.024550)     33: vma 0xffffb5393000 0xffffb5394000
+(00.024550)     33: vma 0xffffb5394000 0xffffb5395000
+(00.024551)     33: vma 0xffffb53a0000 0xffffb53a3000
+(00.024552)     33: vma 0xffffb53a3000 0xffffb53b2000
+(00.024552)     33: vma 0xffffb53b2000 0xffffb53b3000
+(00.024553)     33: vma 0xffffb53b3000 0xffffb53b4000
+(00.024554)     33: vma 0xffffb53c0000 0xffffb53c3000
+(00.024555)     33: vma 0xffffb53c3000 0xffffb53d3000
+(00.024555)     33: vma 0xffffb53d3000 0xffffb53d4000
+(00.024556)     33: vma 0xffffb53d4000 0xffffb53d5000
+(00.024557)     33: vma 0xffffb53e0000 0xffffb53e2000
+(00.024558)     33: vma 0xffffb53e2000 0xffffb53f2000
+(00.024558)     33: vma 0xffffb53f2000 0xffffb53f3000
+(00.024559)     33: vma 0xffffb53f3000 0xffffb53f4000
+(00.024560)     33: vma 0xffffb5400000 0xffffb5800000
+(00.024561)     33: vma 0xffffb5800000 0xffffb5c00000
+(00.024561)     33: vma 0xffffb5c10000 0xffffb5c12000
+(00.024562)     33: vma 0xffffb5c12000 0xffffb5c21000
+(00.024563)     33: vma 0xffffb5c21000 0xffffb5c22000
+(00.024563)     33: vma 0xffffb5c22000 0xffffb5c23000
+(00.024564)     33: vma 0xffffb5c30000 0xffffb5c32000
+(00.024565)     33: vma 0xffffb5c32000 0xffffb5c41000
+(00.024566)     33: vma 0xffffb5c41000 0xffffb5c42000
+(00.024566)     33: vma 0xffffb5c42000 0xffffb5c43000
+(00.024567)     33: vma 0xffffb5c50000 0xffffb5c52000
+(00.024568)     33: vma 0xffffb5c52000 0xffffb5c62000
+(00.024569)     33: vma 0xffffb5c62000 0xffffb5c63000
+(00.024569)     33: vma 0xffffb5c63000 0xffffb5c64000
+(00.024570)     33: vma 0xffffb5c70000 0xffffb5c80000
+(00.024571)     33: vma 0xffffb5c80000 0xffffb6480000
+(00.024572)     33: vma 0xffffb6480000 0xffffb6482000
+(00.024572)     33: vma 0xffffb6482000 0xffffb6491000
+(00.024573)     33: vma 0xffffb6491000 0xffffb6492000
+(00.024574)     33: vma 0xffffb6492000 0xffffb6493000
+(00.024574)     33: vma 0xffffb64a0000 0xffffb64ad000
+(00.024575)     33: vma 0xffffb64ad000 0xffffb64bd000
+(00.024576)     33: vma 0xffffb64bd000 0xffffb64be000
+(00.024577)     33: vma 0xffffb64be000 0xffffb64bf000
+(00.024577)     33: vma 0xffffb64bf000 0xffffb64c1000
+(00.024578)     33: vma 0xffffb64d0000 0xffffb64d4000
+(00.024579)     33: vma 0xffffb64d4000 0xffffb64e3000
+(00.024580)     33: vma 0xffffb64e3000 0xffffb64e4000
+(00.024581)     33: vma 0xffffb64e4000 0xffffb64e5000
+(00.024582)     33: vma 0xffffb64f0000 0xffffb64f9000
+(00.024582)     33: vma 0xffffb64f9000 0xffffb6508000
+(00.024583)     33: vma 0xffffb6508000 0xffffb6509000
+(00.024584)     33: vma 0xffffb6509000 0xffffb650a000
+(00.024584)     33: vma 0xffffb6510000 0xffffb6530000
+(00.024585)     33: vma 0xffffb6530000 0xffffb653f000
+(00.024586)     33: vma 0xffffb653f000 0xffffb6540000
+(00.024587)     33: vma 0xffffb6540000 0xffffb6541000
+(00.024587)     33: vma 0xffffb6550000 0xffffb6568000
+(00.024588)     33: vma 0xffffb6568000 0xffffb6577000
+(00.024589)     33: vma 0xffffb6577000 0xffffb6578000
+(00.024589)     33: vma 0xffffb6578000 0xffffb6579000
+(00.024590)     33: vma 0xffffb6580000 0xffffb658b000
+(00.024591)     33: vma 0xffffb658b000 0xffffb659a000
+(00.024592)     33: vma 0xffffb659a000 0xffffb659b000
+(00.024592)     33: vma 0xffffb659b000 0xffffb659c000
+(00.024593)     33: vma 0xffffb65a0000 0xffffb65a3000
+(00.024594)     33: vma 0xffffb65a3000 0xffffb65b2000
+(00.024597)     33: vma 0xffffb65b2000 0xffffb65b3000
+(00.024598)     33: vma 0xffffb65b3000 0xffffb65b4000
+(00.024599)     33: vma 0xffffb65c0000 0xffffb65e9000
+(00.024600)     33: vma 0xffffb65e9000 0xffffb65f9000
+(00.024600)     33: vma 0xffffb65f9000 0xffffb65fa000
+(00.024601)     33: vma 0xffffb65fa000 0xffffb65fb000
+(00.024602)     33: vma 0xffffb6600000 0xffffb66b7000
+(00.024602)     33: vma 0xffffb66b7000 0xffffb66c6000
+(00.024603)     33: vma 0xffffb66c6000 0xffffb66d1000
+(00.024608)     33: vma 0xffffb66d1000 0xffffb66d3000
+(00.024609)     33: vma 0xffffb66e0000 0xffffb66f3000
+(00.024609)     33: vma 0xffffb66f3000 0xffffb6703000
+(00.024610)     33: vma 0xffffb6703000 0xffffb6704000
+(00.024611)     33: vma 0xffffb6704000 0xffffb6705000
+(00.024611)     33: vma 0xffffb6710000 0xffffb6837000
+(00.024612)     33: vma 0xffffb6837000 0xffffb6846000
+(00.024613)     33: vma 0xffffb6846000 0xffffb6850000
+(00.024614)     33: vma 0xffffb6850000 0xffffb685a000
+(00.024614)     33: vma 0xffffb6860000 0xffffb6be9000
+(00.024615)     33: vma 0xffffb6be9000 0xffffb6bf8000
+(00.024616)     33: vma 0xffffb6bf8000 0xffffb6c4c000
+(00.024616)     33: vma 0xffffb6c4c000 0xffffb6c4f000
+(00.024617)     33: vma 0xffffb6c4f000 0xffffb6c52000
+(00.024618)     33: vma 0xffffb6c60000 0xffffb6cd5000
+(00.024619)     33: vma 0xffffb6cd5000 0xffffb6ce5000
+(00.024619)     33: vma 0xffffb6ce5000 0xffffb6ce6000
+(00.024620)     33: vma 0xffffb6ce6000 0xffffb6ce7000
+(00.024621)     33: vma 0xffffb6cf0000 0xffffb6d34000
+(00.024621)     33: vma 0xffffb6d34000 0xffffb6d44000
+(00.024622)     33: vma 0xffffb6d44000 0xffffb6d45000
+(00.024626)     33: vma 0xffffb6d45000 0xffffb6d46000
+(00.024627)     33: vma 0xffffb6d50000 0xffffb6eed000
+(00.024628)     33: vma 0xffffb6eed000 0xffffb6efd000
+(00.024628)     33: vma 0xffffb6efd000 0xffffb6f01000
+(00.024629)     33: vma 0xffffb6f01000 0xffffb6f02000
+(00.024630)     33: vma 0xffffb6f10000 0xffffb6f19000
+(00.024631)     33: vma 0xffffb6f19000 0xffffb6f29000
+(00.024631)     33: vma 0xffffb6f29000 0xffffb6f2a000
+(00.024632)     33: vma 0xffffb6f2a000 0xffffb6f2b000
+(00.024633)     33: vma 0xffffb6f30000 0xffffb6fe2000
+(00.024633)     33: vma 0xffffb6fe2000 0xffffb6ff1000
+(00.024634)     33: vma 0xffffb6ff1000 0xffffb6ff2000
+(00.024635)     33: vma 0xffffb6ff2000 0xffffb6ff3000
+(00.024635)     33: vma 0xffffb7000000 0xffffb700e000
+(00.024636)     33: vma 0xffffb700e000 0xffffb701e000
+(00.024637)     33: vma 0xffffb701e000 0xffffb701f000
+(00.024638)     33: vma 0xffffb701f000 0xffffb7020000
+(00.024638)     33: vma 0xffffb7030000 0xffffb7088000
+(00.024639)     33: vma 0xffffb7088000 0xffffb7097000
+(00.024640)     33: vma 0xffffb7097000 0xffffb7099000
+(00.024640)     33: vma 0xffffb7099000 0xffffb709a000
+(00.024644)     33: vma 0xffffb709a000 0xffffb709c000
+(00.024644)     33: vma 0xffffb70a0000 0xffffb70ea000
+(00.024645)     33: vma 0xffffb70ea000 0xffffb70f9000
+(00.024646)     33: vma 0xffffb70f9000 0xffffb70fb000
+(00.024646)     33: vma 0xffffb70fb000 0xffffb70fd000
+(00.024647)     33: vma 0xffffb7100000 0xffffb72e4000
+(00.024648)     33: vma 0xffffb72e4000 0xffffb72f4000
+(00.024648)     33: vma 0xffffb72f4000 0xffffb7303000
+(00.024649)     33: vma 0xffffb7303000 0xffffb7305000
+(00.024650)     33: vma 0xffffb7305000 0xffffb7307000
+(00.024651)     33: vma 0xffffb7310000 0xffffb734f000
+(00.024651)     33: vma 0xffffb734f000 0xffffb735e000
+(00.024652)     33: vma 0xffffb735e000 0xffffb7360000
+(00.024653)     33: vma 0xffffb7360000 0xffffb7361000
+(00.024653)     33: vma 0xffffb7370000 0xffffb7381000
+(00.024654)     33: vma 0xffffb7381000 0xffffb7390000
+(00.024655)     33: vma 0xffffb7390000 0xffffb7391000
+(00.024655)     33: vma 0xffffb7391000 0xffffb7392000
+(00.024656)     33: vma 0xffffb73a0000 0xffffb7405000
+(00.024657)     33: vma 0xffffb7405000 0xffffb7415000
+(00.024658)     33: vma 0xffffb7415000 0xffffb7417000
+(00.024658)     33: vma 0xffffb7417000 0xffffb7419000
+(00.024660)     33: vma 0xffffb7420000 0xffffb743a000
+(00.024661)     33: vma 0xffffb743a000 0xffffb744a000
+(00.024662)     33: vma 0xffffb744a000 0xffffb744b000
+(00.024663)     33: vma 0xffffb744b000 0xffffb744c000
+(00.024664)     33: vma 0xffffb7450000 0xffffb746d000
+(00.024665)     33: vma 0xffffb746d000 0xffffb747c000
+(00.024665)     33: vma 0xffffb747c000 0xffffb747d000
+(00.024666)     33: vma 0xffffb747d000 0xffffb747e000
+(00.024667)     33: vma 0xffffb7480000 0xffffb74a3000
+(00.024668)     33: vma 0xffffb74a3000 0xffffb74b2000
+(00.024668)     33: vma 0xffffb74b2000 0xffffb74b5000
+(00.024669)     33: vma 0xffffb74b5000 0xffffb74b6000
+(00.024670)     33: vma 0xffffb74c0000 0xffffb754e000
+(00.024670)     33: vma 0xffffb754e000 0xffffb755d000
+(00.024671)     33: vma 0xffffb755d000 0xffffb7561000
+(00.024672)     33: vma 0xffffb7561000 0xffffb7563000
+(00.024673)     33: vma 0xffffb7563000 0xffffb7564000
+(00.024673)     33: vma 0xffffb7570000 0xffffb7710000
+(00.024674)     33: vma 0xffffb7710000 0xffffb7720000
+(00.024675)     33: vma 0xffffb7720000 0xffffb7722000
+(00.024675)     33: vma 0xffffb7722000 0xffffb7733000
+(00.024677)     33: vma 0xffffb7733000 0xffffb7735000
+(00.024678)     33: vma 0xffffb7740000 0xffffb775e000
+(00.024679)     33: vma 0xffffb775e000 0xffffb776d000
+(00.024679)     33: vma 0xffffb776d000 0xffffb776e000
+(00.024680)     33: vma 0xffffb776e000 0xffffb776f000
+(00.024681)     33: vma 0xffffb7770000 0xffffb7780000
+(00.024682)     33: vma 0xffffb7780000 0xffffb7f80000
+(00.024682)     33: vma 0xffffb7f80000 0xffffb7f85000
+(00.024683)     33: vma 0xffffb7f85000 0xffffb7f95000
+(00.024684)     33: vma 0xffffb7f95000 0xffffb7f96000
+(00.024684)     33: vma 0xffffb7f96000 0xffffb7f97000
+(00.024685)     33: vma 0xffffb7fa0000 0xffffb7fa1000
+(00.024686)     33: vma 0xffffb7fa1000 0xffffb7fb1000
+(00.024686)     33: vma 0xffffb7fb1000 0xffffb7fb2000
+(00.024687)     33: vma 0xffffb7fb2000 0xffffb7fb3000
+(00.024688)     33: vma 0xffffb7fc0000 0xffffb7fc1000
+(00.024689)     33: vma 0xffffb7fc1000 0xffffb7fd1000
+(00.024689)     33: vma 0xffffb7fd1000 0xffffb7fd2000
+(00.024690)     33: vma 0xffffb7fd2000 0xffffb7fd3000
+(00.024691)     33: vma 0xffffb7fe0000 0xffffb7fe1000
+(00.024691)     33: vma 0xffffb7fe1000 0xffffb7ff0000
+(00.024695)     33: vma 0xffffb7ff0000 0xffffb7ff1000
+(00.024695)     33: vma 0xffffb7ff1000 0xffffb7ff2000
+(00.024696)     33: vma 0xffffb8000000 0xffffb8002000
+(00.024697)     33: vma 0xffffb8002000 0xffffb8011000
+(00.024698)     33: vma 0xffffb8011000 0xffffb8012000
+(00.024698)     33: vma 0xffffb8012000 0xffffb8013000
+(00.024699)     33: vma 0xffffb8020000 0xffffb8040000
+(00.024700)     33: vma 0xffffb8040000 0xffffb804f000
+(00.024700)     33: vma 0xffffb804f000 0xffffb8051000
+(00.024701)     33: vma 0xffffb8051000 0xffffb8052000
+(00.024702)     33: vma 0xffffb8060000 0xffffb8063000
+(00.024702)     33: vma 0xffffb8063000 0xffffb8072000
+(00.024703)     33: vma 0xffffb8072000 0xffffb8073000
+(00.024704)     33: vma 0xffffb8073000 0xffffb8074000
+(00.024705)     33: vma 0xffffb8080000 0xffffb8083000
+(00.024705)     33: vma 0xffffb8083000 0xffffb8092000
+(00.024706)     33: vma 0xffffb8092000 0xffffb8093000
+(00.024707)     33: vma 0xffffb8093000 0xffffb8094000
+(00.024707)     33: vma 0xffffb80a0000 0xffffb80a8000
+(00.024708)     33: vma 0xffffb80a8000 0xffffb80b7000
+(00.024709)     33: vma 0xffffb80b7000 0xffffb80b8000
+(00.024709)     33: vma 0xffffb80b8000 0xffffb80ba000
+(00.024712)     33: vma 0xffffb80c0000 0xffffb80e6000
+(00.024712)     33: vma 0xffffb80e6000 0xffffb80f6000
+(00.024713)     33: vma 0xffffb80f6000 0xffffb80f7000
+(00.024714)     33: vma 0xffffb80f7000 0xffffb80f8000
+(00.024714)     33: vma 0xffffb8100000 0xffffb8118000
+(00.024715)     33: vma 0xffffb8118000 0xffffb8128000
+(00.024716)     33: vma 0xffffb8128000 0xffffb8129000
+(00.024717)     33: vma 0xffffb8129000 0xffffb812a000
+(00.024717)     33: vma 0xffffb8130000 0xffffb8132000
+(00.024718)     33: vma 0xffffb8132000 0xffffb8141000
+(00.024719)     33: vma 0xffffb8141000 0xffffb8142000
+(00.024719)     33: vma 0xffffb8142000 0xffffb8143000
+(00.024720)     33: vma 0xffffb8150000 0xffffb8182000
+(00.024721)     33: vma 0xffffb8182000 0xffffb8192000
+(00.024721)     33: vma 0xffffb8192000 0xffffb8193000
+(00.024723)     33: vma 0xffffb8193000 0xffffb8194000
+(00.024724)     33: vma 0xffffb81a0000 0xffffb81f2000
+(00.024724)     33: vma 0xffffb81f2000 0xffffb8201000
+(00.024725)     33: vma 0xffffb8201000 0xffffb8202000
+(00.024726)     33: vma 0xffffb8202000 0xffffb8203000
+(00.024727)     33: vma 0xffffb8210000 0xffffb82c7000
+(00.024728)     33: vma 0xffffb82c7000 0xffffb82d6000
+(00.024729)     33: vma 0xffffb82d6000 0xffffb82d8000
+(00.024730)     33: vma 0xffffb82d8000 0xffffb82dc000
+(00.024731)     33: vma 0xffffb82dc000 0xffffb82de000
+(00.024731)     33: vma 0xffffb82e0000 0xffffb8381000
+(00.024732)     33: vma 0xffffb8381000 0xffffb8391000
+(00.024733)     33: vma 0xffffb8391000 0xffffb8394000
+(00.024733)     33: vma 0xffffb8394000 0xffffb8399000
+(00.024734)     33: vma 0xffffb8399000 0xffffb839f000
+(00.024735)     33: vma 0xffffb83a0000 0xffffb852e000
+(00.024736)     33: vma 0xffffb852e000 0xffffb853d000
+(00.024736)     33: vma 0xffffb853d000 0xffffb8541000
+(00.024737)     33: vma 0xffffb8541000 0xffffb8543000
+(00.024738)     33: vma 0xffffb8543000 0xffffb854f000
+(00.024738)     33: vma 0xffffb8550000 0xffffb8564000
+(00.024739)     33: vma 0xffffb8564000 0xffffb8573000
+(00.024740)     33: vma 0xffffb8573000 0xffffb8574000
+(00.024741)     33: vma 0xffffb8574000 0xffffb8575000
+(00.024741)     33: vma 0xffffb8580000 0xffffb8606000
+(00.024742)     33: vma 0xffffb8606000 0xffffb8615000
+(00.024743)     33: vma 0xffffb8615000 0xffffb8616000
+(00.024745)     33: vma 0xffffb8616000 0xffffb8617000
+(00.024745)     33: vma 0xffffb8620000 0xffffb882b000
+(00.024746)     33: vma 0xffffb882b000 0xffffb883b000
+(00.024747)     33: vma 0xffffb883b000 0xffffb8846000
+(00.024747)     33: vma 0xffffb8846000 0xffffb8849000
+(00.024748)     33: vma 0xffffb8849000 0xffffb884c000
+(00.024749)     33: vma 0xffffb8850000 0xffffb895b000
+(00.024749)     33: vma 0xffffb895b000 0xffffb896a000
+(00.024750)     33: vma 0xffffb896a000 0xffffb896c000
+(00.024751)     33: vma 0xffffb896c000 0xffffb897c000
+(00.024752)     33: vma 0xffffb897c000 0xffffb898e000
+(00.024752)     33: vma 0xffffb8990000 0xffffb89a5000
+(00.024753)     33: vma 0xffffb89a5000 0xffffb89b4000
+(00.024754)     33: vma 0xffffb89b4000 0xffffb89b6000
+(00.024754)     33: vma 0xffffb89b6000 0xffffb89b7000
+(00.024755)     33: vma 0xffffb89c3000 0xffffb89c7000
+(00.024756)     33: vma 0xffffb89c7000 0xffffb89f2000
+(00.024756)     33: vma 0xffffb89f2000 0xffffb89f6000
+(00.024757)     33: vma 0xffffb89f7000 0xffffb89f8000
+(00.024758)     33: vma 0xffffb89f8000 0xffffb89f9000
+(00.024759)     33: vma 0xffffb89f9000 0xffffb89fa000
+(00.024759)     33: vma 0xffffb89fa000 0xffffb89fb000
+(00.024761)     33: vma 0xffffb89fb000 0xffffb89fd000
+(00.024762)     33: vma 0xffffb89fd000 0xffffb89ff000
+(00.024763)     33: vma 0xffffb89ff000 0xffffb8a01000
+(00.024763)     33: vma 0xffffb8a01000 0xffffb8a03000
+(00.024764)     33: vma 0xffffb8a03000 0xffffb8a05000
+(00.024765)     33: vma 0xffffea847000 0xffffea868000
+(00.024769)     33: Collect fdinfo pid=33 fd=0 id=0x55
+(00.024770)     33: Collect fdinfo pid=33 fd=1 id=0x56
+(00.024771)     33: Collect fdinfo pid=33 fd=2 id=0x58
+(00.024772)     33: Collect fdinfo pid=33 fd=3 id=0x59
+(00.024773)     33: Collect fdinfo pid=33 fd=4 id=0x5a
+(00.024774)     33: Collect fdinfo pid=33 fd=5 id=0x5b
+(00.024775)     33: Collect fdinfo pid=33 fd=6 id=0x5c
+(00.024775)     33: Collect fdinfo pid=33 fd=7 id=0x5d
+(00.024777)     33: Collect fdinfo pid=33 fd=8 id=0x5e
+(00.024778)     33: Collect fdinfo pid=33 fd=9 id=0x5f
+(00.024779)     33: Collect fdinfo pid=33 fd=10 id=0x60
+(00.024780)     33: Collect fdinfo pid=33 fd=11 id=0x61
+(00.024781)     33: Collect fdinfo pid=33 fd=12 id=0x62
+(00.024781)     33: Collect fdinfo pid=33 fd=13 id=0x63
+(00.024782)     33: Collect fdinfo pid=33 fd=14 id=0x64
+(00.024783)     33: Collect fdinfo pid=33 fd=15 id=0x65
+(00.024784)     33: Collect fdinfo pid=33 fd=16 id=0x66
+(00.024785)     33: Collect fdinfo pid=33 fd=17 id=0x67
+(00.024879)     33: skqueue: Preparing SCMs
+(00.024882)     33: Error (criu/tty.c:410): tty: Found slave peer index 0 without correspond master peer
+(00.024957) Unlink remap /dev/shm/open_mpi.0000.cr.1.ghost
+(00.024970) Error (criu/cr-restore.c:2320): Restoring FAILED.
+(00.025071) Error (criu/cr-restore.c:1262): 33 killed by signal 9: Killed

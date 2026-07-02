@@ -1,0 +1,17 @@
+timestamp=20260316_135235
+modules=deploy service migrate verify cleanup
+namespace=test-namespace
+mpijob_yaml=./tests/antibody-sim/nbody-mpijob-long.yml
+job_name=nbody-sim
+worker_0_pod=nbody-sim-worker-0
+worker_0_node=kind-worker2
+worker_1_pod=nbody-sim-worker-1
+worker_1_node=kind-worker
+launcher=nbody-sim-launcher-wmz69
+migrate_mode=http
+target_nodes=kind-worker,kind-worker2
+http_code=404
+migration_time_s=0
+verify_pass=0
+verify_fail=3
+total_time_s=20
